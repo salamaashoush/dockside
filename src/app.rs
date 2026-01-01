@@ -11,6 +11,7 @@ use crate::state::{docker_state, CurrentView, DockerState, StateChanged};
 use crate::ui::containers::ContainersView;
 use crate::ui::images::ImagesView;
 use crate::ui::machines::MachinesView;
+use crate::ui::networks::NetworksView;
 use crate::ui::volumes::VolumesView;
 
 /// Main application - only handles layout and view switching
@@ -20,6 +21,7 @@ pub struct DockerApp {
     containers_view: Entity<ContainersView>,
     volumes_view: Entity<VolumesView>,
     images_view: Entity<ImagesView>,
+    networks_view: Entity<NetworksView>,
 }
 
 impl DockerApp {
@@ -41,6 +43,7 @@ impl DockerApp {
         let containers_view = cx.new(|cx| ContainersView::new(window, cx));
         let volumes_view = cx.new(|cx| VolumesView::new(window, cx));
         let images_view = cx.new(|cx| ImagesView::new(window, cx));
+        let networks_view = cx.new(|cx| NetworksView::new(window, cx));
 
         Self {
             docker_state,
@@ -48,6 +51,7 @@ impl DockerApp {
             containers_view,
             volumes_view,
             images_view,
+            networks_view,
         }
     }
 
@@ -138,6 +142,7 @@ impl DockerApp {
             CurrentView::Containers => div().size_full().child(self.containers_view.clone()),
             CurrentView::Volumes => div().size_full().child(self.volumes_view.clone()),
             CurrentView::Images => div().size_full().child(self.images_view.clone()),
+            CurrentView::Networks => div().size_full().child(self.networks_view.clone()),
             _ => {
                 // Placeholder for views not yet implemented
                 let colors = &cx.theme().colors;

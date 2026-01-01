@@ -1034,6 +1034,87 @@ pub fn inspect_image(image_id: String, cx: &mut App) {
 }
 
 // ============================================================================
+// NETWORK OPERATIONS
+// ============================================================================
+
+pub fn refresh_networks(cx: &mut App) {
+    let state = docker_state(cx);
+    let client = docker_client();
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        let docker = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+        docker.list_networks().await
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        cx.update(|cx| {
+            if let Ok(Ok(networks)) = result {
+                state.update(cx, |state, cx| {
+                    state.set_networks(networks);
+                    cx.emit(StateChanged::NetworksUpdated);
+                });
+            }
+        })
+    })
+    .detach();
+}
+
+pub fn delete_network(id: String, cx: &mut App) {
+    let task_id = start_task(cx, "delete_network", "Deleting network...".to_string());
+    let disp = dispatcher(cx);
+    let client = docker_client();
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        let docker = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+        docker.remove_network(&id).await
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        cx.update(|cx| {
+            match result {
+                Ok(Ok(_)) => {
+                    complete_task(cx, task_id);
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskCompleted {
+                            name: "delete_network".to_string(),
+                            message: "Network deleted".to_string(),
+                        });
+                    });
+                    refresh_networks(cx);
+                }
+                Ok(Err(e)) => {
+                    fail_task(cx, task_id, e.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "delete_network".to_string(),
+                            error: e.to_string(),
+                        });
+                    });
+                }
+                Err(e) => {
+                    fail_task(cx, task_id, e.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "delete_network".to_string(),
+                            error: e.to_string(),
+                        });
+                    });
+                }
+            }
+        })
+    })
+    .detach();
+}
+
+// ============================================================================
 // MACHINE OPERATIONS
 // ============================================================================
 
