@@ -180,7 +180,11 @@ impl DockerClient {
             // Only get stats for running containers
             if container.state == ContainerState::Running {
                 match self.get_container_stats(&container.id).await {
-                    Ok(stats) => {
+                    Ok(mut stats) => {
+                        // Use the container name from list_containers if stats name is empty
+                        if stats.name.is_empty() {
+                            stats.name = container.name.clone();
+                        }
                         aggregate.total_cpu_percent += stats.cpu_percent;
                         aggregate.total_memory += stats.memory_usage;
                         aggregate.total_network_rx += stats.network_rx;

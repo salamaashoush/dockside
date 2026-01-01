@@ -262,8 +262,14 @@ impl ActivityMonitorView {
 
     fn render_container_row(&self, stats: &ContainerStats, cx: &Context<Self>) -> impl IntoElement {
         let colors = &cx.theme().colors;
+        let name = if stats.name.is_empty() {
+            stats.id.chars().take(12).collect::<String>()
+        } else {
+            stats.name.clone()
+        };
 
         h_flex()
+            .id(gpui::SharedString::from(format!("container-row-{}", stats.id)))
             .w_full()
             .h(px(32.))
             .px(px(16.))
@@ -281,7 +287,7 @@ impl ActivityMonitorView {
                             .text_color(colors.foreground)
                             .overflow_hidden()
                             .text_ellipsis()
-                            .child(stats.name.clone()),
+                            .child(name),
                     )
                     .child(
                         div()
