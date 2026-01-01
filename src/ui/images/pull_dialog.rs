@@ -1,5 +1,5 @@
 use gpui::{
-    div, prelude::*, px, rgb, App, Context, Entity, FocusHandle, Focusable, Render,
+    div, prelude::*, px, App, Context, Entity, FocusHandle, Focusable, Hsla, Render,
     SharedString, Styled, Window,
 };
 use gpui_component::{
@@ -8,6 +8,7 @@ use gpui_component::{
     label::Label,
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
+    theme::ActiveTheme,
     v_flex, IndexPath, Sizable,
 };
 
@@ -112,47 +113,6 @@ impl PullImageDialog {
 
         PullImageOptions { image, platform }
     }
-
-    fn render_form_row(&self, label: &'static str, content: impl IntoElement) -> gpui::Div {
-        h_flex()
-            .w_full()
-            .py(px(12.))
-            .px(px(16.))
-            .justify_between()
-            .items_center()
-            .border_b_1()
-            .border_color(rgb(0x414868))
-            .child(Label::new(label).text_color(rgb(0xa9b1d6)))
-            .child(content)
-    }
-
-    fn render_form_row_with_desc(
-        &self,
-        label: &'static str,
-        description: &'static str,
-        content: impl IntoElement,
-    ) -> gpui::Div {
-        h_flex()
-            .w_full()
-            .py(px(12.))
-            .px(px(16.))
-            .justify_between()
-            .items_center()
-            .border_b_1()
-            .border_color(rgb(0x414868))
-            .child(
-                v_flex()
-                    .gap(px(2.))
-                    .child(Label::new(label).text_color(rgb(0xa9b1d6)))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x565f89))
-                            .child(description),
-                    ),
-            )
-            .child(content)
-    }
 }
 
 impl Focusable for PullImageDialog {
@@ -164,9 +124,48 @@ impl Focusable for PullImageDialog {
 impl Render for PullImageDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure_inputs(window, cx);
+        let colors = cx.theme().colors.clone();
 
         let image_input = self.image_input.clone().unwrap();
         let platform_select = self.platform_select.clone().unwrap();
+
+        // Helper to render form row
+        let render_form_row = |label: &'static str, content: gpui::AnyElement, border: Hsla, fg: Hsla| {
+            h_flex()
+                .w_full()
+                .py(px(12.))
+                .px(px(16.))
+                .justify_between()
+                .items_center()
+                .border_b_1()
+                .border_color(border)
+                .child(Label::new(label).text_color(fg))
+                .child(content)
+        };
+
+        // Helper to render form row with description
+        let render_form_row_with_desc = |label: &'static str, description: &'static str, content: gpui::AnyElement, border: Hsla, fg: Hsla, muted: Hsla| {
+            h_flex()
+                .w_full()
+                .py(px(12.))
+                .px(px(16.))
+                .justify_between()
+                .items_center()
+                .border_b_1()
+                .border_color(border)
+                .child(
+                    v_flex()
+                        .gap(px(2.))
+                        .child(Label::new(label).text_color(fg))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(description),
+                        ),
+                )
+                .child(content)
+        };
 
         v_flex()
             .w_full()
@@ -179,19 +178,24 @@ impl Render for PullImageDialog {
                     .px(px(16.))
                     .py(px(12.))
                     .text_sm()
-                    .text_color(rgb(0x9aa5ce))
+                    .text_color(colors.muted_foreground)
                     .child("Pull an image from Docker Hub or another registry. Use the format: repository:tag or registry/repository:tag"),
             )
             // Image name row (required)
-            .child(self.render_form_row(
+            .child(render_form_row(
                 "Image",
-                div().w(px(300.)).child(Input::new(&image_input).small()),
+                div().w(px(300.)).child(Input::new(&image_input).small()).into_any_element(),
+                colors.border,
+                colors.foreground,
             ))
             // Platform
-            .child(self.render_form_row_with_desc(
+            .child(render_form_row_with_desc(
                 "Platform",
                 "Target platform for the image",
-                div().w(px(150.)).child(Select::new(&platform_select).small()),
+                div().w(px(150.)).child(Select::new(&platform_select).small()).into_any_element(),
+                colors.border,
+                colors.foreground,
+                colors.muted_foreground,
             ))
     }
 }

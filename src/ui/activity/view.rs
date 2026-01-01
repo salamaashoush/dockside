@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, rgb, Context, Render, Styled, Timer, Window};
+use gpui::{div, prelude::*, px, Context, Hsla, Render, Styled, Timer, Window};
 use gpui_component::{
     h_flex,
     label::Label,
@@ -339,7 +339,7 @@ impl ActivityMonitorView {
                     "Total CPU:",
                     format!("{:.1}%", self.stats.total_cpu_percent),
                     &self.cpu_history,
-                    rgb(0xbb9af7), // Purple
+                    colors.link,
                     cx,
                 ),
             )
@@ -349,7 +349,7 @@ impl ActivityMonitorView {
                     "Memory:",
                     self.stats.display_total_memory(),
                     &self.memory_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
-                    rgb(0x7aa2f7), // Blue
+                    colors.primary,
                     cx,
                 ),
             )
@@ -359,7 +359,7 @@ impl ActivityMonitorView {
                     "Network:",
                     self.stats.display_total_network(),
                     &self.network_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
-                    rgb(0x7dcfff), // Cyan
+                    colors.accent,
                     cx,
                 ),
             )
@@ -369,7 +369,7 @@ impl ActivityMonitorView {
                     "Disk:",
                     self.stats.display_total_disk(),
                     &self.disk_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
-                    rgb(0x9ece6a), // Green
+                    colors.success,
                     cx,
                 ),
             )
@@ -380,7 +380,7 @@ impl ActivityMonitorView {
         label: &'static str,
         value: String,
         history: &[f64],
-        color: gpui::Rgba,
+        color: Hsla,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let colors = &cx.theme().colors;
@@ -414,7 +414,7 @@ impl ActivityMonitorView {
             )
     }
 
-    fn render_mini_chart(&self, history: &[f64], color: gpui::Rgba) -> impl IntoElement {
+    fn render_mini_chart(&self, history: &[f64], color: Hsla) -> impl IntoElement {
         // Simple bar chart visualization
         let max_value = history.iter().cloned().fold(0.0f64, f64::max).max(1.0);
 

@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, rgb, App, Context, Entity, Render, Styled, Window};
+use gpui::{div, prelude::*, px, App, Context, Entity, Render, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
@@ -55,7 +55,7 @@ impl ListDelegate for ContainerListDelegate {
         let container_id = container.id.clone();
 
         let icon_bg = if is_running {
-            gpui::rgba(0x9d7cd8ff).into() // Purple for running
+            colors.primary
         } else {
             colors.muted_foreground
         };
@@ -80,7 +80,7 @@ impl ListDelegate for ContainerListDelegate {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(Icon::new(AppIcon::Container).text_color(gpui::rgb(0xffffff))),
+                    .child(Icon::new(AppIcon::Container).text_color(colors.background)),
             )
             .child(
                 v_flex()
@@ -317,7 +317,7 @@ impl Render for ContainerList {
             .w_full()
             .px(px(16.))
             .border_b_1()
-            .border_color(rgb(0x414868))
+            .border_color(cx.theme().colors.border)
             .items_center()
             .justify_between()
             .flex_shrink_0()

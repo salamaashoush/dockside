@@ -1,5 +1,5 @@
 use gpui::{
-    div, prelude::*, px, rgb, App, Context, Entity, FocusHandle, Focusable,
+    div, prelude::*, px, App, Context, Entity, FocusHandle, Focusable, Hsla,
     ParentElement, Render, SharedString, Styled, Window,
 };
 use gpui_component::{
@@ -10,8 +10,21 @@ use gpui_component::{
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
     switch::Switch,
-    v_flex, IconName, IndexPath, Sizable,
+    tab::{Tab, TabBar},
+    theme::ActiveTheme,
+    v_flex, IconName, IndexPath, Selectable, Sizable,
 };
+use std::rc::Rc;
+
+/// Theme colors struct for passing to helper methods
+#[derive(Clone)]
+struct DialogColors {
+    border: Hsla,
+    foreground: Hsla,
+    muted_foreground: Hsla,
+    sidebar: Hsla,
+    link: Hsla,
+}
 
 /// Platform options for container
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -524,7 +537,7 @@ impl CreateContainerDialog {
         }
     }
 
-    fn render_form_row(&self, label: &'static str, content: impl IntoElement) -> gpui::Div {
+    fn render_form_row(&self, label: &'static str, content: impl IntoElement, colors: &DialogColors) -> gpui::Div {
         h_flex()
             .w_full()
             .py(px(12.))
@@ -532,8 +545,8 @@ impl CreateContainerDialog {
             .justify_between()
             .items_center()
             .border_b_1()
-            .border_color(rgb(0x414868))
-            .child(Label::new(label).text_color(rgb(0xa9b1d6)))
+            .border_color(colors.border)
+            .child(Label::new(label).text_color(colors.foreground))
             .child(content)
     }
 
@@ -542,6 +555,7 @@ impl CreateContainerDialog {
         label: &'static str,
         description: &'static str,
         content: impl IntoElement,
+        colors: &DialogColors,
     ) -> gpui::Div {
         h_flex()
             .w_full()
@@ -550,31 +564,31 @@ impl CreateContainerDialog {
             .justify_between()
             .items_center()
             .border_b_1()
-            .border_color(rgb(0x414868))
+            .border_color(colors.border)
             .child(
                 v_flex()
                     .gap(px(2.))
-                    .child(Label::new(label).text_color(rgb(0xa9b1d6)))
+                    .child(Label::new(label).text_color(colors.foreground))
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(0x565f89))
+                            .text_color(colors.muted_foreground)
                             .child(description),
                     ),
             )
             .child(content)
     }
 
-    fn render_section_header(&self, title: &'static str) -> gpui::Div {
+    fn render_section_header(&self, title: &'static str, colors: &DialogColors) -> gpui::Div {
         div()
             .w_full()
             .py(px(8.))
             .px(px(16.))
-            .bg(rgb(0x1a1b26))
-            .child(div().text_xs().text_color(rgb(0x565f89)).child(title))
+            .bg(colors.sidebar)
+            .child(div().text_xs().text_color(colors.muted_foreground).child(title))
     }
 
-    fn render_general_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_general_tab(&self, colors: &DialogColors, cx: &mut Context<Self>) -> impl IntoElement {
         let remove_after_stop = self.remove_after_stop;
         let privileged = self.privileged;
         let read_only = self.read_only;
@@ -594,17 +608,20 @@ impl CreateContainerDialog {
             .child(self.render_form_row(
                 "Image",
                 div().w(px(250.)).child(Input::new(&image_input).small()),
+                colors,
             ))
             // Name row
             .child(self.render_form_row(
                 "Name",
                 div().w(px(250.)).child(Input::new(&name_input).small()),
+                colors,
             ))
             // Platform
             .child(self.render_form_row_with_desc(
                 "Platform",
                 "Target platform for the container",
                 div().w(px(150.)).child(Select::new(&platform_select).small()),
+                colors,
             ))
             // Remove after stop
             .child(self.render_form_row_with_desc(
@@ -616,29 +633,34 @@ impl CreateContainerDialog {
                         this.remove_after_stop = *checked;
                         cx.notify();
                     })),
+                colors,
             ))
             // Restart policy
             .child(self.render_form_row_with_desc(
                 "Restart policy",
                 "When to restart the container",
                 div().w(px(150.)).child(Select::new(&restart_policy_select).small()),
+                colors,
             ))
             // Command section
-            .child(self.render_section_header("Command"))
+            .child(self.render_section_header("Command", colors))
             .child(self.render_form_row(
                 "Command",
                 div().w(px(250.)).child(Input::new(&command_input).small()),
+                colors,
             ))
             .child(self.render_form_row(
                 "Entrypoint",
                 div().w(px(250.)).child(Input::new(&entrypoint_input).small()),
+                colors,
             ))
             .child(self.render_form_row(
                 "Working dir",
                 div().w(px(250.)).child(Input::new(&workdir_input).small()),
+                colors,
             ))
             // Advanced section
-            .child(self.render_section_header("Advanced"))
+            .child(self.render_section_header("Advanced", colors))
             .child(self.render_form_row_with_desc(
                 "Privileged",
                 "Full access to host (--privileged)",
@@ -648,6 +670,7 @@ impl CreateContainerDialog {
                         this.privileged = *checked;
                         cx.notify();
                     })),
+                colors,
             ))
             .child(self.render_form_row_with_desc(
                 "Read-only",
@@ -658,6 +681,7 @@ impl CreateContainerDialog {
                         this.read_only = *checked;
                         cx.notify();
                     })),
+                colors,
             ))
             .child(self.render_form_row_with_desc(
                 "Docker init",
@@ -668,13 +692,17 @@ impl CreateContainerDialog {
                         this.docker_init = *checked;
                         cx.notify();
                     })),
+                colors,
             ))
     }
 
-    fn render_ports_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_ports_tab(&self, colors: &DialogColors, cx: &mut Context<Self>) -> impl IntoElement {
         let port_host_input = self.port_host_input.clone().unwrap();
         let port_container_input = self.port_container_input.clone().unwrap();
         let port_protocol_tcp = self.port_protocol_tcp;
+        let sidebar_color = colors.sidebar;
+        let foreground_color = colors.foreground;
+        let muted_color = colors.muted_foreground;
 
         v_flex()
             .w_full()
@@ -691,7 +719,7 @@ impl CreateContainerDialog {
                             .w(px(100.))
                             .child(Input::new(&port_host_input).small()),
                     )
-                    .child(Label::new(":").text_color(rgb(0x565f89)))
+                    .child(Label::new(":").text_color(muted_color))
                     .child(
                         div()
                             .w(px(100.))
@@ -757,7 +785,7 @@ impl CreateContainerDialog {
             .child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0x565f89))
+                    .text_color(muted_color)
                     .child("Host port : Container port"),
             )
             // List of added ports
@@ -769,13 +797,13 @@ impl CreateContainerDialog {
                     .px(px(12.))
                     .gap(px(8.))
                     .items_center()
-                    .bg(rgb(0x1a1b26))
+                    .bg(sidebar_color)
                     .rounded(px(4.))
                     .child(
                         div()
                             .flex_1()
                             .text_sm()
-                            .text_color(rgb(0xc0caf5))
+                            .text_color(foreground_color)
                             .child(format!("{}:{}/{}", port.host_port, port.container_port, protocol)),
                     )
                     .child(
@@ -791,10 +819,13 @@ impl CreateContainerDialog {
             }))
     }
 
-    fn render_volumes_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_volumes_tab(&self, colors: &DialogColors, cx: &mut Context<Self>) -> impl IntoElement {
         let volume_host_input = self.volume_host_input.clone().unwrap();
         let volume_container_input = self.volume_container_input.clone().unwrap();
         let volume_readonly = self.volume_readonly;
+        let sidebar_color = colors.sidebar;
+        let foreground_color = colors.foreground;
+        let muted_color = colors.muted_foreground;
 
         v_flex()
             .w_full()
@@ -811,7 +842,7 @@ impl CreateContainerDialog {
                             .w(px(150.))
                             .child(Input::new(&volume_host_input).small()),
                     )
-                    .child(Label::new(":").text_color(rgb(0x565f89)))
+                    .child(Label::new(":").text_color(muted_color))
                     .child(
                         div()
                             .w(px(150.))
@@ -821,7 +852,7 @@ impl CreateContainerDialog {
                         h_flex()
                             .gap(px(4.))
                             .items_center()
-                            .child(Label::new("RO").text_color(rgb(0x565f89)).text_xs())
+                            .child(Label::new("RO").text_color(muted_color).text_xs())
                             .child(
                                 Switch::new("volume-ro")
                                     .checked(volume_readonly)
@@ -866,7 +897,7 @@ impl CreateContainerDialog {
             .child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0x565f89))
+                    .text_color(muted_color)
                     .child("Host path : Container path"),
             )
             // List of added volumes
@@ -878,13 +909,13 @@ impl CreateContainerDialog {
                     .px(px(12.))
                     .gap(px(8.))
                     .items_center()
-                    .bg(rgb(0x1a1b26))
+                    .bg(sidebar_color)
                     .rounded(px(4.))
                     .child(
                         div()
                             .flex_1()
                             .text_sm()
-                            .text_color(rgb(0xc0caf5))
+                            .text_color(foreground_color)
                             .child(format!("{}:{}{}", vol.host_path, vol.container_path, ro_label)),
                     )
                     .child(
@@ -900,9 +931,13 @@ impl CreateContainerDialog {
             }))
     }
 
-    fn render_env_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_env_tab(&self, colors: &DialogColors, cx: &mut Context<Self>) -> impl IntoElement {
         let env_key_input = self.env_key_input.clone().unwrap();
         let env_value_input = self.env_value_input.clone().unwrap();
+        let sidebar_color = colors.sidebar;
+        let foreground_color = colors.foreground;
+        let muted_color = colors.muted_foreground;
+        let link_color = colors.link;
 
         v_flex()
             .w_full()
@@ -919,7 +954,7 @@ impl CreateContainerDialog {
                             .w(px(120.))
                             .child(Input::new(&env_key_input).small()),
                     )
-                    .child(Label::new("=").text_color(rgb(0x565f89)))
+                    .child(Label::new("=").text_color(muted_color))
                     .child(
                         div()
                             .flex_1()
@@ -960,23 +995,23 @@ impl CreateContainerDialog {
                     .px(px(12.))
                     .gap(px(8.))
                     .items_center()
-                    .bg(rgb(0x1a1b26))
+                    .bg(sidebar_color)
                     .rounded(px(4.))
                     .child(
                         div()
                             .w(px(120.))
                             .text_sm()
-                            .text_color(rgb(0x7aa2f7))
+                            .text_color(link_color)
                             .overflow_hidden()
                             .text_ellipsis()
                             .child(env.key.clone()),
                     )
-                    .child(Label::new("=").text_color(rgb(0x565f89)))
+                    .child(Label::new("=").text_color(muted_color))
                     .child(
                         div()
                             .flex_1()
                             .text_sm()
-                            .text_color(rgb(0xc0caf5))
+                            .text_color(foreground_color)
                             .overflow_hidden()
                             .text_ellipsis()
                             .child(env.value.clone()),
@@ -994,7 +1029,7 @@ impl CreateContainerDialog {
             }))
     }
 
-    fn render_network_tab(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_network_tab(&self, colors: &DialogColors, _cx: &mut Context<Self>) -> impl IntoElement {
         let network_input = self.network_input.clone().unwrap();
 
         v_flex()
@@ -1006,7 +1041,7 @@ impl CreateContainerDialog {
                     .w_full()
                     .gap(px(8.))
                     .items_center()
-                    .child(Label::new("Network").text_color(rgb(0xa9b1d6)))
+                    .child(Label::new("Network").text_color(colors.foreground))
                     .child(
                         div()
                             .flex_1()
@@ -1016,7 +1051,7 @@ impl CreateContainerDialog {
             .child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0x565f89))
+                    .text_color(colors.muted_foreground)
                     .child("Leave empty for default bridge network"),
             )
     }
@@ -1032,7 +1067,33 @@ impl Render for CreateContainerDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure_inputs(window, cx);
 
+        let theme_colors = cx.theme().colors.clone();
+        let colors = DialogColors {
+            border: theme_colors.border,
+            foreground: theme_colors.foreground,
+            muted_foreground: theme_colors.muted_foreground,
+            sidebar: theme_colors.sidebar,
+            link: theme_colors.link,
+        };
+
         let active_tab = self.active_tab;
+        let ports_count = self.ports.len();
+        let volumes_count = self.volumes.len();
+        let env_count = self.env_vars.len();
+
+        let tabs = vec![
+            "General".to_string(),
+            format!("Ports ({})", ports_count),
+            format!("Volumes ({})", volumes_count),
+            format!("Env ({})", env_count),
+            "Network".to_string(),
+        ];
+
+        let on_tab_change: Rc<dyn Fn(&usize, &mut Window, &mut App)> =
+            Rc::new(cx.listener(|this, idx: &usize, _window, cx| {
+                this.active_tab = *idx;
+                cx.notify();
+            }));
 
         v_flex()
             .w_full()
@@ -1042,65 +1103,18 @@ impl Render for CreateContainerDialog {
                 div()
                     .w_full()
                     .border_b_1()
-                    .border_color(rgb(0x414868))
+                    .border_color(colors.border)
                     .child(
-                        h_flex()
-                            .gap(px(4.))
-                            .child(
-                                Button::new("tab-general")
-                                    .label("General")
-                                    .small()
-                                    .when(active_tab == 0, |b| b.primary())
-                                    .when(active_tab != 0, |b| b.ghost())
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.active_tab = 0;
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("tab-ports")
-                                    .label(format!("Ports ({})", self.ports.len()))
-                                    .small()
-                                    .when(active_tab == 1, |b| b.primary())
-                                    .when(active_tab != 1, |b| b.ghost())
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.active_tab = 1;
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("tab-volumes")
-                                    .label(format!("Volumes ({})", self.volumes.len()))
-                                    .small()
-                                    .when(active_tab == 2, |b| b.primary())
-                                    .when(active_tab != 2, |b| b.ghost())
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.active_tab = 2;
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("tab-env")
-                                    .label(format!("Env ({})", self.env_vars.len()))
-                                    .small()
-                                    .when(active_tab == 3, |b| b.primary())
-                                    .when(active_tab != 3, |b| b.ghost())
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.active_tab = 3;
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("tab-network")
-                                    .label("Network")
-                                    .small()
-                                    .when(active_tab == 4, |b| b.primary())
-                                    .when(active_tab != 4, |b| b.ghost())
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.active_tab = 4;
-                                        cx.notify();
-                                    })),
-                            ),
+                        TabBar::new("create-container-tabs")
+                            .children(tabs.iter().enumerate().map(|(i, label)| {
+                                let on_tab_change = on_tab_change.clone();
+                                Tab::new()
+                                    .label(label.to_string())
+                                    .selected(active_tab == i)
+                                    .on_click(move |_ev, window, cx| {
+                                        on_tab_change(&i, window, cx);
+                                    })
+                            })),
                     ),
             )
             // Tab content
@@ -1108,11 +1122,11 @@ impl Render for CreateContainerDialog {
                 div()
                     .flex_1()
                     .overflow_y_scrollbar()
-                    .when(active_tab == 0, |el| el.child(self.render_general_tab(cx)))
-                    .when(active_tab == 1, |el| el.child(self.render_ports_tab(cx)))
-                    .when(active_tab == 2, |el| el.child(self.render_volumes_tab(cx)))
-                    .when(active_tab == 3, |el| el.child(self.render_env_tab(cx)))
-                    .when(active_tab == 4, |el| el.child(self.render_network_tab(cx))),
+                    .when(active_tab == 0, |el| el.child(self.render_general_tab(&colors, cx)))
+                    .when(active_tab == 1, |el| el.child(self.render_ports_tab(&colors, cx)))
+                    .when(active_tab == 2, |el| el.child(self.render_volumes_tab(&colors, cx)))
+                    .when(active_tab == 3, |el| el.child(self.render_env_tab(&colors, cx)))
+                    .when(active_tab == 4, |el| el.child(self.render_network_tab(&colors, cx))),
             )
     }
 }

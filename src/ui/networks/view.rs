@@ -1,10 +1,9 @@
-use gpui::{div, prelude::*, px, rgb, rgba, Context, Entity, Render, Styled, Window};
+use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex,
-    label::Label,
     notification::NotificationType,
-    v_flex, Sizable, WindowExt,
+    theme::ActiveTheme,
+    v_flex, WindowExt,
 };
 
 use crate::docker::NetworkInfo;
@@ -22,7 +21,6 @@ pub struct NetworksView {
     selected_network: Option<NetworkInfo>,
     active_tab: usize,
     pending_notifications: Vec<(NotificationType, String)>,
-    create_dialog: Option<Entity<CreateNetworkDialog>>,
 }
 
 impl NetworksView {
@@ -33,13 +31,13 @@ impl NetworksView {
         let network_list = cx.new(|cx| NetworkList::new(window, cx));
 
         // Subscribe to network list events
-        cx.subscribe(&network_list, |this, _list, event: &NetworkListEvent, cx| {
+        cx.subscribe_in(&network_list, window, |this, _list, event: &NetworkListEvent, window, cx| {
             match event {
                 NetworkListEvent::Selected(network) => {
                     this.on_select_network(network, cx);
                 }
                 NetworkListEvent::CreateNetwork => {
-                    this.show_create_dialog(cx);
+                    this.show_create_dialog(window, cx);
                 }
             }
         })
@@ -94,13 +92,56 @@ impl NetworksView {
             selected_network: None,
             active_tab: 0,
             pending_notifications: Vec::new(),
-            create_dialog: None,
         }
     }
 
-    fn show_create_dialog(&mut self, cx: &mut Context<Self>) {
-        self.create_dialog = Some(cx.new(|cx| CreateNetworkDialog::new(cx)));
-        cx.notify();
+    fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|cx| CreateNetworkDialog::new(cx));
+        let colors = cx.theme().colors.clone();
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let dialog_clone = dialog_entity.clone();
+
+            dialog
+                .title("New Network")
+                .min_w(px(500.))
+                .child(
+                    v_flex()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(colors.muted_foreground)
+                                .child("Networks are groups of containers in the same subnet (IP range) that can communicate with each other."),
+                        )
+                        .child(dialog_entity.clone()),
+                )
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_create = dialog_clone.clone();
+
+                    vec![
+                        Button::new("create")
+                            .label("Create")
+                            .primary()
+                            .on_click({
+                                let dialog = dialog_for_create.clone();
+                                move |_ev, window, cx| {
+                                    let options = dialog.read(cx).get_options(cx);
+                                    if !options.name.is_empty() {
+                                        services::create_network(
+                                            options.name,
+                                            options.enable_ipv6,
+                                            options.subnet,
+                                            cx,
+                                        );
+                                        window.close_dialog(cx);
+                                    }
+                                }
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
     }
 
     fn on_select_network(&mut self, network: &NetworkInfo, cx: &mut Context<Self>) {
@@ -113,99 +154,6 @@ impl NetworksView {
         self.active_tab = tab;
         cx.notify();
     }
-
-    fn render_create_dialog(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        self.create_dialog.clone().map(|dialog_entity| {
-            div()
-                .id("dialog-overlay")
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(rgba(0x00000080))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .id("dialog-container")
-                        .on_mouse_down_out(cx.listener(|this, _ev, _window, cx| {
-                            this.create_dialog = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            v_flex()
-                                .w(px(500.))
-                                .bg(rgb(0x24283b))
-                                .rounded(px(12.))
-                                .overflow_hidden()
-                                .border_1()
-                                .border_color(rgb(0x414868))
-                                // Header
-                                .child(
-                                    v_flex()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .gap(px(4.))
-                                        .border_b_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(
-                                            Label::new("New Network")
-                                                .text_color(rgb(0xc0caf5))
-                                        )
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(0x9aa5ce))
-                                                .child("Networks are groups of containers in the same subnet (IP range) that can communicate with each other. They are typically used by Compose, and don't need to be manually created or deleted."),
-                                        ),
-                                )
-                                // Form content
-                                .child(dialog_entity.clone())
-                                // Footer buttons
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .justify_end()
-                                        .gap(px(12.))
-                                        .border_t_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(
-                                            Button::new("cancel")
-                                                .label("Cancel")
-                                                .ghost()
-                                                .on_click(cx.listener(|this, _ev, _window, cx| {
-                                                    this.create_dialog = None;
-                                                    cx.notify();
-                                                })),
-                                        )
-                                        .child({
-                                            let dialog = dialog_entity.clone();
-                                            Button::new("create")
-                                                .label("Create")
-                                                .primary()
-                                                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                                    let options = dialog.read(cx).get_options(cx);
-                                                    if !options.name.is_empty() {
-                                                        services::create_network(
-                                                            options.name,
-                                                            options.enable_ipv6,
-                                                            options.subnet,
-                                                            cx,
-                                                        );
-                                                        this.create_dialog = None;
-                                                        cx.notify();
-                                                    }
-                                                }))
-                                        }),
-                                ),
-                        ),
-                )
-        })
-    }
 }
 
 impl Render for NetworksView {
@@ -216,6 +164,7 @@ impl Render for NetworksView {
             window.push_notification((notification_type, SharedString::from(message)), cx);
         }
 
+        let colors = cx.theme().colors.clone();
         let selected_network = self.selected_network.clone();
         let active_tab = self.active_tab;
 
@@ -233,9 +182,6 @@ impl Render for NetworksView {
                 cx.notify();
             }));
 
-        // Render dialog overlay if open
-        let create_dialog = self.render_create_dialog(cx);
-
         div()
             .size_full()
             .flex()
@@ -248,7 +194,7 @@ impl Render for NetworksView {
                     .flex_shrink_0()
                     .overflow_hidden()
                     .border_r_1()
-                    .border_color(rgb(0x414868))
+                    .border_color(colors.border)
                     .child(self.network_list.clone()),
             )
             .child(
@@ -259,6 +205,5 @@ impl Render for NetworksView {
                     .overflow_hidden()
                     .child(detail.render(window, cx)),
             )
-            .children(create_dialog)
     }
 }

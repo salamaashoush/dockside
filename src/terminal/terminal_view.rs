@@ -1,7 +1,11 @@
 use gpui::{
-    div, prelude::*, px, rgb, App, Context, FocusHandle, Focusable,
+    div, prelude::*, px, App, Context, FocusHandle, Focusable,
     InteractiveElement, KeyDownEvent, MouseButton, ParentElement, Render,
     ScrollWheelEvent, Styled, Window,
+};
+use gpui_component::{
+    button::{Button, ButtonVariants},
+    theme::ActiveTheme,
 };
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -111,10 +115,11 @@ impl Render for TerminalView {
         let content = buffer.get_content();
         drop(buffer);
 
-        // Tokyo Night colors
-        let bg_color = rgb(0x1a1b26);
-        let text_color = rgb(0xa9b1d6);
-        let cursor_color = rgb(0x7aa2f7);
+        // Theme colors
+        let colors = cx.theme().colors.clone();
+        let bg_color = colors.sidebar;
+        let text_color = colors.foreground;
+        let cursor_color = colors.link;
 
         if let Some(err) = error {
             // Error state
@@ -129,23 +134,20 @@ impl Render for TerminalView {
                 .child(
                     div()
                         .text_sm()
-                        .text_color(rgb(0xf7768e))
+                        .text_color(colors.danger)
                         .child(err),
                 )
                 .child(
                     div()
                         .mt(px(16.))
-                        .px(px(16.))
-                        .py(px(8.))
-                        .bg(rgb(0x7aa2f7))
-                        .rounded(px(6.))
-                        .text_sm()
-                        .text_color(rgb(0xffffff))
-                        .cursor_pointer()
-                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _ev, _window, cx| {
-                            this.connect(cx);
-                        }))
-                        .child("Reconnect"),
+                        .child(
+                            Button::new("reconnect")
+                                .label("Reconnect")
+                                .primary()
+                                .on_click(cx.listener(|this, _ev, _window, cx| {
+                                    this.connect(cx);
+                                })),
+                        ),
                 )
                 .into_any_element();
         }
@@ -284,14 +286,14 @@ impl Render for TerminalView {
                     .h(px(track_height))
                     .w(px(8.))
                     .rounded(px(4.))
-                    .bg(rgb(0x292e42))
+                    .bg(colors.border)
                     .child(
                         div()
                             .absolute()
                             .w_full()
                             .top(px(thumb_top))
                             .h(px(thumb_height))
-                            .bg(rgb(0x565f89))
+                            .bg(colors.muted_foreground)
                             .rounded(px(4.))
                     )
             )

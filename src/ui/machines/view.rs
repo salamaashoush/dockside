@@ -1,9 +1,8 @@
-use gpui::{div, prelude::*, px, rgb, rgba, App, AppContext, Context, Entity, Render, Styled, Window};
+use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex,
     notification::NotificationType,
-    v_flex,
+    theme::ActiveTheme,
     WindowExt,
 };
 
@@ -17,14 +16,13 @@ use super::create_dialog::CreateMachineDialog;
 use super::detail::MachineDetail;
 use super::list::{MachineList, MachineListEvent};
 
-/// Self-contained Machines view - handles list, detail, dialog, terminal, and all state
+/// Self-contained Machines view - handles list, detail, terminal, and all state
 pub struct MachinesView {
     docker_state: Entity<DockerState>,
     machine_list: Entity<MachineList>,
     selected_machine: Option<ColimaVm>,
     active_tab: usize,
     terminal_view: Option<Entity<TerminalView>>,
-    create_dialog: Option<Entity<CreateMachineDialog>>,
     machine_tab_state: MachineTabState,
     pending_notifications: Vec<(NotificationType, String)>,
 }
@@ -37,14 +35,13 @@ impl MachinesView {
         let machine_list = cx.new(|cx| MachineList::new(window, cx));
 
         // Subscribe to machine list events
-        cx.subscribe(&machine_list, |this, _list, event: &MachineListEvent, cx| {
+        cx.subscribe_in(&machine_list, window, |this, _list, event: &MachineListEvent, window, cx| {
             match event {
                 MachineListEvent::Selected(machine) => {
                     this.on_select_machine(machine, cx);
                 }
                 MachineListEvent::NewMachine => {
-                    this.create_dialog = Some(cx.new(|cx| CreateMachineDialog::new(cx)));
-                    cx.notify();
+                    this.show_create_dialog(window, cx);
                 }
             }
         })
@@ -93,10 +90,40 @@ impl MachinesView {
             selected_machine: None,
             active_tab: 0,
             terminal_view: None,
-            create_dialog: None,
             machine_tab_state: MachineTabState::default(),
             pending_notifications: Vec::new(),
         }
+    }
+
+    fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|cx| CreateMachineDialog::new(cx));
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let dialog_clone = dialog_entity.clone();
+
+            dialog
+                .title("New Machine")
+                .min_w(px(500.))
+                .child(dialog_entity.clone())
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_create = dialog_clone.clone();
+
+                    vec![
+                        Button::new("create")
+                            .label("Create")
+                            .primary()
+                            .on_click({
+                                let dialog = dialog_for_create.clone();
+                                move |_ev, window, cx| {
+                                    let options = dialog.read(cx).get_options(cx);
+                                    services::create_machine(options, cx);
+                                    window.close_dialog(cx);
+                                }
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
     }
 
     fn on_select_machine(&mut self, machine: &ColimaVm, cx: &mut Context<Self>) {
@@ -282,72 +309,6 @@ impl MachinesView {
         }
     }
 
-    fn render_create_dialog(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        self.create_dialog.clone().map(|dialog_entity| {
-            div()
-                .id("dialog-overlay")
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(rgba(0x00000080))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .id("dialog-container")
-                        .on_mouse_down_out(cx.listener(|this, _ev, _window, cx| {
-                            this.create_dialog = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            v_flex()
-                                .w(px(500.))
-                                .bg(rgb(0x24283b))
-                                .rounded(px(12.))
-                                .overflow_hidden()
-                                .border_1()
-                                .border_color(rgb(0x414868))
-                                .child(dialog_entity.clone())
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .justify_end()
-                                        .gap(px(12.))
-                                        .border_t_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(
-                                            Button::new("cancel")
-                                                .label("Cancel")
-                                                .ghost()
-                                                .on_click(cx.listener(|this, _ev, _window, cx| {
-                                                    this.create_dialog = None;
-                                                    cx.notify();
-                                                })),
-                                        )
-                                        .child({
-                                            let dialog = dialog_entity.clone();
-                                            Button::new("create")
-                                                .label("Create")
-                                                .primary()
-                                                .on_click(cx.listener(
-                                                    move |this, _ev, _window, cx| {
-                                                        let options =
-                                                            dialog.read(cx).get_options(cx);
-                                                        services::create_machine(options, cx);
-                                                        this.create_dialog = None;
-                                                        cx.notify();
-                                                    },
-                                                ))
-                                        }),
-                                ),
-                        ),
-                )
-        })
-    }
 }
 
 impl Render for MachinesView {
@@ -358,6 +319,7 @@ impl Render for MachinesView {
             window.push_notification((notification_type, SharedString::from(message)), cx);
         }
 
+        let colors = cx.theme().colors.clone();
         let selected_machine = self.selected_machine.clone();
         let active_tab = self.active_tab;
         let machine_tab_state = self.machine_tab_state.clone();
@@ -407,14 +369,12 @@ impl Render for MachinesView {
                     .flex_shrink_0()
                     .overflow_hidden()
                     .border_r_1()
-                    .border_color(rgb(0x414868))
+                    .border_color(colors.border)
                     .child(self.machine_list.clone()),
             )
             .child(
                 // Right: Detail panel - flexible width
                 div().flex_1().h_full().overflow_hidden().child(detail.render(window, cx)),
             )
-            // Create dialog overlay
-            .children(self.render_create_dialog(cx))
     }
 }

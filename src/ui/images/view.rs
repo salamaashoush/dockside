@@ -1,10 +1,9 @@
-use gpui::{div, prelude::*, px, rgb, rgba, Context, Entity, Render, Styled, Window};
+use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex,
-    label::Label,
     notification::NotificationType,
-    v_flex, Sizable, WindowExt,
+    theme::ActiveTheme,
+    WindowExt,
 };
 
 use crate::docker::ImageInfo;
@@ -23,7 +22,6 @@ pub struct ImagesView {
     inspect_data: Option<ImageInspectData>,
     active_tab: usize,
     pending_notifications: Vec<(NotificationType, String)>,
-    pull_dialog: Option<Entity<PullImageDialog>>,
 }
 
 impl ImagesView {
@@ -34,13 +32,13 @@ impl ImagesView {
         let image_list = cx.new(|cx| ImageList::new(window, cx));
 
         // Subscribe to image list events
-        cx.subscribe(&image_list, |this, _list, event: &ImageListEvent, cx| {
+        cx.subscribe_in(&image_list, window, |this, _list, event: &ImageListEvent, window, cx| {
             match event {
                 ImageListEvent::Selected(image) => {
                     this.on_select_image(image, cx);
                 }
                 ImageListEvent::PullImage => {
-                    this.show_pull_dialog(cx);
+                    this.show_pull_dialog(window, cx);
                 }
             }
         })
@@ -105,13 +103,44 @@ impl ImagesView {
             inspect_data: None,
             active_tab: 0,
             pending_notifications: Vec::new(),
-            pull_dialog: None,
         }
     }
 
-    fn show_pull_dialog(&mut self, cx: &mut Context<Self>) {
-        self.pull_dialog = Some(cx.new(|cx| PullImageDialog::new(cx)));
-        cx.notify();
+    fn show_pull_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|cx| PullImageDialog::new(cx));
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let dialog_clone = dialog_entity.clone();
+
+            dialog
+                .title("Pull Image")
+                .min_w(px(500.))
+                .child(dialog_entity.clone())
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_pull = dialog_clone.clone();
+
+                    vec![
+                        Button::new("pull")
+                            .label("Pull")
+                            .primary()
+                            .on_click({
+                                let dialog = dialog_for_pull.clone();
+                                move |_ev, window, cx| {
+                                    let options = dialog.read(cx).get_options(cx);
+                                    if !options.image.is_empty() {
+                                        services::pull_image(
+                                            options.image,
+                                            options.platform.as_docker_arg().map(String::from),
+                                            cx,
+                                        );
+                                        window.close_dialog(cx);
+                                    }
+                                }
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
     }
 
     fn on_select_image(&mut self, image: &ImageInfo, cx: &mut Context<Self>) {
@@ -129,88 +158,6 @@ impl ImagesView {
         self.active_tab = tab;
         cx.notify();
     }
-
-    fn render_pull_dialog(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        self.pull_dialog.clone().map(|dialog_entity| {
-            div()
-                .id("dialog-overlay")
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(rgba(0x00000080))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .id("dialog-container")
-                        .on_mouse_down_out(cx.listener(|this, _ev, _window, cx| {
-                            this.pull_dialog = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            v_flex()
-                                .w(px(500.))
-                                .bg(rgb(0x24283b))
-                                .rounded(px(12.))
-                                .overflow_hidden()
-                                .border_1()
-                                .border_color(rgb(0x414868))
-                                // Header
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .border_b_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(Label::new("Pull Image").text_color(rgb(0xc0caf5))),
-                                )
-                                // Form content
-                                .child(dialog_entity.clone())
-                                // Footer buttons
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .justify_end()
-                                        .gap(px(12.))
-                                        .border_t_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(
-                                            Button::new("cancel")
-                                                .label("Cancel")
-                                                .ghost()
-                                                .on_click(cx.listener(|this, _ev, _window, cx| {
-                                                    this.pull_dialog = None;
-                                                    cx.notify();
-                                                })),
-                                        )
-                                        .child({
-                                            let dialog = dialog_entity.clone();
-                                            Button::new("pull")
-                                                .label("Pull")
-                                                .primary()
-                                                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                                    let options = dialog.read(cx).get_options(cx);
-                                                    if !options.image.is_empty() {
-                                                        services::pull_image(
-                                                            options.image,
-                                                            options.platform.as_docker_arg().map(String::from),
-                                                            cx,
-                                                        );
-                                                        this.pull_dialog = None;
-                                                        cx.notify();
-                                                    }
-                                                }))
-                                        }),
-                                ),
-                        ),
-                )
-        })
-    }
 }
 
 impl Render for ImagesView {
@@ -221,6 +168,7 @@ impl Render for ImagesView {
             window.push_notification((notification_type, SharedString::from(message)), cx);
         }
 
+        let colors = cx.theme().colors.clone();
         let selected_image = self.selected_image.clone();
         let inspect_data = self.inspect_data.clone();
         let active_tab = self.active_tab;
@@ -241,9 +189,6 @@ impl Render for ImagesView {
                 cx.notify();
             }));
 
-        // Render dialog overlay if open
-        let pull_dialog = self.render_pull_dialog(cx);
-
         div()
             .size_full()
             .flex()
@@ -256,7 +201,7 @@ impl Render for ImagesView {
                     .flex_shrink_0()
                     .overflow_hidden()
                     .border_r_1()
-                    .border_color(rgb(0x414868))
+                    .border_color(colors.border)
                     .child(self.image_list.clone()),
             )
             .child(
@@ -267,6 +212,5 @@ impl Render for ImagesView {
                     .overflow_hidden()
                     .child(detail.render(window, cx)),
             )
-            .children(pull_dialog)
     }
 }

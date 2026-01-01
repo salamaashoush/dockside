@@ -1,10 +1,9 @@
-use gpui::{div, prelude::*, px, rgb, rgba, Context, Entity, Render, Styled, Window};
+use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex,
-    label::Label,
     notification::NotificationType,
-    v_flex, Sizable, WindowExt,
+    theme::ActiveTheme,
+    WindowExt,
 };
 
 use crate::docker::VolumeInfo;
@@ -23,7 +22,6 @@ pub struct VolumesView {
     active_tab: usize,
     volume_tab_state: VolumeTabState,
     pending_notifications: Vec<(NotificationType, String)>,
-    create_dialog: Option<Entity<CreateVolumeDialog>>,
 }
 
 impl VolumesView {
@@ -34,13 +32,13 @@ impl VolumesView {
         let volume_list = cx.new(|cx| VolumeList::new(window, cx));
 
         // Subscribe to volume list events
-        cx.subscribe(&volume_list, |this, _list, event: &VolumeListEvent, cx| {
+        cx.subscribe_in(&volume_list, window, |this, _list, event: &VolumeListEvent, window, cx| {
             match event {
                 VolumeListEvent::Selected(volume) => {
                     this.on_select_volume(volume, cx);
                 }
                 VolumeListEvent::NewVolume => {
-                    this.show_create_dialog(cx);
+                    this.show_create_dialog(window, cx);
                 }
             }
         })
@@ -118,13 +116,45 @@ impl VolumesView {
             active_tab: 0,
             volume_tab_state: VolumeTabState::new(),
             pending_notifications: Vec::new(),
-            create_dialog: None,
         }
     }
 
-    fn show_create_dialog(&mut self, cx: &mut Context<Self>) {
-        self.create_dialog = Some(cx.new(|cx| CreateVolumeDialog::new(cx)));
-        cx.notify();
+    fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|cx| CreateVolumeDialog::new(cx));
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let dialog_clone = dialog_entity.clone();
+
+            dialog
+                .title("New Volume")
+                .min_w(px(500.))
+                .child(dialog_entity.clone())
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_create = dialog_clone.clone();
+
+                    vec![
+                        Button::new("create")
+                            .label("Create")
+                            .primary()
+                            .on_click({
+                                let dialog = dialog_for_create.clone();
+                                move |_ev, window, cx| {
+                                    let options = dialog.read(cx).get_options(cx);
+                                    if !options.name.is_empty() {
+                                        services::create_volume(
+                                            options.name,
+                                            options.driver.as_docker_arg().to_string(),
+                                            options.labels,
+                                            cx,
+                                        );
+                                        window.close_dialog(cx);
+                                    }
+                                }
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
     }
 
     fn on_select_volume(&mut self, volume: &VolumeInfo, cx: &mut Context<Self>) {
@@ -159,89 +189,6 @@ impl VolumesView {
     fn on_navigate_path(&mut self, path: &str, cx: &mut Context<Self>) {
         self.load_volume_files(path, cx);
     }
-
-    fn render_create_dialog(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        self.create_dialog.clone().map(|dialog_entity| {
-            div()
-                .id("dialog-overlay")
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(rgba(0x00000080))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .id("dialog-container")
-                        .on_mouse_down_out(cx.listener(|this, _ev, _window, cx| {
-                            this.create_dialog = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            v_flex()
-                                .w(px(500.))
-                                .bg(rgb(0x24283b))
-                                .rounded(px(12.))
-                                .overflow_hidden()
-                                .border_1()
-                                .border_color(rgb(0x414868))
-                                // Header
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .border_b_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(Label::new("New Volume").text_color(rgb(0xc0caf5))),
-                                )
-                                // Form content
-                                .child(dialog_entity.clone())
-                                // Footer buttons
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .justify_end()
-                                        .gap(px(12.))
-                                        .border_t_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(
-                                            Button::new("cancel")
-                                                .label("Cancel")
-                                                .ghost()
-                                                .on_click(cx.listener(|this, _ev, _window, cx| {
-                                                    this.create_dialog = None;
-                                                    cx.notify();
-                                                })),
-                                        )
-                                        .child({
-                                            let dialog = dialog_entity.clone();
-                                            Button::new("create")
-                                                .label("Create")
-                                                .primary()
-                                                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                                    let options = dialog.read(cx).get_options(cx);
-                                                    if !options.name.is_empty() {
-                                                        services::create_volume(
-                                                            options.name,
-                                                            options.driver.as_docker_arg().to_string(),
-                                                            options.labels,
-                                                            cx,
-                                                        );
-                                                        this.create_dialog = None;
-                                                        cx.notify();
-                                                    }
-                                                }))
-                                        }),
-                                ),
-                        ),
-                )
-        })
-    }
 }
 
 impl Render for VolumesView {
@@ -252,6 +199,7 @@ impl Render for VolumesView {
             window.push_notification((notification_type, SharedString::from(message)), cx);
         }
 
+        let colors = cx.theme().colors.clone();
         let selected_volume = self.selected_volume.clone();
         let active_tab = self.active_tab;
 
@@ -273,9 +221,6 @@ impl Render for VolumesView {
                 cx.notify();
             }));
 
-        // Render dialog overlay if open
-        let create_dialog = self.render_create_dialog(cx);
-
         div()
             .size_full()
             .flex()
@@ -288,7 +233,7 @@ impl Render for VolumesView {
                     .flex_shrink_0()
                     .overflow_hidden()
                     .border_r_1()
-                    .border_color(rgb(0x414868))
+                    .border_color(colors.border)
                     .child(self.volume_list.clone()),
             )
             .child(
@@ -299,6 +244,5 @@ impl Render for VolumesView {
                     .overflow_hidden()
                     .child(detail.render(window, cx)),
             )
-            .children(create_dialog)
     }
 }

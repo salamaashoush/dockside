@@ -1280,6 +1280,134 @@ pub fn set_docker_context(name: String, cx: &mut App) {
     .detach();
 }
 
+// ============================================================================
+// PRUNE OPERATIONS
+// ============================================================================
+
+pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<crate::ui::PruneDialog> {
+    use crate::docker::PruneResult;
+
+    let task_id = start_task(cx, "prune", "Pruning Docker resources...".to_string());
+    let disp = dispatcher(cx);
+    let client = docker_client();
+
+    // Create a PruneDialog entity to track results
+    let prune_dialog = cx.new(|cx| {
+        let mut dialog = crate::ui::PruneDialog::new(cx);
+        dialog.set_loading(true);
+        dialog
+    });
+    let prune_dialog_clone = prune_dialog.clone();
+
+    let prune_containers = options.prune_containers;
+    let prune_images = options.prune_images;
+    let prune_volumes = options.prune_volumes;
+    let prune_networks = options.prune_networks;
+    let images_dangling_only = options.images_dangling_only;
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        let docker = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+
+        let mut result = PruneResult::default();
+
+        if prune_containers {
+            if let Ok(r) = docker.prune_containers().await {
+                result.containers_deleted = r.containers_deleted;
+                result.space_reclaimed += r.space_reclaimed;
+            }
+        }
+
+        if prune_images {
+            if let Ok(r) = docker.prune_images(images_dangling_only).await {
+                result.images_deleted = r.images_deleted;
+                result.space_reclaimed += r.space_reclaimed;
+            }
+        }
+
+        if prune_volumes {
+            if let Ok(r) = docker.prune_volumes().await {
+                result.volumes_deleted = r.volumes_deleted;
+                result.space_reclaimed += r.space_reclaimed;
+            }
+        }
+
+        if prune_networks {
+            if let Ok(r) = docker.prune_networks().await {
+                result.networks_deleted = r.networks_deleted;
+            }
+        }
+
+        Ok::<_, anyhow::Error>(result)
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        cx.update(|cx| {
+            match result {
+                Ok(Ok(prune_result)) => {
+                    complete_task(cx, task_id);
+
+                    let message = format!(
+                        "Pruned: {} containers, {} images, {} volumes, {} networks. Space reclaimed: {}",
+                        prune_result.containers_deleted.len(),
+                        prune_result.images_deleted.len(),
+                        prune_result.volumes_deleted.len(),
+                        prune_result.networks_deleted.len(),
+                        prune_result.display_space_reclaimed()
+                    );
+
+                    prune_dialog_clone.update(cx, |dialog, _cx| {
+                        dialog.set_result(prune_result);
+                    });
+
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskCompleted {
+                            name: "prune".to_string(),
+                            message,
+                        });
+                    });
+
+                    // Refresh all lists
+                    refresh_containers(cx);
+                    refresh_images(cx);
+                    refresh_volumes(cx);
+                    refresh_networks(cx);
+                }
+                Ok(Err(e)) => {
+                    fail_task(cx, task_id, e.to_string());
+                    prune_dialog_clone.update(cx, |dialog, _cx| {
+                        dialog.set_error(e.to_string());
+                    });
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "prune".to_string(),
+                            error: format!("Failed to prune: {}", e),
+                        });
+                    });
+                }
+                Err(join_err) => {
+                    fail_task(cx, task_id, join_err.to_string());
+                    prune_dialog_clone.update(cx, |dialog, _cx| {
+                        dialog.set_error(join_err.to_string());
+                    });
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "prune".to_string(),
+                            error: format!("Task failed: {}", join_err),
+                        });
+                    });
+                }
+            }
+        })
+    })
+    .detach();
+
+    prune_dialog
+}
+
 // ==================== Initial Data Loading ====================
 
 pub fn load_initial_data(cx: &mut App) {

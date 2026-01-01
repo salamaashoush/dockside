@@ -326,13 +326,13 @@ impl MachineDetail {
                 div()
                     .flex_1()
                     .w_full()
-                    .bg(gpui::rgb(0x1a1b26))
+                    .bg(colors.sidebar)
                     .rounded(px(8.))
                     .p(px(12.))
                     .overflow_y_scrollbar()
                     .font_family("monospace")
                     .text_xs()
-                    .text_color(gpui::rgb(0xa9b1d6))
+                    .text_color(colors.foreground)
                     .when(is_loading, |el| el.child("Loading logs..."))
                     .when(!is_loading, |el| el.child(logs_content)),
             )
@@ -380,37 +380,37 @@ impl MachineDetail {
                 div()
                     .flex_1()
                     .w_full()
-                    .bg(gpui::rgb(0x1a1b26))
+                    .bg(colors.sidebar)
                     .rounded(px(8.))
                     .p(px(12.))
                     .overflow_hidden()
                     .font_family("monospace")
                     .text_sm()
-                    .text_color(gpui::rgb(0xa9b1d6))
+                    .text_color(colors.foreground)
                     .child(
                         v_flex()
                             .gap(px(4.))
                             .children(history.iter().map(|cmd| {
                                 div()
-                                    .text_color(gpui::rgb(0x7aa2f7))
+                                    .text_color(colors.link)
                                     .child(format!("$ {}", cmd))
                             }))
                             .when(!terminal_output.is_empty(), |el| {
                                 el.child(
                                     div()
-                                        .text_color(gpui::rgb(0xa9b1d6))
+                                        .text_color(colors.foreground)
                                         .child(terminal_output.clone()),
                                 )
                             })
                             .child(
                                 h_flex()
                                     .items_center()
-                                    .child(div().text_color(gpui::rgb(0x7aa2f7)).child("$ "))
+                                    .child(div().text_color(colors.link).child("$ "))
                                     .child(
                                         div()
                                             .w(px(8.))
                                             .h(px(16.))
-                                            .bg(gpui::rgb(0xa9b1d6))
+                                            .bg(colors.foreground)
                                             .child(""),
                                     ),
                             ),

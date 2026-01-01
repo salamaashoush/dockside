@@ -1,9 +1,10 @@
 use gpui::{div, prelude::*, px, App, Context, Entity, Render, Styled, Window};
 use gpui_component::{
+    button::{Button, ButtonVariants},
     h_flex,
     sidebar::{Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem},
     theme::{ActiveTheme, Theme, ThemeMode},
-    v_flex, IconName, Root,
+    IconName, Root, WindowExt,
 };
 
 use crate::services::task_manager;
@@ -13,6 +14,7 @@ use crate::ui::containers::ContainersView;
 use crate::ui::images::ImagesView;
 use crate::ui::machines::MachinesView;
 use crate::ui::networks::NetworksView;
+use crate::ui::prune_dialog::PruneDialog;
 use crate::ui::volumes::VolumesView;
 
 /// Main application - only handles layout and view switching
@@ -57,6 +59,39 @@ impl DockerApp {
             networks_view,
             activity_view,
         }
+    }
+
+    fn show_prune_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|cx| PruneDialog::new(cx));
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let dialog_clone = dialog_entity.clone();
+
+            dialog
+                .title("Prune Docker Resources")
+                .min_w(px(450.))
+                .child(dialog_entity.clone())
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_prune = dialog_clone.clone();
+
+                    vec![
+                        Button::new("prune")
+                            .label("Prune")
+                            .primary()
+                            .on_click({
+                                let dialog = dialog_for_prune.clone();
+                                move |_ev, window, cx| {
+                                    let options = dialog.read(cx).get_options();
+                                    if !options.is_empty() {
+                                        crate::services::prune_docker(options, cx);
+                                        window.close_dialog(cx);
+                                    }
+                                }
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
     }
 
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -145,6 +180,13 @@ impl DockerApp {
                                 .active(current_view == CurrentView::ActivityMonitor)
                                 .on_click(cx.listener(|_this, _ev, _window, cx| {
                                     crate::services::set_view(CurrentView::ActivityMonitor, cx);
+                                })),
+                        )
+                        .child(
+                            SidebarMenuItem::new("Prune")
+                                .icon(IconName::Delete)
+                                .on_click(cx.listener(|this, _ev, window, cx| {
+                                    this.show_prune_dialog(window, cx);
                                 })),
                         )
                         .child(
@@ -239,30 +281,30 @@ impl Render for DockerApp {
         let background = colors.background;
         let border = colors.border;
 
-        v_flex()
+        h_flex()
             .size_full()
             .bg(background)
             .overflow_hidden()
-            // Main layout: sidebar + content
             .child(
-                h_flex()
-                    .flex_1()
-                    .w_full()
+                div()
+                    .w(px(220.))
+                    .h_full()
+                    .flex_shrink_0()
                     .overflow_hidden()
-                    .child(
-                        div()
-                            .w(px(220.))
-                            .h_full()
-                            .flex_shrink_0()
-                            .overflow_hidden()
-                            .border_r_1()
-                            .border_color(border)
-                            .child(sidebar),
-                    )
-                    .child(div().flex_1().h_full().overflow_hidden().child(content)),
+                    .border_r_1()
+                    .border_color(border)
+                    .child(sidebar),
             )
-            // Task bar at bottom (if any running tasks)
-            .children(task_bar)
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .child(div().flex_1().overflow_hidden().child(content))
+                    .children(task_bar),
+            )
             // gpui-component layers
             .children(notification_layer)
             .children(dialog_layer)

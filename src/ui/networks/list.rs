@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, rgb, App, Context, Entity, Render, SharedString, Styled, Window};
+use gpui::{div, prelude::*, px, App, Context, Entity, Render, SharedString, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
@@ -124,7 +124,7 @@ impl ListDelegate for NetworkListDelegate {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(Icon::new(IconName::Globe).text_color(gpui::rgb(0xffffff))),
+                    .child(Icon::new(IconName::Globe).text_color(colors.background)),
             )
             .child(
                 v_flex()
@@ -300,6 +300,7 @@ impl Render for NetworkList {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let networks_empty = self.count_networks(cx) == 0;
         let count = self.count_networks(cx);
+        let colors = &cx.theme().colors;
 
         // Toolbar
         let toolbar = h_flex()
@@ -307,7 +308,7 @@ impl Render for NetworkList {
             .w_full()
             .px(px(16.))
             .border_b_1()
-            .border_color(rgb(0x414868))
+            .border_color(cx.theme().colors.border)
             .items_center()
             .justify_between()
             .flex_shrink_0()
@@ -317,7 +318,7 @@ impl Render for NetworkList {
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(0x565f89))
+                            .text_color(colors.muted_foreground)
                             .child(format!("{} networks", count)),
                     ),
             )

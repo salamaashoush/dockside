@@ -1,10 +1,10 @@
-use gpui::{div, prelude::*, px, rgb, rgba, Context, Entity, Render, Styled, Window};
+use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
-    label::Label,
     notification::NotificationType,
-    v_flex, Sizable, WindowExt,
+    theme::ActiveTheme,
+    v_flex, Root, Sizable, WindowExt,
 };
 
 use crate::docker::ContainerInfo;
@@ -25,7 +25,6 @@ pub struct ContainersView {
     terminal_view: Option<Entity<TerminalView>>,
     container_tab_state: ContainerTabState,
     pending_notifications: Vec<(NotificationType, String)>,
-    create_dialog: Option<Entity<CreateContainerDialog>>,
 }
 
 impl ContainersView {
@@ -36,13 +35,13 @@ impl ContainersView {
         let container_list = cx.new(|cx| ContainerList::new(window, cx));
 
         // Subscribe to container list events
-        cx.subscribe(&container_list, |this, _list, event: &ContainerListEvent, cx| {
+        cx.subscribe_in(&container_list, window, |this, _list, event: &ContainerListEvent, window, cx| {
             match event {
                 ContainerListEvent::Selected(container) => {
                     this.on_select_container(container, cx);
                 }
                 ContainerListEvent::NewContainer => {
-                    this.show_create_dialog(cx);
+                    this.show_create_dialog(window, cx);
                 }
             }
         })
@@ -98,13 +97,57 @@ impl ContainersView {
             terminal_view: None,
             container_tab_state: ContainerTabState::new(),
             pending_notifications: Vec::new(),
-            create_dialog: None,
         }
     }
 
-    fn show_create_dialog(&mut self, cx: &mut Context<Self>) {
-        self.create_dialog = Some(cx.new(|cx| CreateContainerDialog::new(cx)));
-        cx.notify();
+    fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|cx| CreateContainerDialog::new(cx));
+
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let colors = cx.theme().colors.clone();
+            let dialog_clone = dialog_entity.clone();
+            let dialog_clone2 = dialog_entity.clone();
+
+            dialog
+                .title("New Container")
+                .min_w(px(550.))
+                .child(dialog_entity.clone())
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_create = dialog_clone.clone();
+                    let dialog_for_start = dialog_clone2.clone();
+
+                    vec![
+                        Button::new("create")
+                            .label("Create")
+                            .ghost()
+                            .on_click({
+                                let dialog = dialog_for_create.clone();
+                                move |_ev, window, cx| {
+                                    let options = dialog.read(cx).get_options(cx, false);
+                                    if !options.image.is_empty() {
+                                        services::create_container(options, cx);
+                                        window.close_dialog(cx);
+                                    }
+                                }
+                            })
+                            .into_any_element(),
+                        Button::new("create-start")
+                            .label("Create & Start")
+                            .primary()
+                            .on_click({
+                                let dialog = dialog_for_start.clone();
+                                move |_ev, window, cx| {
+                                    let options = dialog.read(cx).get_options(cx, true);
+                                    if !options.image.is_empty() {
+                                        services::create_container(options, cx);
+                                        window.close_dialog(cx);
+                                    }
+                                }
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
     }
 
     fn on_select_container(&mut self, container: &ContainerInfo, cx: &mut Context<Self>) {
@@ -265,98 +308,6 @@ impl ContainersView {
             self.load_container_data(&container.id, cx);
         }
     }
-
-    fn render_create_dialog(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        self.create_dialog.clone().map(|dialog_entity| {
-            div()
-                .id("dialog-overlay")
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(rgba(0x00000080))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .id("dialog-container")
-                        .on_mouse_down_out(cx.listener(|this, _ev, _window, cx| {
-                            this.create_dialog = None;
-                            cx.notify();
-                        }))
-                        .child(
-                            v_flex()
-                                .w(px(550.))
-                                .bg(rgb(0x24283b))
-                                .rounded(px(12.))
-                                .overflow_hidden()
-                                .border_1()
-                                .border_color(rgb(0x414868))
-                                // Header
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .border_b_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(Label::new("New Container").text_color(rgb(0xc0caf5))),
-                                )
-                                // Form content
-                                .child(dialog_entity.clone())
-                                // Footer buttons
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .py(px(16.))
-                                        .px(px(20.))
-                                        .justify_end()
-                                        .gap(px(12.))
-                                        .border_t_1()
-                                        .border_color(rgb(0x414868))
-                                        .child(
-                                            Button::new("cancel")
-                                                .label("Cancel")
-                                                .ghost()
-                                                .on_click(cx.listener(|this, _ev, _window, cx| {
-                                                    this.create_dialog = None;
-                                                    cx.notify();
-                                                })),
-                                        )
-                                        .child({
-                                            let dialog = dialog_entity.clone();
-                                            Button::new("create")
-                                                .label("Create")
-                                                .ghost()
-                                                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                                    let options = dialog.read(cx).get_options(cx, false);
-                                                    if !options.image.is_empty() {
-                                                        services::create_container(options, cx);
-                                                        this.create_dialog = None;
-                                                        cx.notify();
-                                                    }
-                                                }))
-                                        })
-                                        .child({
-                                            let dialog = dialog_entity.clone();
-                                            Button::new("create-start")
-                                                .label("Create & Start")
-                                                .primary()
-                                                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                                    let options = dialog.read(cx).get_options(cx, true);
-                                                    if !options.image.is_empty() {
-                                                        services::create_container(options, cx);
-                                                        this.create_dialog = None;
-                                                        cx.notify();
-                                                    }
-                                                }))
-                                        }),
-                                ),
-                        ),
-                )
-        })
-    }
 }
 
 impl Render for ContainersView {
@@ -367,6 +318,7 @@ impl Render for ContainersView {
             window.push_notification((notification_type, SharedString::from(message)), cx);
         }
 
+        let colors = cx.theme().colors.clone();
         let selected_container = self.selected_container.clone();
         let active_tab = self.active_tab;
         let container_tab_state = self.container_tab_state.clone();
@@ -404,9 +356,6 @@ impl Render for ContainersView {
                 cx.notify();
             }));
 
-        // Render dialog overlay if open
-        let create_dialog = self.render_create_dialog(cx);
-
         div()
             .size_full()
             .flex()
@@ -419,13 +368,12 @@ impl Render for ContainersView {
                     .flex_shrink_0()
                     .overflow_hidden()
                     .border_r_1()
-                    .border_color(rgb(0x414868))
+                    .border_color(colors.border)
                     .child(self.container_list.clone()),
             )
             .child(
                 // Right: Detail panel - flexible width
                 div().flex_1().h_full().overflow_hidden().child(detail.render(window, cx)),
             )
-            .children(create_dialog)
     }
 }

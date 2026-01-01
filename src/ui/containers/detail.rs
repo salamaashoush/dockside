@@ -199,9 +199,9 @@ impl ContainerDetail {
         let status_text = container.status.clone();
         let is_running = container.state.is_running();
         let status_color = if is_running {
-            gpui::rgb(0x9ece6a)
+            colors.success
         } else {
-            gpui::rgb(0xf7768e)
+            colors.danger
         };
 
         v_flex()
@@ -304,13 +304,13 @@ impl ContainerDetail {
                 div()
                     .flex_1()
                     .w_full()
-                    .bg(gpui::rgb(0x1a1b26))
+                    .bg(colors.sidebar)
                     .rounded(px(8.))
                     .p(px(12.))
                     .overflow_y_scrollbar()
                     .font_family("monospace")
                     .text_xs()
-                    .text_color(gpui::rgb(0xa9b1d6))
+                    .text_color(colors.foreground)
                     .when(is_loading, |el| el.child("Loading logs..."))
                     .when(!is_loading, |el| el.child(logs_content)),
             )
@@ -374,13 +374,13 @@ impl ContainerDetail {
                 div()
                     .flex_1()
                     .w_full()
-                    .bg(gpui::rgb(0x1a1b26))
+                    .bg(colors.sidebar)
                     .rounded(px(8.))
                     .p(px(12.))
                     .overflow_y_scrollbar()
                     .font_family("monospace")
                     .text_xs()
-                    .text_color(gpui::rgb(0xa9b1d6))
+                    .text_color(colors.foreground)
                     .when(is_loading, |el| el.child("Loading..."))
                     .when(!is_loading, |el| el.child(inspect_content)),
             )

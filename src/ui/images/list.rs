@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, rgb, App, Context, Entity, Render, SharedString, Styled, Window};
+use gpui::{div, prelude::*, px, App, Context, Entity, Render, SharedString, Styled, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
@@ -155,7 +155,7 @@ impl ListDelegate for ImageListDelegate {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(Icon::new(AppIcon::Container).text_color(gpui::rgb(0xffffff))),
+                    .child(Icon::new(AppIcon::Container).text_color(colors.background)),
             )
             .child(
                 v_flex()
@@ -187,7 +187,7 @@ impl ListDelegate for ImageListDelegate {
                         .rounded(px(4.))
                         .bg(colors.primary)
                         .text_xs()
-                        .text_color(rgb(0xffffff))
+                        .text_color(colors.background)
                         .child(plat)
                 )
             });
@@ -340,6 +340,7 @@ impl Render for ImageList {
         let state = self.docker_state.read(cx);
         let images_empty = state.images.is_empty();
         let total_size = self.calculate_total_size(cx);
+        let colors = &cx.theme().colors;
 
         // Toolbar
         let toolbar = h_flex()
@@ -347,7 +348,7 @@ impl Render for ImageList {
             .w_full()
             .px(px(16.))
             .border_b_1()
-            .border_color(rgb(0x414868))
+            .border_color(cx.theme().colors.border)
             .items_center()
             .justify_between()
             .flex_shrink_0()
@@ -357,7 +358,7 @@ impl Render for ImageList {
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(0x565f89))
+                            .text_color(colors.muted_foreground)
                             .child(format!("{} total", total_size)),
                     ),
             )
