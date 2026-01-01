@@ -8,6 +8,7 @@ use gpui_component::{
 
 use crate::services::task_manager;
 use crate::state::{docker_state, CurrentView, DockerState, StateChanged};
+use crate::ui::activity::ActivityMonitorView;
 use crate::ui::containers::ContainersView;
 use crate::ui::images::ImagesView;
 use crate::ui::machines::MachinesView;
@@ -22,6 +23,7 @@ pub struct DockerApp {
     volumes_view: Entity<VolumesView>,
     images_view: Entity<ImagesView>,
     networks_view: Entity<NetworksView>,
+    activity_view: Entity<ActivityMonitorView>,
 }
 
 impl DockerApp {
@@ -44,6 +46,7 @@ impl DockerApp {
         let volumes_view = cx.new(|cx| VolumesView::new(window, cx));
         let images_view = cx.new(|cx| ImagesView::new(window, cx));
         let networks_view = cx.new(|cx| NetworksView::new(window, cx));
+        let activity_view = cx.new(|cx| ActivityMonitorView::new(window, cx));
 
         Self {
             docker_state,
@@ -52,6 +55,7 @@ impl DockerApp {
             volumes_view,
             images_view,
             networks_view,
+            activity_view,
         }
     }
 
@@ -132,6 +136,27 @@ impl DockerApp {
                     ),
                 ),
             )
+            .child(
+                SidebarGroup::new("General").child(
+                    SidebarMenu::new()
+                        .child(
+                            SidebarMenuItem::new("Activity Monitor")
+                                .icon(IconName::ChartPie)
+                                .active(current_view == CurrentView::ActivityMonitor)
+                                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                    crate::services::set_view(CurrentView::ActivityMonitor, cx);
+                                })),
+                        )
+                        .child(
+                            SidebarMenuItem::new("Commands")
+                                .icon(IconName::SquareTerminal)
+                                .active(current_view == CurrentView::Commands)
+                                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                    crate::services::set_view(CurrentView::Commands, cx);
+                                })),
+                        ),
+                ),
+            )
     }
 
     fn render_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -143,6 +168,7 @@ impl DockerApp {
             CurrentView::Volumes => div().size_full().child(self.volumes_view.clone()),
             CurrentView::Images => div().size_full().child(self.images_view.clone()),
             CurrentView::Networks => div().size_full().child(self.networks_view.clone()),
+            CurrentView::ActivityMonitor => div().size_full().child(self.activity_view.clone()),
             _ => {
                 // Placeholder for views not yet implemented
                 let colors = &cx.theme().colors;
