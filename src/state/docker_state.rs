@@ -7,6 +7,17 @@ use super::app_state::{CurrentView, MachineTabState, SelectedItem};
 
 use crate::docker::VolumeFileEntry;
 
+/// Image inspect data for detailed view
+#[derive(Clone, Debug, Default)]
+pub struct ImageInspectData {
+    pub config_cmd: Option<Vec<String>>,
+    pub config_workdir: Option<String>,
+    pub config_env: Vec<(String, String)>,
+    pub config_entrypoint: Option<Vec<String>>,
+    pub config_exposed_ports: Vec<String>,
+    pub used_by: Vec<String>,
+}
+
 /// Event emitted when docker state changes
 #[derive(Clone, Debug)]
 pub enum StateChanged {
@@ -26,6 +37,10 @@ pub enum StateChanged {
     VolumeFilesError {
         volume_name: String,
         error: String,
+    },
+    ImageInspectLoaded {
+        image_id: String,
+        data: ImageInspectData,
     },
 }
 

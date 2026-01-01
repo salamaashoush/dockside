@@ -9,6 +9,7 @@ use gpui_component::{
 use crate::services::task_manager;
 use crate::state::{docker_state, CurrentView, DockerState, StateChanged};
 use crate::ui::containers::ContainersView;
+use crate::ui::images::ImagesView;
 use crate::ui::machines::MachinesView;
 use crate::ui::volumes::VolumesView;
 
@@ -18,6 +19,7 @@ pub struct DockerApp {
     machines_view: Entity<MachinesView>,
     containers_view: Entity<ContainersView>,
     volumes_view: Entity<VolumesView>,
+    images_view: Entity<ImagesView>,
 }
 
 impl DockerApp {
@@ -38,12 +40,14 @@ impl DockerApp {
         let machines_view = cx.new(|cx| MachinesView::new(window, cx));
         let containers_view = cx.new(|cx| ContainersView::new(window, cx));
         let volumes_view = cx.new(|cx| VolumesView::new(window, cx));
+        let images_view = cx.new(|cx| ImagesView::new(window, cx));
 
         Self {
             docker_state,
             machines_view,
             containers_view,
             volumes_view,
+            images_view,
         }
     }
 
@@ -133,6 +137,7 @@ impl DockerApp {
             CurrentView::Machines => div().size_full().child(self.machines_view.clone()),
             CurrentView::Containers => div().size_full().child(self.containers_view.clone()),
             CurrentView::Volumes => div().size_full().child(self.volumes_view.clone()),
+            CurrentView::Images => div().size_full().child(self.images_view.clone()),
             _ => {
                 // Placeholder for views not yet implemented
                 let colors = &cx.theme().colors;
