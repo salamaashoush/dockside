@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod components;
 pub mod containers;
 pub mod images;
 pub mod machines;
