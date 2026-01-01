@@ -1,5 +1,6 @@
 mod actions;
 mod app;
+mod assets;
 mod colima;
 mod docker;
 mod services;
@@ -20,7 +21,7 @@ fn main() -> Result<()> {
         .init();
 
     gpui::Application::new()
-        .with_assets(gpui_component_assets::Assets)
+        .with_assets(assets::Assets)
         .run(|cx: &mut App| {
             // Initialize gpui-component
             gpui_component::init(cx);

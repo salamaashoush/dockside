@@ -1,9 +1,21 @@
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use gpui::{App, AppContext, Entity, EventEmitter, Global};
 
 use crate::colima::{ColimaClient, ColimaStartOptions};
 use crate::docker::DockerClient;
 use crate::state::{docker_state, StateChanged, CurrentView};
-use crate::services::{complete_task, fail_task, start_task};
+use crate::services::{complete_task, fail_task, start_task, Tokio};
+
+/// Shared Docker client - initialized once in load_initial_data
+static DOCKER_CLIENT: std::sync::OnceLock<Arc<RwLock<Option<DockerClient>>>> = std::sync::OnceLock::new();
+
+/// Get the shared Docker client handle
+pub fn docker_client() -> Arc<RwLock<Option<DockerClient>>> {
+    DOCKER_CLIENT
+        .get_or_init(|| Arc::new(RwLock::new(None)))
+        .clone()
+}
 
 /// Event emitted when a task completes (for UI to show notifications)
 #[derive(Clone, Debug)]
@@ -305,6 +317,332 @@ pub fn delete_machine(name: String, cx: &mut App) {
     .detach();
 }
 
+// ==================== Container Actions ====================
+
+pub fn start_container(id: String, cx: &mut App) {
+    let task_id = start_task(cx, "start_container", "Starting container...".to_string());
+    let disp = dispatcher(cx);
+    let client = docker_client();
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        let docker = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+        docker.start_container(&id).await
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        cx.update(|cx| {
+            match result {
+                Ok(Ok(_)) => {
+                    complete_task(cx, task_id);
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskCompleted {
+                            name: "start_container".to_string(),
+                            message: "Container started".to_string(),
+                        });
+                    });
+                    refresh_containers(cx);
+                }
+                Ok(Err(e)) => {
+                    fail_task(cx, task_id, e.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "start_container".to_string(),
+                            error: format!("Failed to start container: {}", e),
+                        });
+                    });
+                }
+                Err(join_err) => {
+                    fail_task(cx, task_id, join_err.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "start_container".to_string(),
+                            error: format!("Task failed: {}", join_err),
+                        });
+                    });
+                }
+            }
+        })
+    })
+    .detach();
+}
+
+pub fn stop_container(id: String, cx: &mut App) {
+    let task_id = start_task(cx, "stop_container", "Stopping container...".to_string());
+    let disp = dispatcher(cx);
+    let client = docker_client();
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        let docker = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+        docker.stop_container(&id).await
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        cx.update(|cx| {
+            match result {
+                Ok(Ok(_)) => {
+                    complete_task(cx, task_id);
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskCompleted {
+                            name: "stop_container".to_string(),
+                            message: "Container stopped".to_string(),
+                        });
+                    });
+                    refresh_containers(cx);
+                }
+                Ok(Err(e)) => {
+                    fail_task(cx, task_id, e.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "stop_container".to_string(),
+                            error: format!("Failed to stop container: {}", e),
+                        });
+                    });
+                }
+                Err(join_err) => {
+                    fail_task(cx, task_id, join_err.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "stop_container".to_string(),
+                            error: format!("Task failed: {}", join_err),
+                        });
+                    });
+                }
+            }
+        })
+    })
+    .detach();
+}
+
+pub fn restart_container(id: String, cx: &mut App) {
+    let task_id = start_task(cx, "restart_container", "Restarting container...".to_string());
+    let disp = dispatcher(cx);
+    let client = docker_client();
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        let docker = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+        docker.restart_container(&id).await
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        cx.update(|cx| {
+            match result {
+                Ok(Ok(_)) => {
+                    complete_task(cx, task_id);
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskCompleted {
+                            name: "restart_container".to_string(),
+                            message: "Container restarted".to_string(),
+                        });
+                    });
+                    refresh_containers(cx);
+                }
+                Ok(Err(e)) => {
+                    fail_task(cx, task_id, e.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "restart_container".to_string(),
+                            error: format!("Failed to restart container: {}", e),
+                        });
+                    });
+                }
+                Err(join_err) => {
+                    fail_task(cx, task_id, join_err.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "restart_container".to_string(),
+                            error: format!("Task failed: {}", join_err),
+                        });
+                    });
+                }
+            }
+        })
+    })
+    .detach();
+}
+
+pub fn delete_container(id: String, cx: &mut App) {
+    let task_id = start_task(cx, "delete_container", "Deleting container...".to_string());
+    let disp = dispatcher(cx);
+    let client = docker_client();
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        let docker = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+        docker.remove_container(&id, true).await
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        cx.update(|cx| {
+            match result {
+                Ok(Ok(_)) => {
+                    complete_task(cx, task_id);
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskCompleted {
+                            name: "delete_container".to_string(),
+                            message: "Container deleted".to_string(),
+                        });
+                    });
+                    refresh_containers(cx);
+                }
+                Ok(Err(e)) => {
+                    fail_task(cx, task_id, e.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "delete_container".to_string(),
+                            error: format!("Failed to delete container: {}", e),
+                        });
+                    });
+                }
+                Err(join_err) => {
+                    fail_task(cx, task_id, join_err.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "delete_container".to_string(),
+                            error: format!("Task failed: {}", join_err),
+                        });
+                    });
+                }
+            }
+        })
+    })
+    .detach();
+}
+
+pub fn create_container(options: crate::ui::containers::CreateContainerOptions, cx: &mut App) {
+    let image_name = options.image.clone();
+    let start_after = options.start_after_create;
+    let task_id = start_task(
+        cx,
+        "create_container",
+        format!("Creating container from {}...", image_name),
+    );
+
+    let disp = dispatcher(cx);
+    let client = docker_client();
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        let docker = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+
+        // Ensure image exists locally, pull if necessary
+        docker
+            .ensure_image(&options.image, options.platform.as_docker_arg())
+            .await?;
+
+        // Parse command and entrypoint if provided
+        let command: Option<Vec<String>> = options
+            .command
+            .as_ref()
+            .map(|c| c.split_whitespace().map(String::from).collect());
+        let entrypoint: Option<Vec<String>> = options
+            .entrypoint
+            .as_ref()
+            .map(|e| e.split_whitespace().map(String::from).collect());
+
+        let container_id = docker
+            .create_container(
+                &options.image,
+                options.name.as_deref(),
+                options.platform.as_docker_arg(),
+                command,
+                entrypoint,
+                options.workdir.as_deref(),
+                options.remove_after_stop,
+                options.restart_policy.as_docker_arg(),
+                options.privileged,
+                options.read_only,
+                options.docker_init,
+            )
+            .await?;
+
+        // Start the container if requested
+        if start_after {
+            docker.start_container(&container_id).await?;
+        }
+
+        Ok::<_, anyhow::Error>(())
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        cx.update(|cx| {
+            match result {
+                Ok(Ok(_)) => {
+                    complete_task(cx, task_id);
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskCompleted {
+                            name: "create_container".to_string(),
+                            message: format!("Container created from {}", image_name),
+                        });
+                    });
+                    refresh_containers(cx);
+                }
+                Ok(Err(e)) => {
+                    fail_task(cx, task_id, e.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "create_container".to_string(),
+                            error: format!("Failed to create container: {}", e),
+                        });
+                    });
+                }
+                Err(join_err) => {
+                    fail_task(cx, task_id, join_err.to_string());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "create_container".to_string(),
+                            error: format!("Task failed: {}", join_err),
+                        });
+                    });
+                }
+            }
+        })
+    })
+    .detach();
+}
+
+pub fn refresh_containers(cx: &mut App) {
+    let state = docker_state(cx);
+    let client = docker_client();
+
+    let tokio_task = Tokio::spawn(cx, async move {
+        let guard = client.read().await;
+        match guard.as_ref() {
+            Some(docker) => docker.list_containers(true).await.unwrap_or_default(),
+            None => vec![],
+        }
+    });
+
+    cx.spawn(async move |cx| {
+        let result = tokio_task.await;
+        let containers = result.unwrap_or_default();
+        cx.update(|cx| {
+            state.update(cx, |state, cx| {
+                state.set_containers(containers);
+                cx.emit(StateChanged::ContainersUpdated);
+            });
+        })
+    })
+    .detach();
+}
+
 pub fn refresh_machines(cx: &mut App) {
     let state = docker_state(cx);
 
@@ -416,52 +754,49 @@ pub fn set_docker_context(name: String, cx: &mut App) {
 
 pub fn load_initial_data(cx: &mut App) {
     let state = docker_state(cx);
+    let client_handle = docker_client();
+
+    // First, get colima VMs and socket path (sync operation)
+    let colima_task = cx.background_executor().spawn(async move {
+        let colima_client = ColimaClient::new();
+        let vms = colima_client.list().unwrap_or_default();
+        let socket_path = colima_client.socket_path(None);
+        (vms, socket_path)
+    });
+
+    // Then spawn tokio task for Docker operations
+    let tokio_task = Tokio::spawn(cx, async move {
+        // Wait for colima info
+        let (vms, socket_path) = colima_task.await;
+
+        // Initialize the shared Docker client
+        let mut new_client = DockerClient::new(socket_path);
+        let docker_connected = new_client.connect().await.is_ok();
+
+        // Store in the global if connected
+        if docker_connected {
+            let mut guard = client_handle.write().await;
+            *guard = Some(new_client);
+            drop(guard);
+
+            // Now use the shared client for all queries
+            let guard = client_handle.read().await;
+            let docker = guard.as_ref().unwrap();
+
+            let containers = docker.list_containers(true).await.unwrap_or_default();
+            let images = docker.list_images(false).await.unwrap_or_default();
+            let volumes = docker.list_volumes().await.unwrap_or_default();
+            let networks = docker.list_networks().await.unwrap_or_default();
+
+            (vms, containers, images, volumes, networks)
+        } else {
+            (vms, vec![], vec![], vec![], vec![])
+        }
+    });
 
     cx.spawn(async move |cx| {
-        let (vms, containers, images, volumes, networks) = cx
-            .background_executor()
-            .spawn(async move {
-                let colima_client = ColimaClient::new();
-                let vms = colima_client.list().unwrap_or_default();
-                let socket_path = colima_client.socket_path(None);
-
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("Failed to create tokio runtime");
-
-                let mut docker_client = DockerClient::new(socket_path);
-                let docker_connected = rt.block_on(async {
-                    docker_client.connect().await.is_ok()
-                });
-
-                let containers = if docker_connected {
-                    rt.block_on(async { docker_client.list_containers(true).await.unwrap_or_default() })
-                } else {
-                    vec![]
-                };
-
-                let images = if docker_connected {
-                    rt.block_on(async { docker_client.list_images(false).await.unwrap_or_default() })
-                } else {
-                    vec![]
-                };
-
-                let volumes = if docker_connected {
-                    rt.block_on(async { docker_client.list_volumes().await.unwrap_or_default() })
-                } else {
-                    vec![]
-                };
-
-                let networks = if docker_connected {
-                    rt.block_on(async { docker_client.list_networks().await.unwrap_or_default() })
-                } else {
-                    vec![]
-                };
-
-                (vms, containers, images, volumes, networks)
-            })
-            .await;
+        let result = tokio_task.await;
+        let (vms, containers, images, volumes, networks) = result.unwrap_or_default();
 
         cx.update(|cx| {
             state.update(cx, |state, cx| {

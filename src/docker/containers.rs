@@ -1,8 +1,11 @@
 use anyhow::Result;
 use bollard::container::{
-    ListContainersOptions, RemoveContainerOptions, RestartContainerOptions,
-    StartContainerOptions, StopContainerOptions,
+    Config, CreateContainerOptions, ListContainersOptions, LogsOptions, RemoveContainerOptions,
+    RestartContainerOptions, StartContainerOptions, StopContainerOptions,
 };
+use bollard::exec::{CreateExecOptions, StartExecResults};
+use futures::stream::StreamExt;
+use bollard::models::HostConfig;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -98,6 +101,27 @@ impl ContainerInfo {
             })
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// File entry in a container filesystem
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerFileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub size: u64,
+    pub permissions: String,
+}
+
+impl ContainerFileEntry {
+    pub fn display_size(&self) -> String {
+        if self.is_dir {
+            "-".to_string()
+        } else {
+            bytesize::ByteSize(self.size).to_string()
+        }
     }
 }
 
@@ -197,5 +221,190 @@ impl DockerClient {
             )
             .await?;
         Ok(())
+    }
+
+    /// Create a new container from an image
+    pub async fn create_container(
+        &self,
+        image: &str,
+        name: Option<&str>,
+        platform: Option<&str>,
+        command: Option<Vec<String>>,
+        entrypoint: Option<Vec<String>>,
+        working_dir: Option<&str>,
+        auto_remove: bool,
+        restart_policy: Option<&str>,
+        privileged: bool,
+        read_only: bool,
+        init: bool,
+    ) -> Result<String> {
+        let docker = self.client()?;
+
+        // Build host config
+        let mut host_config = HostConfig::default();
+        host_config.auto_remove = Some(auto_remove);
+        host_config.privileged = Some(privileged);
+        host_config.readonly_rootfs = Some(read_only);
+        host_config.init = Some(init);
+
+        if let Some(policy) = restart_policy {
+            if policy != "no" {
+                host_config.restart_policy = Some(bollard::models::RestartPolicy {
+                    name: Some(match policy {
+                        "always" => bollard::models::RestartPolicyNameEnum::ALWAYS,
+                        "on-failure" => bollard::models::RestartPolicyNameEnum::ON_FAILURE,
+                        "unless-stopped" => bollard::models::RestartPolicyNameEnum::UNLESS_STOPPED,
+                        _ => bollard::models::RestartPolicyNameEnum::NO,
+                    }),
+                    maximum_retry_count: None,
+                });
+            }
+        }
+
+        // Build container config
+        let config: Config<String> = Config {
+            image: Some(image.to_string()),
+            cmd: command,
+            entrypoint,
+            working_dir: working_dir.map(String::from),
+            host_config: Some(host_config),
+            ..Default::default()
+        };
+
+        // Create options
+        let options = name.map(|n| CreateContainerOptions {
+            name: n.to_string(),
+            platform: platform.map(String::from),
+        });
+
+        let response = docker.create_container(options, config).await?;
+        Ok(response.id)
+    }
+
+    /// Get container logs
+    pub async fn container_logs(&self, id: &str, tail: Option<usize>) -> Result<String> {
+        let docker = self.client()?;
+
+        let options = LogsOptions::<String> {
+            stdout: true,
+            stderr: true,
+            tail: tail.map(|t| t.to_string()).unwrap_or_else(|| "100".to_string()),
+            ..Default::default()
+        };
+
+        let mut stream = docker.logs(id, Some(options));
+        let mut logs = String::new();
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(output) => {
+                    logs.push_str(&output.to_string());
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Failed to get logs: {}", e));
+                }
+            }
+        }
+
+        Ok(logs)
+    }
+
+    /// Inspect a container and return JSON
+    pub async fn inspect_container(&self, id: &str) -> Result<String> {
+        let docker = self.client()?;
+        let info = docker.inspect_container(id, None).await?;
+        let json = serde_json::to_string_pretty(&info)?;
+        Ok(json)
+    }
+
+    /// Execute a command in a container and return output
+    pub async fn exec_command(&self, id: &str, cmd: Vec<&str>) -> Result<String> {
+        let docker = self.client()?;
+
+        let exec = docker
+            .create_exec(
+                id,
+                CreateExecOptions {
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    cmd: Some(cmd),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        let output = docker.start_exec(&exec.id, None).await?;
+
+        let mut result = String::new();
+        if let StartExecResults::Attached { mut output, .. } = output {
+            while let Some(Ok(msg)) = output.next().await {
+                result.push_str(&msg.to_string());
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// List files in a container directory
+    pub async fn list_container_files(&self, id: &str, path: &str) -> Result<Vec<ContainerFileEntry>> {
+        // Use ls -la with specific format for parsing
+        let output = self
+            .exec_command(id, vec!["ls", "-la", path])
+            .await?;
+
+        let mut entries = Vec::new();
+
+        for line in output.lines().skip(1) {
+            // Skip "total" line
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 9 {
+                continue;
+            }
+
+            let permissions = parts[0].to_string();
+            let size: u64 = parts[4].parse().unwrap_or(0);
+            let name = parts[8..].join(" ");
+
+            // Skip . and ..
+            if name == "." || name == ".." {
+                continue;
+            }
+
+            let is_dir = permissions.starts_with('d');
+            let is_symlink = permissions.starts_with('l');
+
+            let full_path = if path == "/" {
+                format!("/{}", name)
+            } else {
+                format!("{}/{}", path.trim_end_matches('/'), name)
+            };
+
+            // For symlinks, extract just the name part (before ->)
+            let display_name = if is_symlink {
+                name.split(" -> ").next().unwrap_or(&name).to_string()
+            } else {
+                name
+            };
+
+            entries.push(ContainerFileEntry {
+                name: display_name,
+                path: full_path,
+                is_dir,
+                is_symlink,
+                size,
+                permissions,
+            });
+        }
+
+        // Sort: directories first, then by name
+        entries.sort_by(|a, b| {
+            match (a.is_dir, b.is_dir) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.name.cmp(&b.name),
+            }
+        });
+
+        Ok(entries)
     }
 }

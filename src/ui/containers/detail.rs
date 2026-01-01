@@ -10,48 +10,68 @@ use gpui_component::{
 use std::rc::Rc;
 
 use crate::assets::AppIcon;
-use crate::colima::{ColimaVm, VmFileEntry};
-use crate::state::MachineTabState;
+use crate::docker::{ContainerFileEntry, ContainerInfo};
 use crate::terminal::TerminalView;
 
-type MachineActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
+type ContainerActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
-type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
+type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 
-pub struct MachineDetail {
-    machine: Option<ColimaVm>,
-    active_tab: usize,
-    machine_state: Option<MachineTabState>,
-    terminal_view: Option<Entity<TerminalView>>,
-    on_start: Option<MachineActionCallback>,
-    on_stop: Option<MachineActionCallback>,
-    on_restart: Option<MachineActionCallback>,
-    on_delete: Option<MachineActionCallback>,
-    on_tab_change: Option<TabChangeCallback>,
-    on_navigate_path: Option<FileNavigateCallback>,
-    on_refresh_logs: Option<RefreshCallback>,
+/// State for container detail tabs
+#[derive(Debug, Clone, Default)]
+pub struct ContainerTabState {
+    pub logs: String,
+    pub logs_loading: bool,
+    pub inspect: String,
+    pub inspect_loading: bool,
+    pub current_path: String,
+    pub files: Vec<ContainerFileEntry>,
+    pub files_loading: bool,
 }
 
-impl MachineDetail {
+impl ContainerTabState {
     pub fn new() -> Self {
         Self {
-            machine: None,
+            current_path: "/".to_string(),
+            ..Default::default()
+        }
+    }
+}
+
+pub struct ContainerDetail {
+    container: Option<ContainerInfo>,
+    active_tab: usize,
+    container_state: Option<ContainerTabState>,
+    terminal_view: Option<Entity<TerminalView>>,
+    on_start: Option<ContainerActionCallback>,
+    on_stop: Option<ContainerActionCallback>,
+    on_restart: Option<ContainerActionCallback>,
+    on_delete: Option<ContainerActionCallback>,
+    on_tab_change: Option<TabChangeCallback>,
+    on_refresh_logs: Option<RefreshCallback>,
+    on_navigate_path: Option<FileNavigateCallback>,
+}
+
+impl ContainerDetail {
+    pub fn new() -> Self {
+        Self {
+            container: None,
             active_tab: 0,
-            machine_state: None,
+            container_state: None,
             terminal_view: None,
             on_start: None,
             on_stop: None,
             on_restart: None,
             on_delete: None,
             on_tab_change: None,
-            on_navigate_path: None,
             on_refresh_logs: None,
+            on_navigate_path: None,
         }
     }
 
-    pub fn machine(mut self, machine: Option<ColimaVm>) -> Self {
-        self.machine = machine;
+    pub fn container(mut self, container: Option<ContainerInfo>) -> Self {
+        self.container = container;
         self
     }
 
@@ -60,8 +80,8 @@ impl MachineDetail {
         self
     }
 
-    pub fn machine_state(mut self, state: MachineTabState) -> Self {
-        self.machine_state = Some(state);
+    pub fn container_state(mut self, state: ContainerTabState) -> Self {
+        self.container_state = Some(state);
         self
     }
 
@@ -110,19 +130,19 @@ impl MachineDetail {
         self
     }
 
-    pub fn on_navigate_path<F>(mut self, callback: F) -> Self
-    where
-        F: Fn(&str, &mut Window, &mut App) + 'static,
-    {
-        self.on_navigate_path = Some(Rc::new(callback));
-        self
-    }
-
     pub fn on_refresh_logs<F>(mut self, callback: F) -> Self
     where
         F: Fn(&(), &mut Window, &mut App) + 'static,
     {
         self.on_refresh_logs = Some(Rc::new(callback));
+        self
+    }
+
+    pub fn on_navigate_path<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&str, &mut Window, &mut App) + 'static,
+    {
+        self.on_navigate_path = Some(Rc::new(callback));
         self
     }
 
@@ -140,185 +160,143 @@ impl MachineDetail {
                     .items_center()
                     .gap(px(16.))
                     .child(
-                        Icon::new(AppIcon::Machine)
+                        Icon::new(AppIcon::Container)
                             .size(px(48.))
                             .text_color(colors.muted_foreground),
                     )
                     .child(
                         div()
                             .text_color(colors.muted_foreground)
-                            .child("Select a machine to view details"),
+                            .child("Select a container to view details"),
                     ),
             )
     }
 
-    fn render_info_tab(&self, machine: &ColimaVm, cx: &App) -> gpui::Div {
-        let status_text = machine.status.to_string();
-        let domain = format!("{}.local", machine.name);
+    fn render_info_tab(&self, container: &ContainerInfo, cx: &App) -> gpui::Div {
+        let colors = &cx.theme().colors;
 
-        // Basic info rows
-        let mut basic_info = vec![
-            ("Name", machine.name.clone()),
-            ("Status", status_text),
-            ("Domain", domain),
-        ];
-
-        if let Some(addr) = &machine.address {
-            basic_info.push(("IP Address", addr.clone()));
-        }
-
-        // Get real OS info from state if available
-        let os_info = self.machine_state.as_ref().and_then(|s| s.os_info.as_ref());
-
-        // Image section - use real OS info
-        let image_info = if let Some(os) = os_info {
-            vec![
-                ("Distro", os.pretty_name.clone()),
-                ("Kernel", os.kernel.clone()),
-                ("Architecture", os.arch.clone()),
-            ]
-        } else {
-            vec![
-                ("Distro", "Loading...".to_string()),
-                ("Kernel", "-".to_string()),
-                ("Architecture", machine.arch.display_name().to_string()),
-            ]
+        let info_row = |label: &str, value: String| {
+            h_flex()
+                .w_full()
+                .py(px(12.))
+                .justify_between()
+                .border_b_1()
+                .border_color(colors.border)
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(colors.muted_foreground)
+                        .child(label.to_string()),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(colors.foreground)
+                        .child(value),
+                )
         };
 
-        // Settings section
-        let mut settings_info = vec![
-            ("CPUs", machine.cpus.to_string()),
-            ("Memory", format!("{:.0} GB", machine.memory_gb())),
-            ("Disk", format!("{:.0} GB", machine.disk_gb())),
-            ("Driver", machine.display_driver()),
-            ("Mount Type", machine.display_mount_type()),
-            ("Runtime", machine.runtime.to_string()),
-        ];
-
-        if machine.kubernetes {
-            settings_info.push(("Kubernetes", "Enabled".to_string()));
-        }
-
-        if let Some(socket) = &machine.docker_socket {
-            settings_info.push(("Docker Socket", socket.clone()));
-        }
+        let status_text = container.status.clone();
+        let is_running = container.state.is_running();
+        let status_color = if is_running {
+            gpui::rgb(0x9ece6a)
+        } else {
+            gpui::rgb(0xf7768e)
+        };
 
         v_flex()
-            .flex_1()
             .w_full()
             .p(px(16.))
-            .gap(px(12.))
-            .child(self.render_section(None, basic_info, cx))
-            .child(self.render_section(Some("Image"), image_info, cx))
-            .child(self.render_section(Some("Settings"), settings_info, cx))
-    }
-
-    fn render_section(
-        &self,
-        header: Option<&str>,
-        rows: Vec<(&str, String)>,
-        cx: &App,
-    ) -> gpui::Div {
-        let colors = &cx.theme().colors;
-
-        let mut section = v_flex().gap(px(1.));
-
-        if let Some(title) = header {
-            section = section.child(
-                div()
-                    .py(px(8.))
-                    .text_sm()
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(colors.foreground)
-                    .child(title.to_string()),
-            );
-        }
-
-        let rows_container = v_flex()
-            .bg(colors.background)
-            .rounded(px(8.))
-            .overflow_hidden()
-            .children(
-                rows.into_iter()
-                    .enumerate()
-                    .map(|(i, (label, value))| self.render_section_row(label, value, i == 0, cx)),
-            );
-
-        section.child(rows_container)
-    }
-
-    fn render_section_row(
-        &self,
-        label: &str,
-        value: String,
-        is_first: bool,
-        cx: &App,
-    ) -> gpui::Div {
-        let colors = &cx.theme().colors;
-
-        let mut row = h_flex()
-            .w_full()
-            .px(px(16.))
-            .py(px(12.))
-            .items_center()
-            .justify_between()
+            .gap(px(8.))
+            .child(info_row("Name", container.name.clone()))
+            .child(info_row("ID", container.short_id().to_string()))
+            .child(info_row("Image", container.image.clone()))
             .child(
-                div()
-                    .text_sm()
-                    .text_color(colors.secondary_foreground)
-                    .child(label.to_string()),
+                h_flex()
+                    .w_full()
+                    .py(px(12.))
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(colors.border)
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(colors.muted_foreground)
+                            .child("Status"),
+                    )
+                    .child(
+                        h_flex()
+                            .gap(px(8.))
+                            .items_center()
+                            .child(
+                                div()
+                                    .w(px(8.))
+                                    .h(px(8.))
+                                    .rounded_full()
+                                    .bg(status_color),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(colors.foreground)
+                                    .child(status_text),
+                            ),
+                    ),
             )
-            .child(div().text_sm().text_color(colors.foreground).child(value));
-
-        if !is_first {
-            row = row.border_t_1().border_color(colors.border);
-        }
-
-        row
+            .child(info_row("Ports", container.display_ports()))
+            .when(container.command.is_some(), |el| {
+                el.child(info_row(
+                    "Command",
+                    container.command.clone().unwrap_or_default(),
+                ))
+            })
+            .when(container.created.is_some(), |el| {
+                el.child(info_row(
+                    "Created",
+                    container
+                        .created
+                        .map(|c| c.format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_default(),
+                ))
+            })
     }
 
     fn render_logs_tab(&self, cx: &App) -> gpui::Div {
         let colors = &cx.theme().colors;
-
-        let logs_content = self
-            .machine_state
-            .as_ref()
+        let state = self.container_state.as_ref();
+        let is_loading = state.map(|s| s.logs_loading).unwrap_or(false);
+        let logs_content = state
             .map(|s| s.logs.clone())
-            .unwrap_or_else(|| "Loading logs...".to_string());
-
-        let is_loading = self
-            .machine_state
-            .as_ref()
-            .map(|s| s.logs_loading)
-            .unwrap_or(false);
+            .unwrap_or_else(|| "No logs available".to_string());
 
         let on_refresh = self.on_refresh_logs.clone();
 
         v_flex()
-            .flex_1()
             .w_full()
+            .h_full()
             .p(px(16.))
-            .gap(px(8.))
+            .gap(px(12.))
             .child(
                 h_flex()
-                    .items_center()
+                    .w_full()
                     .justify_between()
+                    .items_center()
                     .child(
                         div()
                             .text_sm()
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(colors.foreground)
-                            .child("System Logs"),
+                            .child("Container Logs"),
                     )
                     .child(
                         Button::new("refresh-logs")
                             .icon(IconName::Redo)
                             .ghost()
-                            .compact()
-                            .when_some(on_refresh, |btn, cb| {
-                                btn.on_click(move |_ev, window, cx| {
+                            .small()
+                            .on_click(move |_ev, window, cx| {
+                                if let Some(ref cb) = on_refresh {
                                     cb(&(), window, cx);
-                                })
+                                }
                             }),
                     ),
             )
@@ -352,29 +330,45 @@ impl MachineDetail {
         let colors = &cx.theme().colors;
 
         // Fallback: show message
-        let terminal_output = self
-            .machine_state
-            .as_ref()
-            .map(|s| s.terminal_output.clone())
-            .unwrap_or_default();
-
-        let history = self
-            .machine_state
-            .as_ref()
-            .map(|s| s.terminal_history.clone())
-            .unwrap_or_default();
-
         v_flex()
             .flex_1()
             .w_full()
             .p(px(16.))
-            .gap(px(8.))
+            .items_center()
+            .justify_center()
+            .gap(px(16.))
+            .child(
+                Icon::new(AppIcon::Terminal)
+                    .size(px(48.))
+                    .text_color(colors.muted_foreground),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(colors.muted_foreground)
+                    .child("Click Terminal tab to connect to container"),
+            )
+    }
+
+    fn render_inspect_tab(&self, cx: &App) -> gpui::Div {
+        let colors = &cx.theme().colors;
+        let state = self.container_state.as_ref();
+        let is_loading = state.map(|s| s.inspect_loading).unwrap_or(false);
+        let inspect_content = state
+            .map(|s| s.inspect.clone())
+            .unwrap_or_else(|| "{}".to_string());
+
+        v_flex()
+            .w_full()
+            .h_full()
+            .p(px(16.))
+            .gap(px(12.))
             .child(
                 div()
                     .text_sm()
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(colors.foreground)
-                    .child("Terminal"),
+                    .child("Container Inspect"),
             )
             .child(
                 div()
@@ -383,64 +377,54 @@ impl MachineDetail {
                     .bg(gpui::rgb(0x1a1b26))
                     .rounded(px(8.))
                     .p(px(12.))
-                    .overflow_hidden()
+                    .overflow_y_scrollbar()
                     .font_family("monospace")
-                    .text_sm()
-                    .text_color(gpui::rgb(0xa9b1d6))
-                    .child(
-                        v_flex()
-                            .gap(px(4.))
-                            .children(history.iter().map(|cmd| {
-                                div()
-                                    .text_color(gpui::rgb(0x7aa2f7))
-                                    .child(format!("$ {}", cmd))
-                            }))
-                            .when(!terminal_output.is_empty(), |el| {
-                                el.child(
-                                    div()
-                                        .text_color(gpui::rgb(0xa9b1d6))
-                                        .child(terminal_output.clone()),
-                                )
-                            })
-                            .child(
-                                h_flex()
-                                    .items_center()
-                                    .child(div().text_color(gpui::rgb(0x7aa2f7)).child("$ "))
-                                    .child(
-                                        div()
-                                            .w(px(8.))
-                                            .h(px(16.))
-                                            .bg(gpui::rgb(0xa9b1d6))
-                                            .child(""),
-                                    ),
-                            ),
-                    ),
-            )
-            .child(
-                div()
                     .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child("Click on the Terminal tab to connect"),
+                    .text_color(gpui::rgb(0xa9b1d6))
+                    .when(is_loading, |el| el.child("Loading..."))
+                    .when(!is_loading, |el| el.child(inspect_content)),
             )
     }
 
-    fn render_files_tab(&self, cx: &App) -> gpui::Div {
+    fn render_files_tab(&self, is_running: bool, cx: &App) -> gpui::Div {
         let colors = &cx.theme().colors;
 
+        // Container must be running to browse files
+        if !is_running {
+            return v_flex()
+                .flex_1()
+                .w_full()
+                .p(px(16.))
+                .items_center()
+                .justify_center()
+                .gap(px(16.))
+                .child(
+                    Icon::new(AppIcon::Files)
+                        .size(px(48.))
+                        .text_color(colors.muted_foreground),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(colors.muted_foreground)
+                        .child("Container must be running to browse files"),
+                );
+        }
+
         let current_path = self
-            .machine_state
+            .container_state
             .as_ref()
             .map(|s| s.current_path.clone())
             .unwrap_or_else(|| "/".to_string());
 
         let files = self
-            .machine_state
+            .container_state
             .as_ref()
             .map(|s| s.files.clone())
             .unwrap_or_default();
 
         let is_loading = self
-            .machine_state
+            .container_state
             .as_ref()
             .map(|s| s.files_loading)
             .unwrap_or(false);
@@ -540,7 +524,7 @@ impl MachineDetail {
             )
     }
 
-    fn render_file_entry(&self, file: &VmFileEntry, cx: &App) -> gpui::Div {
+    fn render_file_entry(&self, file: &ContainerFileEntry, cx: &App) -> gpui::Div {
         let colors = &cx.theme().colors;
         let icon = if file.is_dir {
             IconName::Folder
@@ -588,21 +572,19 @@ impl MachineDetail {
                     .child(file.permissions.clone()),
             )
     }
-}
 
-impl MachineDetail {
-    pub fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    pub fn render(&self, _window: &mut Window, cx: &App) -> gpui::AnyElement {
         let colors = &cx.theme().colors;
 
-        let Some(machine) = &self.machine else {
+        let Some(container) = &self.container else {
             return self.render_empty(cx).into_any_element();
         };
 
-        let is_running = machine.status.is_running();
-        let machine_name = machine.name.clone();
-        let machine_name_for_stop = machine_name.clone();
-        let machine_name_for_restart = machine_name.clone();
-        let machine_name_for_delete = machine_name.clone();
+        let is_running = container.state.is_running();
+        let container_id = container.id.clone();
+        let container_id_for_stop = container_id.clone();
+        let container_id_for_restart = container_id.clone();
+        let container_id_for_delete = container_id.clone();
 
         let on_start = self.on_start.clone();
         let on_stop = self.on_stop.clone();
@@ -610,7 +592,7 @@ impl MachineDetail {
         let on_delete = self.on_delete.clone();
         let on_tab_change = self.on_tab_change.clone();
 
-        let tabs = vec!["Info", "Logs", "Terminal", "Files"];
+        let tabs = vec!["Info", "Logs", "Terminal", "Files", "Inspect"];
 
         // Toolbar with tabs and actions
         let toolbar = h_flex()
@@ -622,7 +604,7 @@ impl MachineDetail {
             .border_b_1()
             .border_color(colors.border)
             .child(
-                TabBar::new("machine-tabs")
+                TabBar::new("container-tabs")
                     .flex_1()
                     .children(tabs.iter().enumerate().map(|(i, label)| {
                         let on_tab_change = on_tab_change.clone();
@@ -641,7 +623,7 @@ impl MachineDetail {
                     .gap(px(8.))
                     .when(!is_running, |el| {
                         let on_start = on_start.clone();
-                        let name = machine_name.clone();
+                        let id = container_id.clone();
                         el.child(
                             Button::new("start")
                                 .icon(Icon::new(AppIcon::Play))
@@ -649,14 +631,14 @@ impl MachineDetail {
                                 .small()
                                 .on_click(move |_ev, window, cx| {
                                     if let Some(ref cb) = on_start {
-                                        cb(&name, window, cx);
+                                        cb(&id, window, cx);
                                     }
                                 }),
                         )
                     })
                     .when(is_running, |el| {
                         let on_stop = on_stop.clone();
-                        let name = machine_name_for_stop.clone();
+                        let id = container_id_for_stop.clone();
                         el.child(
                             Button::new("stop")
                                 .icon(Icon::new(AppIcon::Stop))
@@ -664,34 +646,34 @@ impl MachineDetail {
                                 .small()
                                 .on_click(move |_ev, window, cx| {
                                     if let Some(ref cb) = on_stop {
-                                        cb(&name, window, cx);
+                                        cb(&id, window, cx);
                                     }
                                 }),
                         )
                     })
                     .child({
                         let on_restart = on_restart.clone();
-                        let name = machine_name_for_restart.clone();
+                        let id = container_id_for_restart.clone();
                         Button::new("restart")
                             .icon(Icon::new(AppIcon::Restart))
                             .ghost()
                             .small()
                             .on_click(move |_ev, window, cx| {
                                 if let Some(ref cb) = on_restart {
-                                    cb(&name, window, cx);
+                                    cb(&id, window, cx);
                                 }
                             })
                     })
                     .child({
                         let on_delete = on_delete.clone();
-                        let name = machine_name_for_delete.clone();
+                        let id = container_id_for_delete.clone();
                         Button::new("delete")
                             .icon(Icon::new(AppIcon::Trash))
                             .ghost()
                             .small()
                             .on_click(move |_ev, window, cx| {
                                 if let Some(ref cb) = on_delete {
-                                    cb(&name, window, cx);
+                                    cb(&id, window, cx);
                                 }
                             })
                     }),
@@ -699,11 +681,12 @@ impl MachineDetail {
 
         // Content based on active tab
         let content = match self.active_tab {
-            0 => self.render_info_tab(machine, cx),
+            0 => self.render_info_tab(container, cx),
             1 => self.render_logs_tab(cx),
             2 => self.render_terminal_tab(cx),
-            3 => self.render_files_tab(cx),
-            _ => self.render_info_tab(machine, cx),
+            3 => self.render_files_tab(is_running, cx),
+            4 => self.render_inspect_tab(cx),
+            _ => self.render_info_tab(container, cx),
         };
 
         // Terminal tab needs full height without scroll
@@ -727,7 +710,7 @@ impl MachineDetail {
         } else {
             result = result.child(
                 div()
-                    .id("machine-detail-scroll")
+                    .id("container-detail-scroll")
                     .flex_1()
                     .overflow_y_scrollbar()
                     .child(content)

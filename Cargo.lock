@@ -1438,6 +1438,7 @@ dependencies = [
  "gpui-component-assets",
  "parking_lot",
  "portable-pty",
+ "rust-embed",
  "serde",
  "serde_json",
  "tokio",

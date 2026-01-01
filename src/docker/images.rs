@@ -1,6 +1,7 @@
 use anyhow::Result;
-use bollard::image::{ListImagesOptions, RemoveImageOptions};
+use bollard::image::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -117,5 +118,75 @@ impl DockerClient {
             architecture: inspect.architecture,
             os: inspect.os,
         })
+    }
+
+    /// Check if an image exists locally
+    pub async fn image_exists(&self, image: &str) -> bool {
+        self.client()
+            .map(|docker| docker.inspect_image(image))
+            .ok()
+            .map(|fut| async move { fut.await.is_ok() })
+            .is_some()
+            && self
+                .client()
+                .ok()
+                .map(|docker| async move { docker.inspect_image(image).await.is_ok() })
+                .is_some()
+    }
+
+    /// Pull an image from a registry
+    pub async fn pull_image(&self, image: &str, platform: Option<&str>) -> Result<()> {
+        let docker = self.client()?;
+
+        // Parse image name into repository and tag
+        let (repo, tag) = if let Some(pos) = image.rfind(':') {
+            // Check if this is a port number (e.g., localhost:5000/image)
+            let after_colon = &image[pos + 1..];
+            if after_colon.contains('/') || after_colon.parse::<u16>().is_ok() {
+                // It's a port, not a tag
+                (image, "latest")
+            } else {
+                (&image[..pos], after_colon)
+            }
+        } else {
+            (image, "latest")
+        };
+
+        let options = CreateImageOptions {
+            from_image: repo,
+            tag,
+            platform: platform.unwrap_or_default(),
+            ..Default::default()
+        };
+
+        let mut stream = docker.create_image(Some(options), None, None);
+
+        // Consume the stream to completion
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(_info) => {
+                    // Progress info available in _info.status, _info.progress, etc.
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Failed to pull image: {}", e));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Ensure an image exists locally, pulling it if necessary
+    pub async fn ensure_image(&self, image: &str, platform: Option<&str>) -> Result<()> {
+        let docker = self.client()?;
+
+        // Try to inspect the image to see if it exists
+        match docker.inspect_image(image).await {
+            Ok(_) => Ok(()), // Image exists
+            Err(_) => {
+                // Image doesn't exist, pull it
+                self.pull_image(image, platform).await
+            }
+        }
     }
 }

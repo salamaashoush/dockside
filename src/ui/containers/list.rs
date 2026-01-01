@@ -11,33 +11,33 @@ use gpui_component::{
 };
 
 use crate::assets::AppIcon;
-use crate::colima::ColimaVm;
+use crate::docker::ContainerInfo;
 use crate::services;
 use crate::state::{docker_state, DockerState, StateChanged};
 
-/// Machine list events emitted to parent
-pub enum MachineListEvent {
-    Selected(ColimaVm),
-    NewMachine,
+/// Container list events emitted to parent
+pub enum ContainerListEvent {
+    Selected(ContainerInfo),
+    NewContainer,
 }
 
-/// Delegate for the machine list
-pub struct MachineListDelegate {
+/// Delegate for the container list
+pub struct ContainerListDelegate {
     docker_state: Entity<DockerState>,
     selected_index: Option<IndexPath>,
 }
 
-impl MachineListDelegate {
-    fn machines<'a>(&self, cx: &'a App) -> &'a Vec<ColimaVm> {
-        &self.docker_state.read(cx).colima_vms
+impl ContainerListDelegate {
+    fn containers<'a>(&self, cx: &'a App) -> &'a Vec<ContainerInfo> {
+        &self.docker_state.read(cx).containers
     }
 }
 
-impl ListDelegate for MachineListDelegate {
+impl ListDelegate for ContainerListDelegate {
     type Item = ListItem;
 
     fn items_count(&self, _section: usize, cx: &App) -> usize {
-        self.machines(cx).len()
+        self.containers(cx).len()
     }
 
     fn render_item(
@@ -46,21 +46,21 @@ impl ListDelegate for MachineListDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let machines = self.machines(cx);
-        let machine = machines.get(ix.row)?;
+        let containers = self.containers(cx);
+        let container = containers.get(ix.row)?;
         let colors = &cx.theme().colors;
 
         let is_selected = self.selected_index == Some(ix);
-        let is_running = machine.status.is_running();
-        let machine_name = machine.name.clone();
+        let is_running = container.state.is_running();
+        let container_id = container.id.clone();
 
         let icon_bg = if is_running {
-            colors.primary
+            gpui::rgba(0x9d7cd8ff).into() // Purple for running
         } else {
             colors.muted_foreground
         };
 
-        let subtitle = format!("latest, {}", machine.arch);
+        let subtitle = container.image.clone();
         let status_color = if is_running {
             colors.success
         } else {
@@ -80,7 +80,7 @@ impl ListDelegate for MachineListDelegate {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(Icon::new(AppIcon::Machine).text_color(gpui::rgb(0xffffff))),
+                    .child(Icon::new(AppIcon::Container).text_color(gpui::rgb(0xffffff))),
             )
             .child(
                 v_flex()
@@ -93,7 +93,7 @@ impl ListDelegate for MachineListDelegate {
                             .w_full()
                             .overflow_hidden()
                             .text_ellipsis()
-                            .child(Label::new(machine.name.clone())),
+                            .child(Label::new(container.name.clone())),
                     )
                     .child(
                         div()
@@ -115,7 +115,7 @@ impl ListDelegate for MachineListDelegate {
             );
 
         // Three-dot menu button
-        let name = machine_name.clone();
+        let id = container_id.clone();
         let running = is_running;
         let row = ix.row;
 
@@ -125,7 +125,7 @@ impl ListDelegate for MachineListDelegate {
             .selected(is_selected)
             .child(item_content)
             .suffix(move |_, _| {
-                let n = name.clone();
+                let id = id.clone();
                 div()
                     .size(px(28.))
                     .flex_shrink_0()
@@ -139,28 +139,17 @@ impl ListDelegate for MachineListDelegate {
                             .xsmall()
                             .dropdown_menu(move |menu, _window, _cx| {
                                 let mut menu = menu;
-                                let n = n.clone();
+                                let id = id.clone();
 
                                 if running {
                                     menu = menu
                                         .item(
-                                            PopupMenuItem::new("Use Docker Context")
-                                                .icon(IconName::Check)
-                                                .on_click({
-                                                    let n = n.clone();
-                                                    move |_, _, cx| {
-                                                        services::set_docker_context(n.clone(), cx);
-                                                    }
-                                                }),
-                                        )
-                                        .separator()
-                                        .item(
                                             PopupMenuItem::new("Stop")
                                                 .icon(Icon::new(AppIcon::Stop))
                                                 .on_click({
-                                                    let n = n.clone();
+                                                    let id = id.clone();
                                                     move |_, _, cx| {
-                                                        services::stop_machine(n.clone(), cx);
+                                                        services::stop_container(id.clone(), cx);
                                                     }
                                                 }),
                                         )
@@ -168,23 +157,23 @@ impl ListDelegate for MachineListDelegate {
                                             PopupMenuItem::new("Restart")
                                                 .icon(Icon::new(AppIcon::Restart))
                                                 .on_click({
-                                                    let n = n.clone();
+                                                    let id = id.clone();
                                                     move |_, _, cx| {
-                                                        services::restart_machine(n.clone(), cx);
+                                                        services::restart_container(id.clone(), cx);
                                                     }
                                                 }),
                                         )
                                         .separator()
                                         .item(PopupMenuItem::new("Terminal").icon(Icon::new(AppIcon::Terminal)))
-                                        .item(PopupMenuItem::new("Files").icon(Icon::new(AppIcon::Files)));
+                                        .item(PopupMenuItem::new("Logs").icon(Icon::new(AppIcon::Logs)));
                                 } else {
                                     menu = menu.item(
                                         PopupMenuItem::new("Start")
                                             .icon(Icon::new(AppIcon::Play))
                                             .on_click({
-                                                let n = n.clone();
+                                                let id = id.clone();
                                                 move |_, _, cx| {
-                                                    services::start_machine(n.clone(), cx);
+                                                    services::start_container(id.clone(), cx);
                                                 }
                                             }),
                                     );
@@ -194,9 +183,9 @@ impl ListDelegate for MachineListDelegate {
                                     PopupMenuItem::new("Delete")
                                         .icon(Icon::new(AppIcon::Trash))
                                         .on_click({
-                                            let n = n.clone();
+                                            let id = id.clone();
                                             move |_, _, cx| {
-                                                services::delete_machine(n.clone(), cx);
+                                                services::delete_container(id.clone(), cx);
                                             }
                                         }),
                                 );
@@ -224,17 +213,17 @@ impl ListDelegate for MachineListDelegate {
     }
 }
 
-/// Self-contained machine list component with working context menus
-pub struct MachineList {
+/// Self-contained container list component
+pub struct ContainerList {
     docker_state: Entity<DockerState>,
-    list_state: Entity<ListState<MachineListDelegate>>,
+    list_state: Entity<ListState<ContainerListDelegate>>,
 }
 
-impl MachineList {
+impl ContainerList {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let docker_state = docker_state(cx);
 
-        let delegate = MachineListDelegate {
+        let delegate = ContainerListDelegate {
             docker_state: docker_state.clone(),
             selected_index: None,
         };
@@ -246,8 +235,8 @@ impl MachineList {
             match event {
                 ListEvent::Select(ix) | ListEvent::Confirm(ix) => {
                     let delegate = state.read(cx).delegate();
-                    if let Some(machine) = delegate.machines(cx).get(ix.row) {
-                        cx.emit(MachineListEvent::Selected(machine.clone()));
+                    if let Some(container) = delegate.containers(cx).get(ix.row) {
+                        cx.emit(ContainerListEvent::Selected(container.clone()));
                     }
                 }
                 _ => {}
@@ -257,8 +246,7 @@ impl MachineList {
 
         // Subscribe to docker state changes to refresh list
         cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
-            if matches!(event, StateChanged::MachinesUpdated) {
-                // Notify list state to re-render
+            if matches!(event, StateChanged::ContainersUpdated) {
                 this.list_state.update(cx, |_state, cx| {
                     cx.notify();
                 });
@@ -291,38 +279,37 @@ impl MachineList {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(Icon::new(AppIcon::Machine).text_color(colors.muted_foreground)),
+                    .child(Icon::new(AppIcon::Container).text_color(colors.muted_foreground)),
             )
             .child(
                 div()
                     .text_xl()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(colors.secondary_foreground)
-                    .child("No Machines"),
+                    .child("No Containers"),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(colors.muted_foreground)
-                    .child("Start Colima to create a Linux VM"),
-            )
-            .child(
-                Button::new("new-machine")
-                    .label("New Machine")
-                    .primary()
-                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                        cx.emit(MachineListEvent::NewMachine);
-                    })),
+                    .child("Run a container to get started"),
             )
     }
 }
 
-impl gpui::EventEmitter<MachineListEvent> for MachineList {}
+impl gpui::EventEmitter<ContainerListEvent> for ContainerList {}
 
-impl Render for MachineList {
+impl Render for ContainerList {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.docker_state.read(cx);
-        let machines_empty = state.colima_vms.is_empty();
+        let containers_empty = state.containers.is_empty();
+        let running_count = state.containers.iter().filter(|c| c.state.is_running()).count();
+
+        let subtitle = if running_count > 0 {
+            format!("{} running", running_count)
+        } else {
+            "None running".to_string()
+        };
 
         // Toolbar
         let toolbar = h_flex()
@@ -334,7 +321,16 @@ impl Render for MachineList {
             .items_center()
             .justify_between()
             .flex_shrink_0()
-            .child(Label::new("Machines"))
+            .child(
+                v_flex()
+                    .child(Label::new("Containers"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors.muted_foreground)
+                            .child(subtitle),
+                    ),
+            )
             .child(
                 h_flex()
                     .items_center()
@@ -351,15 +347,14 @@ impl Render for MachineList {
                             .ghost()
                             .compact()
                             .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                cx.emit(MachineListEvent::NewMachine);
+                                cx.emit(ContainerListEvent::NewContainer);
                             })),
                     ),
             );
 
-        let content: gpui::Div = if machines_empty {
+        let content: gpui::Div = if containers_empty {
             self.render_empty(cx)
         } else {
-            // List needs explicit height for virtualization
             div()
                 .size_full()
                 .p(px(8.))
@@ -374,7 +369,7 @@ impl Render for MachineList {
             .child(toolbar)
             .child(
                 div()
-                    .id("machine-list-scroll")
+                    .id("container-list-scroll")
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()

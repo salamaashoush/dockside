@@ -8,16 +8,14 @@ use gpui_component::{
 
 use crate::services::task_manager;
 use crate::state::{docker_state, CurrentView, DockerState, StateChanged};
+use crate::ui::containers::ContainersView;
 use crate::ui::machines::MachinesView;
 
 /// Main application - only handles layout and view switching
 pub struct DockerApp {
     docker_state: Entity<DockerState>,
     machines_view: Entity<MachinesView>,
-    // TODO: Add other views as they're created
-    // containers_view: Entity<ContainersView>,
-    // images_view: Entity<ImagesView>,
-    // etc.
+    containers_view: Entity<ContainersView>,
 }
 
 impl DockerApp {
@@ -36,10 +34,12 @@ impl DockerApp {
 
         // Create self-contained views
         let machines_view = cx.new(|cx| MachinesView::new(window, cx));
+        let containers_view = cx.new(|cx| ContainersView::new(window, cx));
 
         Self {
             docker_state,
             machines_view,
+            containers_view,
         }
     }
 
@@ -127,7 +127,7 @@ impl DockerApp {
 
         match state.current_view {
             CurrentView::Machines => div().size_full().child(self.machines_view.clone()),
-            // TODO: Add other views as they're created
+            CurrentView::Containers => div().size_full().child(self.containers_view.clone()),
             _ => {
                 // Placeholder for views not yet implemented
                 let colors = &cx.theme().colors;
