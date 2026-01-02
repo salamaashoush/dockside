@@ -1,11 +1,12 @@
 use anyhow::Result;
-use bollard::container::{
-    Config, CreateContainerOptions, KillContainerOptions, ListContainersOptions, LogsOptions,
-    RemoveContainerOptions, RestartContainerOptions, StartContainerOptions, StopContainerOptions,
-};
 use bollard::exec::{CreateExecOptions, StartExecResults};
+use bollard::models::{ContainerCreateBody, HostConfig};
+use bollard::query_parameters::{
+    CreateContainerOptions, KillContainerOptions, ListContainersOptions, LogsOptions,
+    RemoveContainerOptions, RenameContainerOptions, RestartContainerOptions, StartContainerOptions,
+    StopContainerOptions,
+};
 use futures::stream::StreamExt;
-use bollard::models::HostConfig;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -133,7 +134,7 @@ impl DockerClient {
     pub async fn list_containers(&self, all: bool) -> Result<Vec<ContainerInfo>> {
         let docker = self.client()?;
 
-        let options = ListContainersOptions::<String> {
+        let options = ListContainersOptions {
             all,
             ..Default::default()
         };
@@ -172,7 +173,10 @@ impl DockerClient {
                 image: container.image.unwrap_or_default(),
                 image_id: container.image_id.unwrap_or_default(),
                 state: ContainerState::from_str(
-                    &container.state.unwrap_or_default(),
+                    &container
+                        .state
+                        .map(|s| format!("{:?}", s))
+                        .unwrap_or_default(),
                 ),
                 status: container.status.unwrap_or_default(),
                 created,
@@ -191,7 +195,7 @@ impl DockerClient {
     pub async fn start_container(&self, id: &str) -> Result<()> {
         let docker = self.client()?;
         docker
-            .start_container(id, None::<StartContainerOptions<String>>)
+            .start_container(id, None::<StartContainerOptions>)
             .await?;
         Ok(())
     }
@@ -199,7 +203,13 @@ impl DockerClient {
     pub async fn stop_container(&self, id: &str) -> Result<()> {
         let docker = self.client()?;
         docker
-            .stop_container(id, Some(StopContainerOptions { t: 10 }))
+            .stop_container(
+                id,
+                Some(StopContainerOptions {
+                    t: Some(10),
+                    signal: None,
+                }),
+            )
             .await?;
         Ok(())
     }
@@ -207,7 +217,13 @@ impl DockerClient {
     pub async fn restart_container(&self, id: &str) -> Result<()> {
         let docker = self.client()?;
         docker
-            .restart_container(id, Some(RestartContainerOptions { t: 10 }))
+            .restart_container(
+                id,
+                Some(RestartContainerOptions {
+                    t: Some(10),
+                    signal: None,
+                }),
+            )
             .await?;
         Ok(())
     }
@@ -286,7 +302,7 @@ impl DockerClient {
                 bollard::container::Config::<String>::default(),
             )
             .await?;
-        Ok(result.id.unwrap_or_default())
+        Ok(result.id)
     }
 
     pub async fn get_container_top(&self, id: &str) -> Result<Vec<Vec<String>>> {
@@ -331,6 +347,7 @@ impl DockerClient {
     }
 
     pub async fn copy_to_container(&self, id: &str, path: &str, data: Vec<u8>) -> Result<()> {
+        use bytes::Bytes;
         let docker = self.client()?;
         docker
             .upload_to_container(
@@ -339,7 +356,7 @@ impl DockerClient {
                     path,
                     no_overwrite_dir_non_dir: "false",
                 }),
-                data.into(),
+                bollard::body_full(Bytes::from(data)),
             )
             .await?;
         Ok(())
@@ -443,7 +460,7 @@ impl DockerClient {
         };
 
         // Build container config
-        let config: Config<String> = Config {
+        let config = ContainerCreateBody {
             image: Some(image.to_string()),
             cmd: command,
             entrypoint,
@@ -456,8 +473,8 @@ impl DockerClient {
 
         // Create options
         let options = name.map(|n| CreateContainerOptions {
-            name: n.to_string(),
-            platform: platform.map(String::from),
+            name: Some(n.to_string()),
+            platform: platform.map(String::from).unwrap_or_default(),
         });
 
         let response = docker.create_container(options, config).await?;
@@ -468,7 +485,7 @@ impl DockerClient {
     pub async fn container_logs(&self, id: &str, tail: Option<usize>) -> Result<String> {
         let docker = self.client()?;
 
-        let options = LogsOptions::<String> {
+        let options = LogsOptions {
             stdout: true,
             stderr: true,
             tail: tail.map(|t| t.to_string()).unwrap_or_else(|| "100".to_string()),
@@ -494,8 +511,11 @@ impl DockerClient {
 
     /// Inspect a container and return JSON
     pub async fn inspect_container(&self, id: &str) -> Result<String> {
+        use bollard::query_parameters::InspectContainerOptions;
         let docker = self.client()?;
-        let info = docker.inspect_container(id, None).await?;
+        let info = docker
+            .inspect_container(id, None::<InspectContainerOptions>)
+            .await?;
         let json = serde_json::to_string_pretty(&info)?;
         Ok(json)
     }

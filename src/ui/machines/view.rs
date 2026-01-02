@@ -142,18 +142,14 @@ impl MachinesView {
         let machine_clone = machine.clone();
         let dialog_entity = cx.new(|cx| EditMachineDialog::new(&machine_clone, cx));
 
-        window.open_dialog(cx, move |dialog, window, cx| {
+        window.open_dialog(cx, move |dialog, _window, cx| {
             let dialog_clone = dialog_entity.clone();
             let machine = machine_clone.clone();
 
             dialog
                 .title(format!("Edit Machine: {}", machine.name))
                 .min_w(px(500.))
-                .child(
-                    dialog_entity.update(cx, |dialog, cx| {
-                        dialog.render_with_machine(&machine, window, cx)
-                    }),
-                )
+                .child(dialog_entity.clone())
                 .footer(move |_dialog_state, _, _window, _cx| {
                     let dialog_for_save = dialog_clone.clone();
 

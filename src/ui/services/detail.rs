@@ -1,15 +1,16 @@
 use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Window};
 use gpui_component::{
+    button::{Button, ButtonVariants},
     h_flex,
     label::Label,
     scroll::ScrollableElement,
     tab::{Tab, TabBar},
     theme::ActiveTheme,
     v_flex,
-    Icon, IconName, Selectable,
+    Icon, IconName, Selectable, Sizable,
 };
 
-use crate::kubernetes::ServiceInfo;
+use crate::kubernetes::{PodInfo, ServiceInfo};
 use crate::services;
 use crate::state::{docker_state, DockerState, StateChanged};
 
@@ -354,6 +355,240 @@ impl ServiceDetail {
             .child(v_flex().w_full().child(header).children(rows))
     }
 
+    fn render_endpoints_tab(&self, service: &ServiceInfo, cx: &mut Context<Self>) -> gpui::Div {
+        let colors = &cx.theme().colors;
+
+        if service.selector.is_empty() {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(Icon::new(IconName::Info).text_color(colors.muted_foreground))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(colors.muted_foreground)
+                                .child("No selector defined"),
+                        ),
+                );
+        }
+
+        // Get pods that match the service selector
+        let state = self.docker_state.read(cx);
+        let matching_pods: Vec<&PodInfo> = state
+            .pods
+            .iter()
+            .filter(|pod| {
+                // Pod must be in same namespace
+                if pod.namespace != service.namespace {
+                    return false;
+                }
+                // All selector labels must match pod labels
+                service.selector.iter().all(|(key, value)| {
+                    pod.labels.get(key).map(|v| v == value).unwrap_or(false)
+                })
+            })
+            .collect();
+
+        if matching_pods.is_empty() {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(Icon::new(IconName::Info).text_color(colors.muted_foreground))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(colors.muted_foreground)
+                                .child("No matching pods found"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(colors.muted_foreground)
+                                .child(format!(
+                                    "Selector: {}",
+                                    service
+                                        .selector
+                                        .iter()
+                                        .map(|(k, v)| format!("{}={}", k, v))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )),
+                        ),
+                );
+        }
+
+        let header = h_flex()
+            .w_full()
+            .py(px(8.))
+            .px(px(12.))
+            .gap(px(8.))
+            .bg(colors.sidebar)
+            .rounded_t(px(8.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("Pod Name"),
+            )
+            .child(
+                div()
+                    .w(px(80.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("Status"),
+            )
+            .child(
+                div()
+                    .w(px(110.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("IP"),
+            )
+            .child(
+                div()
+                    .w(px(50.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("Ready"),
+            )
+            .child(
+                div()
+                    .w(px(40.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .text_right(),
+            );
+
+        let rows = matching_pods
+            .iter()
+            .enumerate()
+            .map(|(i, pod)| {
+                let status_color = if pod.phase.is_running() {
+                    colors.success
+                } else if pod.phase.is_pending() {
+                    colors.warning
+                } else {
+                    colors.danger
+                };
+
+                let pod_name = pod.name.clone();
+                let pod_namespace = pod.namespace.clone();
+
+                h_flex()
+                    .w_full()
+                    .py(px(8.))
+                    .px(px(12.))
+                    .gap(px(8.))
+                    .rounded(px(6.))
+                    .when(i % 2 == 1, |el| el.bg(colors.sidebar.opacity(0.3)))
+                    .hover(|el| el.bg(colors.sidebar))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .text_color(colors.foreground)
+                            .font_family("monospace")
+                            .text_ellipsis()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .child(pod.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .w(px(80.))
+                            .flex_shrink_0()
+                            .child(
+                                div()
+                                    .px(px(6.))
+                                    .py(px(2.))
+                                    .rounded(px(4.))
+                                    .bg(status_color.opacity(0.15))
+                                    .text_xs()
+                                    .text_color(status_color)
+                                    .child(pod.phase.to_string()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(110.))
+                            .flex_shrink_0()
+                            .text_sm()
+                            .font_family("monospace")
+                            .text_color(colors.muted_foreground)
+                            .child(pod.ip.clone().unwrap_or_else(|| "-".to_string())),
+                    )
+                    .child(
+                        div()
+                            .w(px(50.))
+                            .flex_shrink_0()
+                            .text_sm()
+                            .text_color(colors.foreground)
+                            .child(pod.ready.clone()),
+                    )
+                    .child(
+                        div()
+                            .w(px(40.))
+                            .flex_shrink_0()
+                            .flex()
+                            .justify_end()
+                            .child(
+                                Button::new(("view-pod", i))
+                                    .icon(IconName::Eye)
+                                    .ghost()
+                                    .xsmall()
+                                    .on_click(move |_ev, _window, cx| {
+                                        services::open_pod_info(
+                                            pod_name.clone(),
+                                            pod_namespace.clone(),
+                                            cx,
+                                        );
+                                    }),
+                            ),
+                    )
+            })
+            .collect::<Vec<_>>();
+
+        div()
+            .size_full()
+            .p(px(16.))
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.muted_foreground)
+                            .child(format!("{} pod(s) matching selector", matching_pods.len())),
+                    )
+                    .child(v_flex().w_full().child(header).children(rows)),
+            )
+    }
+
     fn render_yaml_tab(&self, _service: &ServiceInfo, cx: &mut Context<Self>) -> gpui::Div {
         let colors = &cx.theme().colors;
 
@@ -465,10 +700,19 @@ impl Render for ServiceDetail {
             )
             .child(
                 Tab::new()
-                    .label("YAML")
+                    .label("Endpoints")
                     .selected(active_tab == 2)
                     .on_click(cx.listener(|this, _ev, _window, cx| {
                         this.active_tab = 2;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Tab::new()
+                    .label("YAML")
+                    .selected(active_tab == 3)
+                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                        this.active_tab = 3;
                         if let Some(ref svc) = this.service {
                             services::get_service_yaml(
                                 svc.name.clone(),
@@ -483,7 +727,8 @@ impl Render for ServiceDetail {
         let content = match active_tab {
             0 => self.render_info_tab(&service, cx),
             1 => self.render_ports_tab(&service, cx),
-            2 => self.render_yaml_tab(&service, cx),
+            2 => self.render_endpoints_tab(&service, cx),
+            3 => self.render_yaml_tab(&service, cx),
             _ => div(),
         };
 

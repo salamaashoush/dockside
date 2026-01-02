@@ -326,6 +326,70 @@ pub fn restart_machine(name: String, cx: &mut App) {
     .detach();
 }
 
+/// Start Colima with optional profile name (None = default profile)
+pub fn start_colima(profile: Option<String>, cx: &mut App) {
+    let name = profile.clone().unwrap_or_else(|| "default".to_string());
+    start_machine(name, cx);
+}
+
+/// Stop Colima with optional profile name (None = default profile)
+pub fn stop_colima(profile: Option<String>, cx: &mut App) {
+    let name = profile.unwrap_or_else(|| "default".to_string());
+    stop_machine(name, cx);
+}
+
+/// Restart Colima with optional profile name (None = default profile)
+pub fn restart_colima(profile: Option<String>, cx: &mut App) {
+    let name = profile.unwrap_or_else(|| "default".to_string());
+    let task_id = start_task(cx, "restart_colima", format!("Restarting '{}'...", name));
+    let name_clone = name.clone();
+
+    let state = docker_state(cx);
+    let disp = dispatcher(cx);
+
+    cx.spawn(async move |cx| {
+        let result = cx
+            .background_executor()
+            .spawn(async move {
+                let colima_client = ColimaClient::new();
+                let name_opt = if name == "default" { None } else { Some(name.as_str()) };
+                match colima_client.restart(name_opt) {
+                    Ok(_) => Ok(colima_client.list().unwrap_or_default()),
+                    Err(e) => Err(e.to_string()),
+                }
+            })
+            .await;
+
+        cx.update(|cx| {
+            match result {
+                Ok(vms) => {
+                    state.update(cx, |state, cx| {
+                        state.set_machines(vms);
+                        cx.emit(StateChanged::MachinesUpdated);
+                    });
+                    complete_task(cx, task_id);
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskCompleted {
+                            name: "restart_colima".to_string(),
+                            message: format!("Machine '{}' restarted", name_clone),
+                        });
+                    });
+                }
+                Err(e) => {
+                    fail_task(cx, task_id, e.clone());
+                    disp.update(cx, |_, cx| {
+                        cx.emit(DispatcherEvent::TaskFailed {
+                            name: "restart_colima".to_string(),
+                            error: format!("Failed to restart '{}': {}", name_clone, e),
+                        });
+                    });
+                }
+            }
+        })
+    })
+    .detach();
+}
+
 pub fn delete_machine(name: String, cx: &mut App) {
     let task_id = start_task(cx, "delete_machine", format!("Deleting '{}'...", name));
     let name_clone = name.clone();
@@ -959,6 +1023,19 @@ pub fn open_container_inspect(id: String, cx: &mut App) {
 }
 
 // Pod tab navigation functions
+pub fn open_pod_info(name: String, namespace: String, cx: &mut App) {
+    let state = docker_state(cx);
+    state.update(cx, |state, cx| {
+        state.set_view(CurrentView::Pods);
+        cx.emit(StateChanged::ViewChanged);
+        cx.emit(StateChanged::PodTabRequest {
+            pod_name: name,
+            namespace,
+            tab: 0, // Info is tab 0
+        });
+    });
+}
+
 pub fn open_pod_terminal(name: String, namespace: String, cx: &mut App) {
     let state = docker_state(cx);
     state.update(cx, |_state, cx| {
@@ -3101,4 +3178,16 @@ pub fn create_deployment(options: crate::kubernetes::CreateDeploymentOptions, cx
         })
     })
     .detach();
+}
+
+/// Request to open scale dialog for a deployment
+pub fn request_scale_dialog(name: String, namespace: String, current_replicas: i32, cx: &mut App) {
+    let state = docker_state(cx);
+    state.update(cx, |_state, cx| {
+        cx.emit(StateChanged::DeploymentScaleRequest {
+            deployment_name: name,
+            namespace,
+            current_replicas,
+        });
+    });
 }

@@ -102,6 +102,12 @@ pub enum StateChanged {
         namespace: String,
         tab: usize,
     },
+    /// Request to open scale dialog for a deployment
+    DeploymentScaleRequest {
+        deployment_name: String,
+        namespace: String,
+        current_replicas: i32,
+    },
 }
 
 /// Global docker state - all views subscribe to this

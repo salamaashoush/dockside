@@ -1,3 +1,7 @@
+mod view;
+
+pub use view::SettingsView;
+
 use gpui::{
     div, prelude::*, px, App, AppContext, Context, Entity, FocusHandle, Focusable, Render,
     SharedString, Styled, Window,

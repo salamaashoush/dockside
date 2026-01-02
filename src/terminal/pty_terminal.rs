@@ -625,9 +625,7 @@ impl PtyTerminal {
                         break;
                     }
                     Ok(n) => {
-                        for byte in &buf[..n] {
-                            parser.advance(&mut performer, *byte);
-                        }
+                        parser.advance(&mut performer, &buf[..n]);
                         // Auto-scroll to bottom on new output
                         buffer_clone.lock().scroll_to_bottom();
                     }

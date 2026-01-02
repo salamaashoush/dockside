@@ -20,6 +20,7 @@ use crate::state::{docker_state, DockerState, StateChanged};
 pub enum DeploymentListEvent {
     Selected(DeploymentInfo),
     NewDeployment,
+    ScaleDeployment(DeploymentInfo),
 }
 
 /// Delegate for the deployment list
@@ -100,6 +101,7 @@ impl ListDelegate for DeploymentListDelegate {
 
         let ready_display = deployment.ready_display();
         let subtitle = format!("{} - {}", deployment.namespace, deployment.age);
+        let current_replicas = deployment.replicas;
 
         // Three-dot menu button
         let row = ix.row;
@@ -118,9 +120,7 @@ impl ListDelegate for DeploymentListDelegate {
                             let name = name.clone();
                             let ns = ns.clone();
                             move |_, _, cx| {
-                                // TODO: Show scale dialog
-                                // For now, just scale to 0 as a placeholder
-                                services::scale_deployment(name.clone(), ns.clone(), 0, cx);
+                                services::request_scale_dialog(name.clone(), ns.clone(), current_replicas, cx);
                             }
                         }),
                 )

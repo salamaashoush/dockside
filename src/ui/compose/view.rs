@@ -189,14 +189,20 @@ impl ComposeView {
                     ),
             )
             // Services list (when expanded)
-            .when(is_expanded, |el| {
-                el.children(
-                    project
-                        .services
-                        .iter()
-                        .map(|service| self.render_service(service, cx)),
-                )
-            })
+            .when_some(
+                if is_expanded {
+                    Some(
+                        project
+                            .services
+                            .iter()
+                            .map(|service| self.render_service(service, cx).into_any_element())
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    None
+                },
+                |el, services| el.children(services),
+            )
     }
 
     fn render_service(&self, service: &ComposeService, cx: &mut Context<Self>) -> impl IntoElement {
@@ -306,20 +312,25 @@ impl Render for ComposeView {
                     ),
             )
             // Content
-            .child(
+            .child({
+                // Pre-render content to avoid closure escaping issues
+                let content = if projects.is_empty() {
+                    self.render_empty(cx).into_any_element()
+                } else {
+                    v_flex()
+                        .w_full()
+                        .children(projects.iter().map(|project| {
+                            let is_expanded = self.expanded_projects.contains(&project.name);
+                            self.render_project(project, is_expanded, cx).into_any_element()
+                        }))
+                        .into_any_element()
+                };
+
                 div()
                     .id("compose-scroll")
                     .flex_1()
                     .overflow_y_scrollbar()
-                    .when(projects.is_empty(), |el| el.child(self.render_empty(cx)))
-                    .when(!projects.is_empty(), |el| {
-                        el.child(
-                            v_flex().w_full().children(projects.iter().map(|project| {
-                                let is_expanded = self.expanded_projects.contains(&project.name);
-                                self.render_project(project, is_expanded, cx)
-                            })),
-                        )
-                    }),
-            )
+                    .child(content)
+            })
     }
 }

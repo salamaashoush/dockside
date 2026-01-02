@@ -4,8 +4,10 @@ use gpui_component::{
     h_flex,
     sidebar::{Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem},
     theme::{ActiveTheme, Theme, ThemeMode},
-    IconName, Root, WindowExt,
+    Icon, IconName, Root, WindowExt,
 };
+
+use crate::assets::AppIcon;
 
 use crate::services::task_manager;
 use crate::state::{docker_state, CurrentView, DockerState, StateChanged};
@@ -19,7 +21,8 @@ use crate::ui::networks::NetworksView;
 use crate::ui::pods::PodsView;
 use crate::ui::prune_dialog::PruneDialog;
 use crate::ui::services::ServicesView;
-use crate::ui::settings::SettingsDialog;
+use crate::ui::settings::SettingsView;
+use crate::ui::setup_dialog::{is_colima_installed, is_docker_installed, SetupDialog};
 use crate::ui::volumes::VolumesView;
 
 /// Main application - only handles layout and view switching
@@ -35,6 +38,7 @@ pub struct DockerApp {
     services_view: Entity<ServicesView>,
     deployments_view: Entity<DeploymentsView>,
     activity_view: Entity<ActivityMonitorView>,
+    settings_view: Entity<SettingsView>,
 }
 
 impl DockerApp {
@@ -51,6 +55,12 @@ impl DockerApp {
         })
         .detach();
 
+        // Observe theme changes to re-render when theme is switched
+        cx.observe_global::<Theme>(|_this, cx| {
+            cx.notify();
+        })
+        .detach();
+
         // Create self-contained views
         let machines_view = cx.new(|cx| MachinesView::new(window, cx));
         let containers_view = cx.new(|cx| ContainersView::new(window, cx));
@@ -62,6 +72,18 @@ impl DockerApp {
         let services_view = cx.new(|cx| ServicesView::new(window, cx));
         let deployments_view = cx.new(|cx| DeploymentsView::new(window, cx));
         let activity_view = cx.new(|cx| ActivityMonitorView::new(window, cx));
+        let settings_view = cx.new(|cx| SettingsView::new(cx));
+
+        // Check if Docker/Colima are installed and show setup dialog if not
+        let colima_installed = is_colima_installed();
+        let docker_installed = is_docker_installed();
+
+        if !colima_installed || !docker_installed {
+            // Defer showing the dialog until after the window is ready
+            cx.defer_in(window, |this, window, cx| {
+                this.show_setup_dialog(window, cx);
+            });
+        }
 
         Self {
             docker_state,
@@ -75,7 +97,48 @@ impl DockerApp {
             services_view,
             deployments_view,
             activity_view,
+            settings_view,
         }
+    }
+
+    fn show_setup_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|cx| SetupDialog::new(cx));
+
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let dialog_clone = dialog_entity.clone();
+            let colors = cx.theme().colors.clone();
+
+            dialog
+                .title("Setup Required")
+                .min_w(px(550.))
+                .child(dialog_entity.clone())
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_refresh = dialog_clone.clone();
+
+                    vec![
+                        Button::new("refresh")
+                            .label("Check Again")
+                            .ghost()
+                            .on_click({
+                                let dialog = dialog_for_refresh.clone();
+                                move |_ev, _window, cx| {
+                                    dialog.update(cx, |d, cx| {
+                                        d.refresh_status(cx);
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                            .into_any_element(),
+                        Button::new("continue")
+                            .label("Continue Anyway")
+                            .primary()
+                            .on_click(move |_ev, window, cx| {
+                                window.close_dialog(cx);
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
     }
 
     fn show_prune_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -111,39 +174,7 @@ impl DockerApp {
         });
     }
 
-    fn show_settings_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let dialog_entity = cx.new(|cx| SettingsDialog::new(window, cx));
-
-        window.open_dialog(cx, move |dialog, _window, _cx| {
-            let dialog_clone = dialog_entity.clone();
-
-            dialog
-                .title("Settings")
-                .min_w(px(550.))
-                .child(dialog_entity.clone())
-                .footer(move |_dialog_state, _, _window, _cx| {
-                    let dialog_for_save = dialog_clone.clone();
-
-                    vec![
-                        Button::new("save")
-                            .label("Save")
-                            .primary()
-                            .on_click({
-                                let dialog = dialog_for_save.clone();
-                                move |_ev, window, cx| {
-                                    dialog.update(cx, |d, cx| {
-                                        d.apply_settings(window, cx);
-                                    });
-                                    window.close_dialog(cx);
-                                }
-                            })
-                            .into_any_element(),
-                    ]
-                })
-        });
-    }
-
-    fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_sidebar(&self, cx: &mut Context<'_, Self>) -> impl IntoElement + use<> {
         let state = self.docker_state.read(cx);
         let current_view = state.current_view;
 
@@ -255,25 +286,18 @@ impl DockerApp {
                                 })),
                         )
                         .child(
-                            SidebarMenuItem::new("Commands")
-                                .icon(IconName::SquareTerminal)
-                                .active(current_view == CurrentView::Commands)
-                                .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                    crate::services::set_view(CurrentView::Commands, cx);
-                                })),
-                        )
-                        .child(
                             SidebarMenuItem::new("Settings")
                                 .icon(IconName::Settings)
-                                .on_click(cx.listener(|this, _ev, window, cx| {
-                                    this.show_settings_dialog(window, cx);
+                                .active(current_view == CurrentView::Settings)
+                                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                    crate::services::set_view(CurrentView::Settings, cx);
                                 })),
                         ),
                 ),
             )
     }
 
-    fn render_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_content(&self, cx: &mut Context<'_, Self>) -> impl IntoElement + use<> {
         let state = self.docker_state.read(cx);
 
         match state.current_view {
@@ -287,6 +311,7 @@ impl DockerApp {
             CurrentView::Services => div().size_full().child(self.services_view.clone()),
             CurrentView::Deployments => div().size_full().child(self.deployments_view.clone()),
             CurrentView::ActivityMonitor => div().size_full().child(self.activity_view.clone()),
+            CurrentView::Settings => div().size_full().child(self.settings_view.clone()),
             _ => {
                 // Placeholder for views not yet implemented
                 let colors = &cx.theme().colors;
@@ -305,7 +330,7 @@ impl DockerApp {
         }
     }
 
-    fn render_task_bar(&self, cx: &App) -> Option<impl IntoElement> {
+    fn render_task_bar(&self, cx: &App) -> Option<impl IntoElement + use<>> {
         let tasks = task_manager(cx);
         let running_tasks: Vec<_> = tasks
             .read(cx)

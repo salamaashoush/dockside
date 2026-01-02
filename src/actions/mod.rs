@@ -146,6 +146,5 @@ actions!(
         ShowPods,
         ShowServices,
         ShowActivityMonitor,
-        ShowCommands,
     ]
 );

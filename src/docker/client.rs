@@ -58,7 +58,7 @@ impl DockerClient {
             .ok_or_else(|| anyhow!("Not connected to Docker"))
     }
 
-    pub async fn version(&self) -> Result<bollard::system::Version> {
+    pub async fn version(&self) -> Result<bollard::models::SystemVersion> {
         let docker = self.client()?;
         docker
             .version()

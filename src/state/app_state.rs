@@ -15,7 +15,7 @@ pub enum CurrentView {
     Deployments,
     Machines,
     ActivityMonitor,
-    Commands,
+    Settings,
 }
 
 impl CurrentView {
@@ -31,7 +31,7 @@ impl CurrentView {
             CurrentView::Deployments => "Deployments",
             CurrentView::Machines => "Machines",
             CurrentView::ActivityMonitor => "Activity Monitor",
-            CurrentView::Commands => "Commands",
+            CurrentView::Settings => "Settings",
         }
     }
 }

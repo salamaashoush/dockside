@@ -1,16 +1,17 @@
 use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Window};
 use gpui_component::{
+    button::{Button, ButtonVariants},
     h_flex,
     label::Label,
     scroll::ScrollableElement,
     tab::{Tab, TabBar},
     theme::ActiveTheme,
     v_flex,
-    Icon, Selectable,
+    Icon, IconName, Selectable, Sizable,
 };
 
 use crate::assets::AppIcon;
-use crate::kubernetes::DeploymentInfo;
+use crate::kubernetes::{DeploymentInfo, PodInfo};
 use crate::services;
 use crate::state::{docker_state, DockerState, StateChanged};
 
@@ -331,6 +332,232 @@ impl DeploymentDetail {
             )
     }
 
+    fn render_pods_tab(&self, deployment: &DeploymentInfo, cx: &mut Context<Self>) -> gpui::Div {
+        let colors = &cx.theme().colors;
+
+        // Get pods that are owned by this deployment
+        // Pods are matched by the deployment's labels (which become the pod template labels)
+        let state = self.docker_state.read(cx);
+        let matching_pods: Vec<&PodInfo> = state
+            .pods
+            .iter()
+            .filter(|pod| {
+                // Pod must be in same namespace
+                if pod.namespace != deployment.namespace {
+                    return false;
+                }
+                // Check if pod has owner reference matching deployment name
+                // Or match by app label (common pattern)
+                deployment.labels.iter().any(|(key, value)| {
+                    pod.labels.get(key).map(|v| v == value).unwrap_or(false)
+                })
+            })
+            .collect();
+
+        if matching_pods.is_empty() {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            Icon::new(AppIcon::Pod)
+                                .size(px(32.))
+                                .text_color(colors.muted_foreground),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(colors.muted_foreground)
+                                .child("No pods found"),
+                        ),
+                );
+        }
+
+        let header = h_flex()
+            .w_full()
+            .py(px(8.))
+            .px(px(12.))
+            .gap(px(8.))
+            .bg(colors.sidebar)
+            .rounded_t(px(8.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("Pod Name"),
+            )
+            .child(
+                div()
+                    .w(px(80.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("Status"),
+            )
+            .child(
+                div()
+                    .w(px(50.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("Ready"),
+            )
+            .child(
+                div()
+                    .w(px(60.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("Restarts"),
+            )
+            .child(
+                div()
+                    .w(px(50.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .child("Age"),
+            )
+            .child(
+                div()
+                    .w(px(40.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_foreground)
+                    .text_right(),
+            );
+
+        let rows = matching_pods
+            .iter()
+            .enumerate()
+            .map(|(i, pod)| {
+                let status_color = if pod.phase.is_running() {
+                    colors.success
+                } else if pod.phase.is_pending() {
+                    colors.warning
+                } else {
+                    colors.danger
+                };
+
+                let pod_name = pod.name.clone();
+                let pod_namespace = pod.namespace.clone();
+
+                h_flex()
+                    .w_full()
+                    .py(px(8.))
+                    .px(px(12.))
+                    .gap(px(8.))
+                    .rounded(px(6.))
+                    .when(i % 2 == 1, |el| el.bg(colors.sidebar.opacity(0.3)))
+                    .hover(|el| el.bg(colors.sidebar))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .text_color(colors.foreground)
+                            .font_family("monospace")
+                            .text_ellipsis()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .child(pod.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .w(px(80.))
+                            .flex_shrink_0()
+                            .child(
+                                div()
+                                    .px(px(6.))
+                                    .py(px(2.))
+                                    .rounded(px(4.))
+                                    .bg(status_color.opacity(0.15))
+                                    .text_xs()
+                                    .text_color(status_color)
+                                    .child(pod.phase.to_string()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(50.))
+                            .flex_shrink_0()
+                            .text_sm()
+                            .text_color(colors.foreground)
+                            .child(pod.ready.clone()),
+                    )
+                    .child(
+                        div()
+                            .w(px(60.))
+                            .flex_shrink_0()
+                            .text_sm()
+                            .text_color(if pod.restarts > 0 {
+                                colors.warning
+                            } else {
+                                colors.muted_foreground
+                            })
+                            .child(pod.restarts.to_string()),
+                    )
+                    .child(
+                        div()
+                            .w(px(50.))
+                            .flex_shrink_0()
+                            .text_sm()
+                            .text_color(colors.muted_foreground)
+                            .child(pod.age.clone()),
+                    )
+                    .child(
+                        div()
+                            .w(px(40.))
+                            .flex_shrink_0()
+                            .flex()
+                            .justify_end()
+                            .child(
+                                Button::new(("view-pod", i))
+                                    .icon(IconName::Eye)
+                                    .ghost()
+                                    .xsmall()
+                                    .on_click(move |_ev, _window, cx| {
+                                        services::open_pod_info(
+                                            pod_name.clone(),
+                                            pod_namespace.clone(),
+                                            cx,
+                                        );
+                                    }),
+                            ),
+                    )
+            })
+            .collect::<Vec<_>>();
+
+        div()
+            .size_full()
+            .p(px(16.))
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.muted_foreground)
+                            .child(format!("{} pod(s)", matching_pods.len())),
+                    )
+                    .child(v_flex().w_full().child(header).children(rows)),
+            )
+    }
+
     fn render_yaml_tab(&self, _deployment: &DeploymentInfo, cx: &mut Context<Self>) -> gpui::Div {
         let colors = &cx.theme().colors;
 
@@ -442,10 +669,19 @@ impl Render for DeploymentDetail {
             )
             .child(
                 Tab::new()
-                    .label("YAML")
+                    .label("Pods")
                     .selected(active_tab == 1)
                     .on_click(cx.listener(|this, _ev, _window, cx| {
                         this.active_tab = 1;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Tab::new()
+                    .label("YAML")
+                    .selected(active_tab == 2)
+                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                        this.active_tab = 2;
                         if let Some(ref dep) = this.deployment {
                             services::get_deployment_yaml(
                                 dep.name.clone(),
@@ -459,7 +695,8 @@ impl Render for DeploymentDetail {
         // Tab content
         let content = match active_tab {
             0 => self.render_info_tab(&deployment, cx),
-            1 => self.render_yaml_tab(&deployment, cx),
+            1 => self.render_pods_tab(&deployment, cx),
+            2 => self.render_yaml_tab(&deployment, cx),
             _ => div(),
         };
 

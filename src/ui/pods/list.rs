@@ -383,6 +383,20 @@ impl PodList {
         cx.notify();
     }
 
+    /// Select a pod by name and namespace
+    pub fn select_pod(&mut self, name: &str, namespace: &str, cx: &mut Context<Self>) {
+        self.list_state.update(cx, |state, cx| {
+            let delegate = state.delegate();
+            let pods = delegate.filtered_pods(cx);
+            if let Some(idx) = pods.iter().position(|p| p.name == name && p.namespace == namespace) {
+                let ix = IndexPath::new(idx);
+                state.delegate_mut().selected_index = Some(ix);
+                cx.notify();
+            }
+        });
+        cx.notify();
+    }
+
     fn render_empty(&self, cx: &mut Context<Self>) -> gpui::Div {
         let colors = &cx.theme().colors;
         let state = self.docker_state.read(cx);

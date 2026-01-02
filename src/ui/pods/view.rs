@@ -95,6 +95,11 @@ impl PodsView {
                         state.get_pod(pod_name, namespace).cloned()
                     };
                     if let Some(pod) = pod {
+                        // Select in the list UI
+                        this.pod_list.update(cx, |list, cx| {
+                            list.select_pod(pod_name, namespace, cx);
+                        });
+                        // Select in the view
                         this.on_select_pod(&pod, cx);
                         this.on_tab_change(*tab, window, cx);
                     }

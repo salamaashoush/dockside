@@ -8,6 +8,7 @@ use gpui_component::{
 use super::create_dialog::CreateDeploymentDialog;
 use super::detail::DeploymentDetail;
 use super::list::{DeploymentList, DeploymentListEvent};
+use super::scale_dialog::ScaleDialog;
 use crate::kubernetes::DeploymentInfo;
 use crate::services;
 use crate::state::{docker_state, DockerState, StateChanged};
@@ -40,12 +41,21 @@ impl DeploymentsView {
                 DeploymentListEvent::NewDeployment => {
                     this.show_create_dialog(window, cx);
                 }
+                DeploymentListEvent::ScaleDeployment(deployment) => {
+                    this.show_scale_dialog(
+                        deployment.name.clone(),
+                        deployment.namespace.clone(),
+                        deployment.replicas,
+                        window,
+                        cx,
+                    );
+                }
             }
         })
         .detach();
 
         // Subscribe to docker state changes
-        cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
+        cx.subscribe_in(&docker_state, window, |this, _state, event: &StateChanged, window, cx| {
             match event {
                 StateChanged::DeploymentTabRequest {
                     deployment_name,
@@ -67,6 +77,19 @@ impl DeploymentsView {
                         cx.notify();
                     }
                 }
+                StateChanged::DeploymentScaleRequest {
+                    deployment_name,
+                    namespace,
+                    current_replicas,
+                } => {
+                    this.show_scale_dialog(
+                        deployment_name.clone(),
+                        namespace.clone(),
+                        *current_replicas,
+                        window,
+                        cx,
+                    );
+                }
                 _ => {}
             }
         })
@@ -87,7 +110,7 @@ impl DeploymentsView {
         let dialog_entity = cx.new(|cx| CreateDeploymentDialog::new(cx));
 
         window.open_dialog(cx, move |dialog, _window, cx| {
-            let colors = cx.theme().colors.clone();
+            let _colors = cx.theme().colors.clone();
             let dialog_clone = dialog_entity.clone();
 
             dialog
@@ -108,6 +131,47 @@ impl DeploymentsView {
                                     services::create_deployment(options, cx);
                                     window.close_dialog(cx);
                                 }
+                            }
+                        })
+                        .into_any_element()]
+                })
+        });
+    }
+
+    fn show_scale_dialog(
+        &mut self,
+        deployment_name: String,
+        namespace: String,
+        current_replicas: i32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dialog_entity = cx.new(|cx| {
+            ScaleDialog::new(deployment_name.clone(), namespace.clone(), current_replicas, cx)
+        });
+
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let _colors = cx.theme().colors.clone();
+            let dialog_clone = dialog_entity.clone();
+
+            dialog
+                .title("Scale Deployment")
+                .min_w(px(350.))
+                .child(dialog_entity.clone())
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_scale = dialog_clone.clone();
+
+                    vec![Button::new("scale")
+                        .label("Scale")
+                        .primary()
+                        .on_click({
+                            let dialog = dialog_for_scale.clone();
+                            move |_ev, window, cx| {
+                                let replicas = dialog.read(cx).get_replicas(cx);
+                                let name = dialog.read(cx).deployment_name().to_string();
+                                let ns = dialog.read(cx).namespace().to_string();
+                                services::scale_deployment(name, ns, replicas, cx);
+                                window.close_dialog(cx);
                             }
                         })
                         .into_any_element()]

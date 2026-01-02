@@ -1,6 +1,9 @@
 use anyhow::Result;
-use bollard::container::{Config, CreateContainerOptions, LogsOptions, RemoveContainerOptions};
-use bollard::volume::{ListVolumesOptions, RemoveVolumeOptions};
+use bollard::models::ContainerCreateBody;
+use bollard::query_parameters::{
+    CreateContainerOptions, LogsOptions, RemoveContainerOptions, ListVolumesOptions,
+    RemoveVolumeOptions,
+};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -66,7 +69,7 @@ impl DockerClient {
     pub async fn list_volumes(&self) -> Result<Vec<VolumeInfo>> {
         let docker = self.client()?;
 
-        let options = ListVolumesOptions::<String> {
+        let options = ListVolumesOptions {
             ..Default::default()
         };
 
@@ -178,9 +181,9 @@ impl DockerClient {
             ..Default::default()
         };
 
-        let config = Config {
-            image: Some("alpine:latest"),
-            cmd: Some(vec!["ls", "-la", &normalized_path]),
+        let config = ContainerCreateBody {
+            image: Some("alpine:latest".to_string()),
+            cmd: Some(vec!["ls".to_string(), "-la".to_string(), normalized_path.clone()]),
             host_config: Some(host_config),
             tty: Some(false),
             attach_stdout: Some(true),
@@ -189,20 +192,25 @@ impl DockerClient {
         };
 
         let options = CreateContainerOptions {
-            name: container_name.clone(),
+            name: Some(container_name.clone()),
             ..Default::default()
         };
 
         // Create and start container (it will run ls and exit immediately)
         docker.create_container(Some(options), config).await?;
-        docker.start_container::<String>(&container_name, None).await?;
+        docker
+            .start_container(&container_name, None::<bollard::query_parameters::StartContainerOptions>)
+            .await?;
 
         // Wait for container to finish
-        let mut wait_stream = docker.wait_container::<String>(&container_name, None);
+        let mut wait_stream = docker.wait_container(
+            &container_name,
+            None::<bollard::query_parameters::WaitContainerOptions>,
+        );
         while let Some(_) = wait_stream.next().await {}
 
         // Get the logs (output of ls command)
-        let log_options = LogsOptions::<String> {
+        let log_options = LogsOptions {
             stdout: true,
             stderr: true,
             ..Default::default()

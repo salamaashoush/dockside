@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bollard::container::StatsOptions;
+use bollard::query_parameters::StatsOptions;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
@@ -100,22 +100,35 @@ impl DockerClient {
             let stats = result?;
 
             // Calculate CPU percentage
-            let cpu_delta = stats.cpu_stats.cpu_usage.total_usage
-                .saturating_sub(stats.precpu_stats.cpu_usage.total_usage);
-            let system_delta = stats.cpu_stats.system_cpu_usage
+            let cpu_stats = stats.cpu_stats.as_ref();
+            let precpu_stats = stats.precpu_stats.as_ref();
+
+            let cpu_delta = cpu_stats
+                .and_then(|s| s.cpu_usage.as_ref())
+                .and_then(|u| u.total_usage)
                 .unwrap_or(0)
-                .saturating_sub(stats.precpu_stats.system_cpu_usage.unwrap_or(0));
+                .saturating_sub(
+                    precpu_stats
+                        .and_then(|s| s.cpu_usage.as_ref())
+                        .and_then(|u| u.total_usage)
+                        .unwrap_or(0),
+                );
+            let system_delta = cpu_stats
+                .and_then(|s| s.system_cpu_usage)
+                .unwrap_or(0)
+                .saturating_sub(precpu_stats.and_then(|s| s.system_cpu_usage).unwrap_or(0));
 
             let cpu_percent = if system_delta > 0 && cpu_delta > 0 {
-                let num_cpus = stats.cpu_stats.online_cpus.unwrap_or(1) as f64;
+                let num_cpus = cpu_stats.and_then(|s| s.online_cpus).unwrap_or(1) as f64;
                 (cpu_delta as f64 / system_delta as f64) * num_cpus * 100.0
             } else {
                 0.0
             };
 
             // Memory stats
-            let memory_usage = stats.memory_stats.usage.unwrap_or(0);
-            let memory_limit = stats.memory_stats.limit.unwrap_or(1);
+            let memory_stats = stats.memory_stats.as_ref();
+            let memory_usage = memory_stats.and_then(|s| s.usage).unwrap_or(0);
+            let memory_limit = memory_stats.and_then(|s| s.limit).unwrap_or(1);
             let memory_percent = if memory_limit > 0 {
                 (memory_usage as f64 / memory_limit as f64) * 100.0
             } else {
@@ -125,10 +138,8 @@ impl DockerClient {
             // Network stats (aggregate all interfaces)
             let (network_rx, network_tx) = if let Some(networks) = &stats.networks {
                 networks.values().fold((0u64, 0u64), |(rx, tx), net| {
-                    (rx + net.rx_bytes, tx + net.tx_bytes)
+                    (rx + net.rx_bytes.unwrap_or(0), tx + net.tx_bytes.unwrap_or(0))
                 })
-            } else if let Some(network) = &stats.network {
-                (network.rx_bytes, network.tx_bytes)
             } else {
                 (0, 0)
             };
@@ -136,13 +147,15 @@ impl DockerClient {
             // Block I/O stats
             let (block_read, block_write) = stats
                 .blkio_stats
-                .io_service_bytes_recursive
                 .as_ref()
+                .and_then(|s| s.io_service_bytes_recursive.as_ref())
                 .map(|entries| {
                     entries.iter().fold((0u64, 0u64), |(read, write), entry| {
-                        match entry.op.as_str() {
-                            "read" | "Read" => (read + entry.value, write),
-                            "write" | "Write" => (read, write + entry.value),
+                        let op = entry.op.as_deref().unwrap_or("");
+                        let value = entry.value.unwrap_or(0);
+                        match op {
+                            "read" | "Read" => (read + value, write),
+                            "write" | "Write" => (read, write + value),
                             _ => (read, write),
                         }
                     })
@@ -150,10 +163,15 @@ impl DockerClient {
                 .unwrap_or((0, 0));
 
             // Clean up the name (remove leading /)
-            let name = stats.name.trim_start_matches('/').to_string();
+            let name = stats
+                .name
+                .as_deref()
+                .map(|n| n.trim_start_matches('/'))
+                .unwrap_or("")
+                .to_string();
 
             Ok(ContainerStats {
-                id: stats.id,
+                id: stats.id.unwrap_or_default(),
                 name,
                 cpu_percent,
                 memory_usage,
