@@ -14,6 +14,7 @@ use crate::terminal::TerminalView;
 
 use super::create_dialog::CreateMachineDialog;
 use super::detail::MachineDetail;
+use super::edit_dialog::EditMachineDialog;
 use super::list::{MachineList, MachineListEvent};
 
 /// Self-contained Machines view - handles list, detail, terminal, and all state
@@ -48,7 +49,7 @@ impl MachinesView {
         .detach();
 
         // Subscribe to state changes
-        cx.subscribe(&docker_state, |this, state, event: &StateChanged, cx| {
+        cx.subscribe_in(&docker_state, window, |this, state, event: &StateChanged, window, cx| {
             match event {
                 StateChanged::MachinesUpdated => {
                     // If selected machine was deleted, clear selection
@@ -61,6 +62,17 @@ impl MachinesView {
                         }
                     }
                     cx.notify();
+                }
+                StateChanged::MachineTabRequest { machine_name, tab } => {
+                    // Find the machine and select it with the specified tab
+                    let machine = {
+                        let state = state.read(cx);
+                        state.colima_vms.iter().find(|vm| vm.name == *machine_name).cloned()
+                    };
+                    if let Some(machine) = machine {
+                        this.on_select_machine(&machine, cx);
+                        this.on_tab_change(*tab, window, cx);
+                    }
                 }
                 _ => {}
             }
@@ -117,6 +129,43 @@ impl MachinesView {
                                 move |_ev, window, cx| {
                                     let options = dialog.read(cx).get_options(cx);
                                     services::create_machine(options, cx);
+                                    window.close_dialog(cx);
+                                }
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
+    }
+
+    fn show_edit_dialog(&mut self, machine: &ColimaVm, window: &mut Window, cx: &mut Context<Self>) {
+        let machine_clone = machine.clone();
+        let dialog_entity = cx.new(|cx| EditMachineDialog::new(&machine_clone, cx));
+
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let dialog_clone = dialog_entity.clone();
+            let machine = machine_clone.clone();
+
+            dialog
+                .title(format!("Edit Machine: {}", machine.name))
+                .min_w(px(500.))
+                .child(
+                    dialog_entity.update(cx, |dialog, cx| {
+                        dialog.render_with_machine(&machine, window, cx)
+                    }),
+                )
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_save = dialog_clone.clone();
+
+                    vec![
+                        Button::new("save")
+                            .label("Save & Restart")
+                            .primary()
+                            .on_click({
+                                let dialog = dialog_for_save.clone();
+                                move |_ev, window, cx| {
+                                    let options = dialog.read(cx).get_options(cx);
+                                    services::edit_machine(options, cx);
                                     window.close_dialog(cx);
                                 }
                             })
@@ -355,6 +404,9 @@ impl Render for MachinesView {
                 this.active_tab = 0;
                 this.terminal_view = None;
                 cx.notify();
+            }))
+            .on_edit(cx.listener(|this, machine: &ColimaVm, window, cx| {
+                this.show_edit_dialog(machine, window, cx);
             }));
 
         div()

@@ -292,6 +292,10 @@ impl ColimaClient {
             cmd.arg("--hostname").arg(hostname);
         }
 
+        if options.edit {
+            cmd.arg("--edit");
+        }
+
         let output = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -61,6 +61,7 @@ pub enum AppIcon {
     Network,
     Pod,
     Service,
+    Deployment,
     Machine,
     Activity,
     Terminal,
@@ -71,6 +72,7 @@ pub enum AppIcon {
     Files,
     ChevronRight,
     ChevronDown,
+    Kubernetes,
 }
 
 impl IconNamed for AppIcon {
@@ -86,6 +88,7 @@ impl IconNamed for AppIcon {
             Self::Network => "icons/network.svg",
             Self::Pod => "icons/pod.svg",
             Self::Service => "icons/service.svg",
+            Self::Deployment => "icons/deployment.svg",
             Self::Machine => "icons/machine.svg",
             Self::Activity => "icons/activity.svg",
             Self::Terminal => "icons/terminal.svg",
@@ -96,6 +99,7 @@ impl IconNamed for AppIcon {
             Self::Files => "icons/files.svg",
             Self::ChevronRight => "icons/chevron-right.svg",
             Self::ChevronDown => "icons/chevron-down.svg",
+            Self::Kubernetes => "icons/kubernetes.svg",
         }
         .into()
     }

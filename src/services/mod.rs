@@ -8,7 +8,7 @@ pub use task_manager::*;
 
 use gpui::App;
 
-use crate::state::init_docker_state;
+use crate::state::{init_docker_state, init_settings};
 
 /// Initialize all global services
 pub fn init_services(cx: &mut App) {
@@ -17,6 +17,7 @@ pub fn init_services(cx: &mut App) {
 
     // Initialize state
     init_docker_state(cx);
+    init_settings(cx);
 
     // Initialize services
     init_task_manager(cx);

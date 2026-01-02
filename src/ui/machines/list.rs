@@ -142,6 +142,7 @@ impl ListDelegate for MachineListDelegate {
         // Three-dot menu button
         let name = machine_name.clone();
         let running = is_running;
+        let has_k8s = machine.kubernetes;
         let row = ix.row;
 
         let item = ListItem::new(ix)
@@ -200,8 +201,62 @@ impl ListDelegate for MachineListDelegate {
                                                 }),
                                         )
                                         .separator()
-                                        .item(PopupMenuItem::new("Terminal").icon(Icon::new(AppIcon::Terminal)))
-                                        .item(PopupMenuItem::new("Files").icon(Icon::new(AppIcon::Files)));
+                                        .item(
+                                            PopupMenuItem::new("Terminal")
+                                                .icon(Icon::new(AppIcon::Terminal))
+                                                .on_click({
+                                                    let n = n.clone();
+                                                    move |_, _, cx| {
+                                                        services::open_machine_terminal(n.clone(), cx);
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Files")
+                                                .icon(Icon::new(AppIcon::Files))
+                                                .on_click({
+                                                    let n = n.clone();
+                                                    move |_, _, cx| {
+                                                        services::open_machine_files(n.clone(), cx);
+                                                    }
+                                                }),
+                                        );
+
+                                    // Kubernetes actions (only if machine has K8s enabled)
+                                    if has_k8s {
+                                        menu = menu
+                                            .separator()
+                                            .item(
+                                                PopupMenuItem::new("K8s Start")
+                                                    .icon(Icon::new(AppIcon::Kubernetes))
+                                                    .on_click({
+                                                        let n = n.clone();
+                                                        move |_, _, cx| {
+                                                            services::kubernetes_start(n.clone(), cx);
+                                                        }
+                                                    }),
+                                            )
+                                            .item(
+                                                PopupMenuItem::new("K8s Stop")
+                                                    .icon(Icon::new(AppIcon::Kubernetes))
+                                                    .on_click({
+                                                        let n = n.clone();
+                                                        move |_, _, cx| {
+                                                            services::kubernetes_stop(n.clone(), cx);
+                                                        }
+                                                    }),
+                                            )
+                                            .item(
+                                                PopupMenuItem::new("K8s Reset")
+                                                    .icon(Icon::new(AppIcon::Kubernetes))
+                                                    .on_click({
+                                                        let n = n.clone();
+                                                        move |_, _, cx| {
+                                                            services::kubernetes_reset(n.clone(), cx);
+                                                        }
+                                                    }),
+                                            );
+                                    }
                                 } else {
                                     menu = menu.item(
                                         PopupMenuItem::new("Start")

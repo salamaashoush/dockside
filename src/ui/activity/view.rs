@@ -11,6 +11,7 @@ use std::time::Duration;
 use crate::assets::AppIcon;
 use crate::docker::{AggregateStats, ContainerStats};
 use crate::services;
+use crate::state::settings_state;
 
 /// Activity monitor showing container resource usage
 pub struct ActivityMonitorView {
@@ -25,12 +26,15 @@ pub struct ActivityMonitorView {
 }
 
 impl ActivityMonitorView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Get refresh interval from settings
+        let refresh_interval = settings_state(cx).read(cx).settings.stats_refresh_interval;
+
         // Start periodic refresh
         cx.spawn(async move |this, cx| {
             loop {
-                // Wait 2 seconds before next refresh
-                Timer::after(Duration::from_secs(2)).await;
+                // Wait for configured refresh interval
+                Timer::after(Duration::from_secs(refresh_interval)).await;
 
                 // Refresh stats
                 let _ = this.update(cx, |this, cx| {

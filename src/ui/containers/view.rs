@@ -1,4 +1,5 @@
-use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Window};
+use gpui::{div, prelude::*, px, Context, Entity, Render, Styled, Timer, Window};
+use std::time::Duration;
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
@@ -9,7 +10,7 @@ use gpui_component::{
 
 use crate::docker::ContainerInfo;
 use crate::services::{self, dispatcher, DispatcherEvent};
-use crate::state::{docker_state, DockerState, StateChanged};
+use crate::state::{docker_state, settings_state, DockerState, StateChanged};
 use crate::terminal::{TerminalSessionType, TerminalView};
 
 use super::create_dialog::CreateContainerDialog;
@@ -48,7 +49,7 @@ impl ContainersView {
         .detach();
 
         // Subscribe to state changes
-        cx.subscribe(&docker_state, |this, state, event: &StateChanged, cx| {
+        cx.subscribe_in(&docker_state, window, |this, state, event: &StateChanged, window, cx| {
             match event {
                 StateChanged::ContainersUpdated => {
                     // If selected container was deleted, clear selection
@@ -66,6 +67,17 @@ impl ContainersView {
                         }
                     }
                     cx.notify();
+                }
+                StateChanged::ContainerTabRequest { container_id, tab } => {
+                    // Find the container and select it with the specified tab
+                    let container = {
+                        let state = state.read(cx);
+                        state.containers.iter().find(|c| c.id == *container_id).cloned()
+                    };
+                    if let Some(container) = container {
+                        this.on_select_container(&container, cx);
+                        this.on_tab_change(*tab, window, cx);
+                    }
                 }
                 _ => {}
             }
@@ -86,6 +98,18 @@ impl ContainersView {
                 }
             }
             cx.notify();
+        })
+        .detach();
+
+        // Start periodic container refresh using interval from settings
+        let refresh_interval = settings_state(cx).read(cx).settings.container_refresh_interval;
+        cx.spawn(async move |_this, cx| {
+            loop {
+                Timer::after(Duration::from_secs(refresh_interval)).await;
+                let _ = cx.update(|cx| {
+                    services::refresh_containers(cx);
+                });
+            }
         })
         .detach();
 
@@ -244,6 +268,9 @@ impl ContainersView {
         let id = container_id.to_string();
         let id_for_inspect = id.clone();
 
+        // Get max log lines from settings
+        let max_log_lines = settings_state(cx).read(cx).settings.max_log_lines;
+
         // Get tokio handle and docker client before spawning
         let tokio_handle = services::Tokio::runtime_handle();
         let client = services::docker_client();
@@ -259,7 +286,7 @@ impl ContainersView {
                         let guard = client.read().await;
                         match guard.as_ref() {
                             Some(c) => c
-                                .container_logs(&id, Some(100))
+                                .container_logs(&id, Some(max_log_lines))
                                 .await
                                 .unwrap_or_else(|e| format!("Failed to get logs: {}", e)),
                             None => "Docker client not connected".to_string(),

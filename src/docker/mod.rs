@@ -1,4 +1,5 @@
 mod client;
+mod compose;
 mod containers;
 mod images;
 mod networks;
@@ -7,6 +8,7 @@ mod stats;
 mod volumes;
 
 pub use client::*;
+pub use compose::*;
 pub use containers::*;
 pub use images::*;
 pub use networks::*;

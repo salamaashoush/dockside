@@ -11,9 +11,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 
 use super::{PtyTerminal, TerminalBuffer, TerminalKey, TerminalSessionType};
-
-const LINE_HEIGHT: f32 = 18.0;
-const FONT_SIZE: f32 = 13.0;
+use crate::state::settings_state;
 
 /// A functional terminal view with keyboard input and mouse scrolling
 pub struct TerminalView {
@@ -21,6 +19,8 @@ pub struct TerminalView {
     buffer: Arc<Mutex<TerminalBuffer>>,
     session_type: TerminalSessionType,
     focus_handle: FocusHandle,
+    font_size: f32,
+    line_height: f32,
 }
 
 impl TerminalView {
@@ -28,11 +28,17 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
         let buffer = Arc::new(Mutex::new(TerminalBuffer::default()));
 
+        // Get font size from settings
+        let font_size = settings_state(cx).read(cx).settings.terminal_font_size;
+        let line_height = font_size * 1.4; // Line height is 1.4x font size
+
         let mut view = Self {
             terminal: None,
             buffer,
             session_type,
             focus_handle,
+            font_size,
+            line_height,
         };
 
         view.connect(cx);
@@ -102,11 +108,14 @@ impl Focusable for TerminalView {
 
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let font_size = self.font_size;
+        let line_height = self.line_height;
+
         // Calculate rows based on window height
         // Estimate available height: window height minus toolbar/tabs (~120px) minus padding (24px)
         let window_height: f32 = window.viewport_size().height.into();
         let available_height = (window_height - 144.0).max(200.0);
-        let display_rows = (available_height / LINE_HEIGHT) as usize;
+        let display_rows = (available_height / line_height) as usize;
 
         let mut buffer = self.buffer.lock();
         buffer.set_display_rows(display_rows);
@@ -201,19 +210,19 @@ impl Render for TerminalView {
 
                 div()
                     .w_full()
-                    .h(px(LINE_HEIGHT))
+                    .h(px(line_height))
                     .flex()
                     .items_center()
                     .child(
                         div()
-                            .text_size(px(FONT_SIZE))
+                            .text_size(px(font_size))
                             .font_family("monospace")
                             .text_color(text_color)
                             .child(before)
                     )
                     .child(
                         div()
-                            .text_size(px(FONT_SIZE))
+                            .text_size(px(font_size))
                             .font_family("monospace")
                             .bg(cursor_color)
                             .text_color(bg_color)
@@ -221,7 +230,7 @@ impl Render for TerminalView {
                     )
                     .child(
                         div()
-                            .text_size(px(FONT_SIZE))
+                            .text_size(px(font_size))
                             .font_family("monospace")
                             .text_color(text_color)
                             .child(after)
@@ -230,19 +239,19 @@ impl Render for TerminalView {
                 // Cursor at end of line
                 div()
                     .w_full()
-                    .h(px(LINE_HEIGHT))
+                    .h(px(line_height))
                     .flex()
                     .items_center()
                     .child(
                         div()
-                            .text_size(px(FONT_SIZE))
+                            .text_size(px(font_size))
                             .font_family("monospace")
                             .text_color(text_color)
                             .child(line_text)
                     )
                     .child(
                         div()
-                            .text_size(px(FONT_SIZE))
+                            .text_size(px(font_size))
                             .font_family("monospace")
                             .bg(cursor_color)
                             .text_color(bg_color)
@@ -251,10 +260,10 @@ impl Render for TerminalView {
             } else {
                 div()
                     .w_full()
-                    .h(px(LINE_HEIGHT))
+                    .h(px(line_height))
                     .flex()
                     .items_center()
-                    .text_size(px(FONT_SIZE))
+                    .text_size(px(font_size))
                     .font_family("monospace")
                     .text_color(text_color)
                     .child(line_text)
@@ -265,7 +274,7 @@ impl Render for TerminalView {
 
         // Scrollbar - show when there's more content than visible
         let scrollbar = if content.total_lines > content.rows {
-            let track_height = content.rows as f32 * LINE_HEIGHT - 16.0; // Match visible area minus padding
+            let track_height = content.rows as f32 * line_height - 16.0; // Match visible area minus padding
             let visible_ratio = content.rows as f32 / content.total_lines as f32;
             let thumb_height = (visible_ratio * track_height).max(30.0);
 
@@ -353,7 +362,7 @@ impl Render for TerminalView {
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
                 let delta = event.delta.pixel_delta(px(1.0));
                 let y_pixels: f32 = delta.y.into();
-                let lines = (y_pixels / LINE_HEIGHT) as i32;
+                let lines = (y_pixels / this.line_height) as i32;
                 if lines != 0 {
                     this.scroll(-lines);
                 }

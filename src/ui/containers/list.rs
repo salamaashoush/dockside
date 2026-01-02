@@ -93,137 +93,275 @@ impl ListDelegate for ContainerListDelegate {
             colors.muted_foreground
         };
 
-        let item_content = h_flex()
-            .w_full()
-            .items_center()
-            .gap(px(10.))
-            .child(
-                div()
-                    .size(px(36.))
-                    .flex_shrink_0()
-                    .rounded(px(8.))
-                    .bg(icon_bg)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(Icon::new(AppIcon::Container).text_color(colors.background)),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .w_full()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(Label::new(container.name.clone())),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
-                            .child(subtitle),
-                    ),
-            )
-            // Status dot
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .size(px(8.))
-                    .rounded_full()
-                    .bg(status_color),
-            );
-
         // Three-dot menu button
         let id = container_id.clone();
         let running = is_running;
+        let paused = container.state.is_paused();
         let row = ix.row;
 
-        let item = ListItem::new(ix)
-            .py(px(6.))
-            .rounded(px(6.))
-            .selected(is_selected)
-            .child(item_content)
-            .suffix(move |_, _| {
+        let menu_button = Button::new(("menu", row))
+            .icon(IconName::Ellipsis)
+            .ghost()
+            .xsmall()
+            .dropdown_menu(move |menu, _window, _cx| {
+                let mut menu = menu;
                 let id = id.clone();
-                div()
-                    .size(px(28.))
-                    .flex_shrink_0()
-                    .flex()
+
+                if running {
+                    // Running container actions
+                    menu = menu
+                        .item(
+                            PopupMenuItem::new("Stop")
+                                .icon(Icon::new(AppIcon::Stop))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::stop_container(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Restart")
+                                .icon(Icon::new(AppIcon::Restart))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::restart_container(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Pause")
+                                .icon(IconName::Minus)
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::pause_container(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Kill")
+                                .icon(IconName::Close)
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::kill_container(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Terminal")
+                                .icon(Icon::new(AppIcon::Terminal))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::open_container_terminal(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Logs")
+                                .icon(Icon::new(AppIcon::Logs))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::open_container_logs(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Inspect")
+                                .icon(IconName::Info)
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::open_container_inspect(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Files")
+                                .icon(IconName::Folder)
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::open_container_files(id.clone(), cx);
+                                    }
+                                }),
+                        );
+                } else if paused {
+                    // Paused container actions
+                    menu = menu
+                        .item(
+                            PopupMenuItem::new("Resume")
+                                .icon(Icon::new(AppIcon::Play))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::unpause_container(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Stop")
+                                .icon(Icon::new(AppIcon::Stop))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::stop_container(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Kill")
+                                .icon(IconName::Close)
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::kill_container(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Logs")
+                                .icon(Icon::new(AppIcon::Logs))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::open_container_logs(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Inspect")
+                                .icon(IconName::Info)
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::open_container_inspect(id.clone(), cx);
+                                    }
+                                }),
+                        );
+                } else {
+                    // Stopped container actions
+                    menu = menu
+                        .item(
+                            PopupMenuItem::new("Start")
+                                .icon(Icon::new(AppIcon::Play))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::start_container(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Logs")
+                                .icon(Icon::new(AppIcon::Logs))
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::open_container_logs(id.clone(), cx);
+                                    }
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Inspect")
+                                .icon(IconName::Info)
+                                .on_click({
+                                    let id = id.clone();
+                                    move |_, _, cx| {
+                                        services::open_container_inspect(id.clone(), cx);
+                                    }
+                                }),
+                        );
+                }
+
+                menu = menu.separator().item(
+                    PopupMenuItem::new("Delete")
+                        .icon(Icon::new(AppIcon::Trash))
+                        .on_click({
+                            let id = id.clone();
+                            move |_, _, cx| {
+                                services::delete_container(id.clone(), cx);
+                            }
+                        }),
+                );
+
+                menu
+            });
+
+        // Build item content with menu button INSIDE (not as suffix which gets hidden)
+        let item_content = h_flex()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .gap(px(8.))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
                     .items_center()
-                    .justify_center()
+                    .gap(px(8.))
                     .child(
-                        Button::new(("menu", row))
-                            .icon(IconName::Ellipsis)
-                            .ghost()
-                            .xsmall()
-                            .dropdown_menu(move |menu, _window, _cx| {
-                                let mut menu = menu;
-                                let id = id.clone();
-
-                                if running {
-                                    menu = menu
-                                        .item(
-                                            PopupMenuItem::new("Stop")
-                                                .icon(Icon::new(AppIcon::Stop))
-                                                .on_click({
-                                                    let id = id.clone();
-                                                    move |_, _, cx| {
-                                                        services::stop_container(id.clone(), cx);
-                                                    }
-                                                }),
-                                        )
-                                        .item(
-                                            PopupMenuItem::new("Restart")
-                                                .icon(Icon::new(AppIcon::Restart))
-                                                .on_click({
-                                                    let id = id.clone();
-                                                    move |_, _, cx| {
-                                                        services::restart_container(id.clone(), cx);
-                                                    }
-                                                }),
-                                        )
-                                        .separator()
-                                        .item(PopupMenuItem::new("Terminal").icon(Icon::new(AppIcon::Terminal)))
-                                        .item(PopupMenuItem::new("Logs").icon(Icon::new(AppIcon::Logs)));
-                                } else {
-                                    menu = menu.item(
-                                        PopupMenuItem::new("Start")
-                                            .icon(Icon::new(AppIcon::Play))
-                                            .on_click({
-                                                let id = id.clone();
-                                                move |_, _, cx| {
-                                                    services::start_container(id.clone(), cx);
-                                                }
-                                            }),
-                                    );
-                                }
-
-                                menu = menu.separator().item(
-                                    PopupMenuItem::new("Delete")
-                                        .icon(Icon::new(AppIcon::Trash))
-                                        .on_click({
-                                            let id = id.clone();
-                                            move |_, _, cx| {
-                                                services::delete_container(id.clone(), cx);
-                                            }
-                                        }),
-                                );
-
-                                menu
-                            }),
+                        div()
+                            .size(px(24.))
+                            .rounded(px(4.))
+                            .bg(icon_bg)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_shrink_0()
+                            .child(
+                                Icon::new(AppIcon::Container)
+                                    .size(px(14.))
+                                    .text_color(colors.background),
+                            ),
                     )
-            })
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_ellipsis()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .child(container.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(status_color)
+                                    .text_ellipsis()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .child(subtitle),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .child(menu_button),
+            );
+
+        let item = ListItem::new(("container", ix.row))
+            .py(px(4.))
+            .rounded(px(6.))
+            .overflow_hidden()
+            .selected(is_selected)
             .on_click(cx.listener(move |this, _ev, _window, cx| {
                 this.delegate_mut().selected_index = Some(ix);
                 cx.notify();
-            }));
+            }))
+            .child(item_content);
 
         Some(item)
     }

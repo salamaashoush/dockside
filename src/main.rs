@@ -3,6 +3,7 @@ mod app;
 mod assets;
 mod colima;
 mod docker;
+mod kubernetes;
 mod services;
 mod state;
 mod terminal;
@@ -15,6 +16,8 @@ use gpui::{px, size, App, AppContext, Bounds, SharedString, TitlebarOptions, Win
 use gpui_component::{theme::{Theme, ThemeRegistry}, Root};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use state::AppSettings;
+
 fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
@@ -26,15 +29,18 @@ fn main() -> Result<()> {
             // Initialize gpui-component
             gpui_component::init(cx);
 
-            // Load Tokyo Night theme from themes directory
-            let theme_name = SharedString::from("Tokyo Night");
+            // Load saved settings to get the user's preferred theme
+            let settings = AppSettings::load();
+            let saved_theme_name = SharedString::from(settings.theme.theme_name().to_string());
+
+            // Watch themes directory and apply the saved theme
             if let Err(err) = ThemeRegistry::watch_dir(
                 PathBuf::from("./themes"),
                 cx,
                 move |cx| {
                     if let Some(theme) = ThemeRegistry::global(cx)
                         .themes()
-                        .get(&theme_name)
+                        .get(&saved_theme_name)
                         .cloned()
                     {
                         Theme::global_mut(cx).apply_config(&theme);

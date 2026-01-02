@@ -13,6 +13,7 @@ bollard = "0.18"
 tokio = { version = "1", features = ["full", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 futures = "0.3"
 dirs = "5"
 anyhow = "1"
@@ -24,3 +25,5 @@ portable-pty = "0.8"
 parking_lot = "0.12"
 vte = "0.13"
 rust-embed = "8"
+kube = { version = "0.98", features = ["client", "runtime"] }
+k8s-openapi = { version = "0.24", features = ["v1_32"] }

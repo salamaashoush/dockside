@@ -10,11 +10,16 @@ use gpui_component::{
 use crate::services::task_manager;
 use crate::state::{docker_state, CurrentView, DockerState, StateChanged};
 use crate::ui::activity::ActivityMonitorView;
+use crate::ui::compose::ComposeView;
 use crate::ui::containers::ContainersView;
+use crate::ui::deployments::DeploymentsView;
 use crate::ui::images::ImagesView;
 use crate::ui::machines::MachinesView;
 use crate::ui::networks::NetworksView;
+use crate::ui::pods::PodsView;
 use crate::ui::prune_dialog::PruneDialog;
+use crate::ui::services::ServicesView;
+use crate::ui::settings::SettingsDialog;
 use crate::ui::volumes::VolumesView;
 
 /// Main application - only handles layout and view switching
@@ -22,9 +27,13 @@ pub struct DockerApp {
     docker_state: Entity<DockerState>,
     machines_view: Entity<MachinesView>,
     containers_view: Entity<ContainersView>,
+    compose_view: Entity<ComposeView>,
     volumes_view: Entity<VolumesView>,
     images_view: Entity<ImagesView>,
     networks_view: Entity<NetworksView>,
+    pods_view: Entity<PodsView>,
+    services_view: Entity<ServicesView>,
+    deployments_view: Entity<DeploymentsView>,
     activity_view: Entity<ActivityMonitorView>,
 }
 
@@ -45,18 +54,26 @@ impl DockerApp {
         // Create self-contained views
         let machines_view = cx.new(|cx| MachinesView::new(window, cx));
         let containers_view = cx.new(|cx| ContainersView::new(window, cx));
+        let compose_view = cx.new(|cx| ComposeView::new(window, cx));
         let volumes_view = cx.new(|cx| VolumesView::new(window, cx));
         let images_view = cx.new(|cx| ImagesView::new(window, cx));
         let networks_view = cx.new(|cx| NetworksView::new(window, cx));
+        let pods_view = cx.new(|cx| PodsView::new(window, cx));
+        let services_view = cx.new(|cx| ServicesView::new(window, cx));
+        let deployments_view = cx.new(|cx| DeploymentsView::new(window, cx));
         let activity_view = cx.new(|cx| ActivityMonitorView::new(window, cx));
 
         Self {
             docker_state,
             machines_view,
             containers_view,
+            compose_view,
             volumes_view,
             images_view,
             networks_view,
+            pods_view,
+            services_view,
+            deployments_view,
             activity_view,
         }
     }
@@ -94,6 +111,38 @@ impl DockerApp {
         });
     }
 
+    fn show_settings_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog_entity = cx.new(|cx| SettingsDialog::new(window, cx));
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let dialog_clone = dialog_entity.clone();
+
+            dialog
+                .title("Settings")
+                .min_w(px(550.))
+                .child(dialog_entity.clone())
+                .footer(move |_dialog_state, _, _window, _cx| {
+                    let dialog_for_save = dialog_clone.clone();
+
+                    vec![
+                        Button::new("save")
+                            .label("Save")
+                            .primary()
+                            .on_click({
+                                let dialog = dialog_for_save.clone();
+                                move |_ev, window, cx| {
+                                    dialog.update(cx, |d, cx| {
+                                        d.apply_settings(window, cx);
+                                    });
+                                    window.close_dialog(cx);
+                                }
+                            })
+                            .into_any_element(),
+                    ]
+                })
+        });
+    }
+
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.docker_state.read(cx);
         let current_view = state.current_view;
@@ -110,6 +159,14 @@ impl DockerApp {
                                 .active(current_view == CurrentView::Containers)
                                 .on_click(cx.listener(|_this, _ev, _window, cx| {
                                     crate::services::set_view(CurrentView::Containers, cx);
+                                })),
+                        )
+                        .child(
+                            SidebarMenuItem::new("Compose")
+                                .icon(IconName::LayoutDashboard)
+                                .active(current_view == CurrentView::Compose)
+                                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                    crate::services::set_view(CurrentView::Compose, cx);
                                 })),
                         )
                         .child(
@@ -150,8 +207,16 @@ impl DockerApp {
                                 })),
                         )
                         .child(
+                            SidebarMenuItem::new("Deployments")
+                                .icon(IconName::GalleryVerticalEnd)
+                                .active(current_view == CurrentView::Deployments)
+                                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                    crate::services::set_view(CurrentView::Deployments, cx);
+                                })),
+                        )
+                        .child(
                             SidebarMenuItem::new("Services")
-                                .icon(IconName::Settings)
+                                .icon(IconName::Globe)
                                 .active(current_view == CurrentView::Services)
                                 .on_click(cx.listener(|_this, _ev, _window, cx| {
                                     crate::services::set_view(CurrentView::Services, cx);
@@ -196,6 +261,13 @@ impl DockerApp {
                                 .on_click(cx.listener(|_this, _ev, _window, cx| {
                                     crate::services::set_view(CurrentView::Commands, cx);
                                 })),
+                        )
+                        .child(
+                            SidebarMenuItem::new("Settings")
+                                .icon(IconName::Settings)
+                                .on_click(cx.listener(|this, _ev, window, cx| {
+                                    this.show_settings_dialog(window, cx);
+                                })),
                         ),
                 ),
             )
@@ -207,9 +279,13 @@ impl DockerApp {
         match state.current_view {
             CurrentView::Machines => div().size_full().child(self.machines_view.clone()),
             CurrentView::Containers => div().size_full().child(self.containers_view.clone()),
+            CurrentView::Compose => div().size_full().child(self.compose_view.clone()),
             CurrentView::Volumes => div().size_full().child(self.volumes_view.clone()),
             CurrentView::Images => div().size_full().child(self.images_view.clone()),
             CurrentView::Networks => div().size_full().child(self.networks_view.clone()),
+            CurrentView::Pods => div().size_full().child(self.pods_view.clone()),
+            CurrentView::Services => div().size_full().child(self.services_view.clone()),
+            CurrentView::Deployments => div().size_full().child(self.deployments_view.clone()),
             CurrentView::ActivityMonitor => div().size_full().child(self.activity_view.clone()),
             _ => {
                 // Placeholder for views not yet implemented

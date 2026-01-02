@@ -309,4 +309,9 @@ impl ColimaStartOptions {
         self.hostname = Some(hostname.into());
         self
     }
+
+    pub fn with_edit(mut self, edit: bool) -> Self {
+        self.edit = edit;
+        self
+    }
 }

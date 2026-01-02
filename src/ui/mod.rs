@@ -1,16 +1,26 @@
 pub mod activity;
 pub mod components;
+pub mod compose;
 pub mod containers;
+pub mod deployments;
 pub mod images;
 pub mod machines;
 pub mod networks;
+pub mod pods;
 pub mod prune_dialog;
+pub mod services;
+pub mod settings;
 pub mod volumes;
 
 pub use activity::ActivityMonitorView;
+pub use compose::ComposeView;
 pub use containers::ContainersView;
+pub use deployments::DeploymentsView;
 pub use images::ImagesView;
 pub use machines::MachinesView;
 pub use networks::NetworksView;
+pub use pods::PodsView;
 pub use prune_dialog::{PruneDialog, PruneOptions};
+pub use services::ServicesView;
+pub use settings::SettingsDialog;
 pub use volumes::VolumesView;

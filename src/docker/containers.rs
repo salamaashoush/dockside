@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bollard::container::{
-    Config, CreateContainerOptions, ListContainersOptions, LogsOptions, RemoveContainerOptions,
-    RestartContainerOptions, StartContainerOptions, StopContainerOptions,
+    Config, CreateContainerOptions, KillContainerOptions, ListContainersOptions, LogsOptions,
+    RemoveContainerOptions, RestartContainerOptions, StartContainerOptions, StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use futures::stream::StreamExt;
@@ -42,6 +42,10 @@ impl std::fmt::Display for ContainerState {
 impl ContainerState {
     pub fn is_running(&self) -> bool {
         matches!(self, ContainerState::Running)
+    }
+
+    pub fn is_paused(&self) -> bool {
+        matches!(self, ContainerState::Paused)
     }
 
     pub fn from_str(s: &str) -> Self {
@@ -218,6 +222,124 @@ impl DockerClient {
                     v: false,
                     link: false,
                 }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn pause_container(&self, id: &str) -> Result<()> {
+        let docker = self.client()?;
+        docker.pause_container(id).await?;
+        Ok(())
+    }
+
+    pub async fn unpause_container(&self, id: &str) -> Result<()> {
+        let docker = self.client()?;
+        docker.unpause_container(id).await?;
+        Ok(())
+    }
+
+    pub async fn kill_container(&self, id: &str, signal: Option<&str>) -> Result<()> {
+        let docker = self.client()?;
+        docker
+            .kill_container(
+                id,
+                Some(KillContainerOptions {
+                    signal: signal.unwrap_or("SIGKILL").to_string(),
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn rename_container(&self, id: &str, new_name: &str) -> Result<()> {
+        let docker = self.client()?;
+        docker
+            .rename_container(
+                id,
+                bollard::container::RenameContainerOptions { name: new_name },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn commit_container(
+        &self,
+        id: &str,
+        repo: &str,
+        tag: &str,
+        comment: Option<&str>,
+        author: Option<&str>,
+    ) -> Result<String> {
+        let docker = self.client()?;
+        let result = docker
+            .commit_container(
+                bollard::image::CommitContainerOptions {
+                    container: id,
+                    repo,
+                    tag,
+                    comment: comment.unwrap_or(""),
+                    author: author.unwrap_or(""),
+                    pause: true,
+                    changes: None,
+                },
+                bollard::container::Config::<String>::default(),
+            )
+            .await?;
+        Ok(result.id.unwrap_or_default())
+    }
+
+    pub async fn get_container_top(&self, id: &str) -> Result<Vec<Vec<String>>> {
+        let docker = self.client()?;
+        let result = docker
+            .top_processes(id, Some(bollard::container::TopOptions { ps_args: "aux" }))
+            .await?;
+        Ok(result.processes.unwrap_or_default())
+    }
+
+    pub async fn export_container(&self, id: &str, output_path: &str) -> Result<()> {
+        use futures::TryStreamExt;
+        use tokio::io::AsyncWriteExt;
+
+        let docker = self.client()?;
+        let stream = docker.export_container(id);
+        let mut file = tokio::fs::File::create(output_path).await?;
+
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.try_next().await? {
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        Ok(())
+    }
+
+    pub async fn copy_from_container(&self, id: &str, path: &str) -> Result<Vec<u8>> {
+        use futures::TryStreamExt;
+
+        let docker = self.client()?;
+        let stream = docker.download_from_container(
+            id,
+            Some(bollard::container::DownloadFromContainerOptions { path }),
+        );
+
+        let mut data = Vec::new();
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.try_next().await? {
+            data.extend_from_slice(&chunk);
+        }
+        Ok(data)
+    }
+
+    pub async fn copy_to_container(&self, id: &str, path: &str, data: Vec<u8>) -> Result<()> {
+        let docker = self.client()?;
+        docker
+            .upload_to_container(
+                id,
+                Some(bollard::container::UploadToContainerOptions {
+                    path,
+                    no_overwrite_dir_non_dir: "false",
+                }),
+                data.into(),
             )
             .await?;
         Ok(())

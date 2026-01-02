@@ -15,6 +15,7 @@ use crate::state::MachineTabState;
 use crate::terminal::TerminalView;
 
 type MachineActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
+type MachineEditCallback = Rc<dyn Fn(&ColimaVm, &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
 type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
@@ -28,6 +29,7 @@ pub struct MachineDetail {
     on_stop: Option<MachineActionCallback>,
     on_restart: Option<MachineActionCallback>,
     on_delete: Option<MachineActionCallback>,
+    on_edit: Option<MachineEditCallback>,
     on_tab_change: Option<TabChangeCallback>,
     on_navigate_path: Option<FileNavigateCallback>,
     on_refresh_logs: Option<RefreshCallback>,
@@ -44,6 +46,7 @@ impl MachineDetail {
             on_stop: None,
             on_restart: None,
             on_delete: None,
+            on_edit: None,
             on_tab_change: None,
             on_navigate_path: None,
             on_refresh_logs: None,
@@ -99,6 +102,14 @@ impl MachineDetail {
         F: Fn(&str, &mut Window, &mut App) + 'static,
     {
         self.on_delete = Some(Rc::new(callback));
+        self
+    }
+
+    pub fn on_edit<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&ColimaVm, &mut Window, &mut App) + 'static,
+    {
+        self.on_edit = Some(Rc::new(callback));
         self
     }
 
@@ -608,7 +619,9 @@ impl MachineDetail {
         let on_stop = self.on_stop.clone();
         let on_restart = self.on_restart.clone();
         let on_delete = self.on_delete.clone();
+        let on_edit = self.on_edit.clone();
         let on_tab_change = self.on_tab_change.clone();
+        let machine_for_edit = machine.clone();
 
         let tabs = vec!["Info", "Logs", "Terminal", "Files"];
 
@@ -679,6 +692,19 @@ impl MachineDetail {
                             .on_click(move |_ev, window, cx| {
                                 if let Some(ref cb) = on_restart {
                                     cb(&name, window, cx);
+                                }
+                            })
+                    })
+                    .child({
+                        let on_edit = on_edit.clone();
+                        let machine = machine_for_edit.clone();
+                        Button::new("edit")
+                            .icon(Icon::new(IconName::Settings))
+                            .ghost()
+                            .small()
+                            .on_click(move |_ev, window, cx| {
+                                if let Some(ref cb) = on_edit {
+                                    cb(&machine, window, cx);
                                 }
                             })
                     })

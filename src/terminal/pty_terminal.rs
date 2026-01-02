@@ -13,6 +13,13 @@ pub enum TerminalSessionType {
     ColimaSsh { profile: Option<String> },
     /// Exec into a Docker container
     DockerExec { container_id: String, shell: Option<String> },
+    /// Exec into a Kubernetes pod
+    KubectlExec {
+        pod_name: String,
+        namespace: String,
+        container: Option<String>,
+        shell: Option<String>,
+    },
     /// Custom command
     Custom { program: String, args: Vec<String> },
 }
@@ -24,6 +31,20 @@ impl TerminalSessionType {
 
     pub fn docker_exec(container_id: String, shell: Option<String>) -> Self {
         Self::DockerExec { container_id, shell }
+    }
+
+    pub fn kubectl_exec(
+        pod_name: String,
+        namespace: String,
+        container: Option<String>,
+        shell: Option<String>,
+    ) -> Self {
+        Self::KubectlExec {
+            pod_name,
+            namespace,
+            container,
+            shell,
+        }
     }
 
     fn build_command(&self) -> CommandBuilder {
@@ -49,6 +70,26 @@ impl TerminalSessionType {
                 cmd.arg(shell.as_deref().unwrap_or("/bin/sh"));
                 cmd
             }
+            Self::KubectlExec {
+                pod_name,
+                namespace,
+                container,
+                shell,
+            } => {
+                let mut cmd = CommandBuilder::new("kubectl");
+                cmd.arg("exec");
+                cmd.arg("-it");
+                cmd.arg("-n");
+                cmd.arg(namespace);
+                if let Some(c) = container {
+                    cmd.arg("-c");
+                    cmd.arg(c);
+                }
+                cmd.arg(pod_name);
+                cmd.arg("--");
+                cmd.arg(shell.as_deref().unwrap_or("/bin/sh"));
+                cmd
+            }
             Self::Custom { program, args } => {
                 let mut cmd = CommandBuilder::new(program);
                 for arg in args {
@@ -68,6 +109,9 @@ impl TerminalSessionType {
             }
             Self::DockerExec { container_id, .. } => {
                 format!("Container: {}", &container_id[..12.min(container_id.len())])
+            }
+            Self::KubectlExec { pod_name, namespace, .. } => {
+                format!("Pod: {}/{}", namespace, pod_name)
             }
             Self::Custom { program, .. } => format!("Terminal: {}", program),
         }

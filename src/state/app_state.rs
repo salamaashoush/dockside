@@ -1,15 +1,18 @@
 use crate::colima::{ColimaVm, VmOsInfo, VmFileEntry};
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
+use crate::kubernetes::PodInfo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CurrentView {
     #[default]
     Containers,
+    Compose,
     Volumes,
     Images,
     Networks,
     Pods,
     Services,
+    Deployments,
     Machines,
     ActivityMonitor,
     Commands,
@@ -19,11 +22,13 @@ impl CurrentView {
     pub fn title(&self) -> &'static str {
         match self {
             CurrentView::Containers => "Containers",
+            CurrentView::Compose => "Compose",
             CurrentView::Volumes => "Volumes",
             CurrentView::Images => "Images",
             CurrentView::Networks => "Networks",
             CurrentView::Pods => "Pods",
             CurrentView::Services => "Services",
+            CurrentView::Deployments => "Deployments",
             CurrentView::Machines => "Machines",
             CurrentView::ActivityMonitor => "Activity Monitor",
             CurrentView::Commands => "Commands",
@@ -38,6 +43,7 @@ pub enum SelectedItem {
     Volume(VolumeInfo),
     Network(NetworkInfo),
     Machine(ColimaVm),
+    Pod(PodInfo),
 }
 
 /// State for machine-specific data (logs, files, terminal)

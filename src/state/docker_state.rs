@@ -2,6 +2,7 @@ use gpui::{App, AppContext, Entity, EventEmitter, Global};
 
 use crate::colima::ColimaVm;
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
+use crate::kubernetes::{DeploymentInfo, PodInfo, ServiceInfo};
 
 use super::app_state::{CurrentView, MachineTabState, SelectedItem};
 
@@ -26,6 +27,8 @@ pub enum StateChanged {
     ImagesUpdated,
     VolumesUpdated,
     NetworksUpdated,
+    PodsUpdated,
+    NamespacesUpdated,
     SelectionChanged,
     ViewChanged,
     Loading(bool),
@@ -42,16 +45,81 @@ pub enum StateChanged {
         image_id: String,
         data: ImageInspectData,
     },
+    PodLogsLoaded {
+        pod_name: String,
+        namespace: String,
+        logs: String,
+    },
+    PodDescribeLoaded {
+        pod_name: String,
+        namespace: String,
+        describe: String,
+    },
+    PodYamlLoaded {
+        pod_name: String,
+        namespace: String,
+        yaml: String,
+    },
+    /// Request to open a machine with a specific tab
+    MachineTabRequest {
+        machine_name: String,
+        tab: usize,
+    },
+    /// Request to open a container with a specific tab
+    ContainerTabRequest {
+        container_id: String,
+        tab: usize,
+    },
+    /// Request to open a pod with a specific tab
+    PodTabRequest {
+        pod_name: String,
+        namespace: String,
+        tab: usize,
+    },
+    // Services
+    ServicesUpdated,
+    ServiceYamlLoaded {
+        service_name: String,
+        namespace: String,
+        yaml: String,
+    },
+    /// Request to open a service with a specific tab
+    ServiceTabRequest {
+        service_name: String,
+        namespace: String,
+        tab: usize,
+    },
+    // Deployments
+    DeploymentsUpdated,
+    DeploymentYamlLoaded {
+        deployment_name: String,
+        namespace: String,
+        yaml: String,
+    },
+    /// Request to open a deployment with a specific tab
+    DeploymentTabRequest {
+        deployment_name: String,
+        namespace: String,
+        tab: usize,
+    },
 }
 
 /// Global docker state - all views subscribe to this
 pub struct DockerState {
-    // Data
+    // Docker Data
     pub colima_vms: Vec<ColimaVm>,
     pub containers: Vec<ContainerInfo>,
     pub images: Vec<ImageInfo>,
     pub volumes: Vec<VolumeInfo>,
     pub networks: Vec<NetworkInfo>,
+
+    // Kubernetes Data
+    pub pods: Vec<PodInfo>,
+    pub services: Vec<ServiceInfo>,
+    pub deployments: Vec<DeploymentInfo>,
+    pub namespaces: Vec<String>,
+    pub selected_namespace: String,
+    pub k8s_available: bool,
 
     // UI state
     pub current_view: CurrentView,
@@ -71,6 +139,12 @@ impl DockerState {
             images: Vec::new(),
             volumes: Vec::new(),
             networks: Vec::new(),
+            pods: Vec::new(),
+            services: Vec::new(),
+            deployments: Vec::new(),
+            namespaces: vec!["default".to_string()],
+            selected_namespace: "default".to_string(),
+            k8s_available: false,
             current_view: CurrentView::default(),
             selected_item: None,
             active_detail_tab: 0,
@@ -124,6 +198,51 @@ impl DockerState {
         self.networks.iter().find(|n| n.id == id)
     }
 
+    // Pods (Kubernetes)
+    pub fn set_pods(&mut self, pods: Vec<PodInfo>) {
+        self.pods = pods;
+    }
+
+    pub fn get_pod(&self, name: &str, namespace: &str) -> Option<&PodInfo> {
+        self.pods
+            .iter()
+            .find(|p| p.name == name && p.namespace == namespace)
+    }
+
+    pub fn set_namespaces(&mut self, namespaces: Vec<String>) {
+        self.namespaces = namespaces;
+    }
+
+    pub fn set_selected_namespace(&mut self, namespace: String) {
+        self.selected_namespace = namespace;
+    }
+
+    pub fn set_k8s_available(&mut self, available: bool) {
+        self.k8s_available = available;
+    }
+
+    // Services (Kubernetes)
+    pub fn set_services(&mut self, services: Vec<ServiceInfo>) {
+        self.services = services;
+    }
+
+    pub fn get_service(&self, name: &str, namespace: &str) -> Option<&ServiceInfo> {
+        self.services
+            .iter()
+            .find(|s| s.name == name && s.namespace == namespace)
+    }
+
+    // Deployments (Kubernetes)
+    pub fn set_deployments(&mut self, deployments: Vec<DeploymentInfo>) {
+        self.deployments = deployments;
+    }
+
+    pub fn get_deployment(&self, name: &str, namespace: &str) -> Option<&DeploymentInfo> {
+        self.deployments
+            .iter()
+            .find(|d| d.name == name && d.namespace == namespace)
+    }
+
     // Selection
     pub fn select_machine(&mut self, name: &str) {
         if let Some(vm) = self.get_machine(name).cloned() {
@@ -157,6 +276,13 @@ impl DockerState {
     pub fn select_network(&mut self, id: &str) {
         if let Some(network) = self.get_network(id).cloned() {
             self.selected_item = Some(SelectedItem::Network(network));
+            self.active_detail_tab = 0;
+        }
+    }
+
+    pub fn select_pod(&mut self, name: &str, namespace: &str) {
+        if let Some(pod) = self.get_pod(name, namespace).cloned() {
+            self.selected_item = Some(SelectedItem::Pod(pod));
             self.active_detail_tab = 0;
         }
     }
