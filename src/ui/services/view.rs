@@ -1,4 +1,6 @@
-use gpui::{Context, Entity, Render, Styled, Window, div, prelude::*, px};
+use std::time::Duration;
+
+use gpui::{Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
 use gpui_component::{
   WindowExt,
   button::{Button, ButtonVariants},
@@ -10,7 +12,7 @@ use super::detail::ServiceDetail;
 use super::list::{ServiceList, ServiceListEvent};
 use crate::kubernetes::ServiceInfo;
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state};
+use crate::state::{DockerState, StateChanged, docker_state, settings_state};
 
 /// Main services view with list and detail panels
 pub struct ServicesView {
@@ -73,7 +75,21 @@ impl ServicesView {
     })
     .detach();
 
+    // Start periodic refresh
+    let refresh_interval = settings_state(cx).read(cx).settings.container_refresh_interval;
+    cx.spawn(async move |_this, cx| {
+      loop {
+        Timer::after(Duration::from_secs(refresh_interval)).await;
+        let _ = cx.update(|cx| {
+          services::refresh_machines(cx);
+          services::refresh_services(cx);
+        });
+      }
+    })
+    .detach();
+
     // Trigger initial data load
+    services::refresh_machines(cx);
     services::refresh_services(cx);
 
     Self {

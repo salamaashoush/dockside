@@ -2535,6 +2535,26 @@ pub fn load_initial_data(cx: &mut App) {
 // Kubernetes Functions
 // ============================================================================
 
+/// Refresh the list of Colima machines
+pub fn refresh_machines(cx: &mut App) {
+  let state = docker_state(cx);
+
+  let task = cx
+    .background_executor()
+    .spawn(async move { ColimaClient::list().unwrap_or_default() });
+
+  cx.spawn(async move |cx| {
+    let vms = task.await;
+    cx.update(|cx| {
+      state.update(cx, |state, cx| {
+        state.set_machines(vms);
+        cx.emit(StateChanged::MachinesUpdated);
+      });
+    })
+  })
+  .detach();
+}
+
 /// Refresh the list of pods
 pub fn refresh_pods(cx: &mut App) {
   let state = docker_state(cx);

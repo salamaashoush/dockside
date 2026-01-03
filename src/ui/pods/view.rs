@@ -133,12 +133,13 @@ impl PodsView {
     )
     .detach();
 
-    // Start periodic pod refresh
+    // Start periodic pod and machine refresh
     let refresh_interval = settings_state(cx).read(cx).settings.container_refresh_interval;
     cx.spawn(async move |_this, cx| {
       loop {
         Timer::after(Duration::from_secs(refresh_interval)).await;
         let _ = cx.update(|cx| {
+          services::refresh_machines(cx);
           services::refresh_pods(cx);
         });
       }
@@ -146,6 +147,7 @@ impl PodsView {
     .detach();
 
     // Initial data load
+    services::refresh_machines(cx);
     services::refresh_pods(cx);
     services::refresh_namespaces(cx);
 
