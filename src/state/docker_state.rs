@@ -4,7 +4,7 @@ use crate::colima::ColimaVm;
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
 use crate::kubernetes::{DeploymentInfo, PodInfo, ServiceInfo};
 
-use super::app_state::{CurrentView, MachineTabState, SelectedItem};
+use super::app_state::CurrentView;
 
 use crate::docker::VolumeFileEntry;
 
@@ -29,9 +29,8 @@ pub enum StateChanged {
   NetworksUpdated,
   PodsUpdated,
   NamespacesUpdated,
-  SelectionChanged,
   ViewChanged,
-  Loading(bool),
+  Loading,
   VolumeFilesLoaded {
     volume_name: String,
     path: String,
@@ -39,7 +38,6 @@ pub enum StateChanged {
   },
   VolumeFilesError {
     volume_name: String,
-    error: String,
   },
   ImageInspectLoaded {
     image_id: String,
@@ -65,15 +63,14 @@ pub enum StateChanged {
     machine_name: String,
     tab: usize,
   },
+  /// Request to open edit dialog for a machine
+  EditMachineRequest {
+    machine_name: String,
+  },
   /// Request to open a container with a specific tab
   ContainerTabRequest {
     container_id: String,
     tab: usize,
-  },
-  /// Container processes loaded
-  ContainerProcessesLoaded {
-    container_id: String,
-    processes: Vec<Vec<String>>,
   },
   /// Request to open rename dialog for a container
   RenameContainerRequest {
@@ -149,9 +146,7 @@ pub struct DockerState {
 
   // UI state
   pub current_view: CurrentView,
-  pub selected_item: Option<SelectedItem>,
   pub active_detail_tab: usize,
-  pub machine_tab_state: MachineTabState,
 
   // Loading states
   pub is_loading: bool,
@@ -172,9 +167,7 @@ impl DockerState {
       selected_namespace: "default".to_string(),
       k8s_available: false,
       current_view: CurrentView::default(),
-      selected_item: None,
       active_detail_tab: 0,
-      machine_tab_state: MachineTabState::new(),
       is_loading: true,
     }
   }
@@ -184,17 +177,9 @@ impl DockerState {
     self.colima_vms = vms;
   }
 
-  pub fn get_machine(&self, name: &str) -> Option<&ColimaVm> {
-    self.colima_vms.iter().find(|vm| vm.name == name)
-  }
-
   // Containers
   pub fn set_containers(&mut self, containers: Vec<ContainerInfo>) {
     self.containers = containers;
-  }
-
-  pub fn get_container(&self, id: &str) -> Option<&ContainerInfo> {
-    self.containers.iter().find(|c| c.id == id)
   }
 
   // Images
@@ -202,26 +187,14 @@ impl DockerState {
     self.images = images;
   }
 
-  pub fn get_image(&self, id: &str) -> Option<&ImageInfo> {
-    self.images.iter().find(|i| i.id == id)
-  }
-
   // Volumes
   pub fn set_volumes(&mut self, volumes: Vec<VolumeInfo>) {
     self.volumes = volumes;
   }
 
-  pub fn get_volume(&self, name: &str) -> Option<&VolumeInfo> {
-    self.volumes.iter().find(|v| v.name == name)
-  }
-
   // Networks
   pub fn set_networks(&mut self, networks: Vec<NetworkInfo>) {
     self.networks = networks;
-  }
-
-  pub fn get_network(&self, id: &str) -> Option<&NetworkInfo> {
-    self.networks.iter().find(|n| n.id == id)
   }
 
   // Pods (Kubernetes)
@@ -269,64 +242,10 @@ impl DockerState {
       .find(|d| d.name == name && d.namespace == namespace)
   }
 
-  // Selection
-  pub fn select_machine(&mut self, name: &str) {
-    if let Some(vm) = self.get_machine(name).cloned() {
-      self.selected_item = Some(SelectedItem::Machine(vm));
-      self.active_detail_tab = 0;
-      self.machine_tab_state = MachineTabState::new();
-    }
-  }
-
-  pub fn select_container(&mut self, id: &str) {
-    if let Some(container) = self.get_container(id).cloned() {
-      self.selected_item = Some(SelectedItem::Container(container));
-      self.active_detail_tab = 0;
-    }
-  }
-
-  pub fn select_image(&mut self, id: &str) {
-    if let Some(image) = self.get_image(id).cloned() {
-      self.selected_item = Some(SelectedItem::Image(image));
-      self.active_detail_tab = 0;
-    }
-  }
-
-  pub fn select_volume(&mut self, name: &str) {
-    if let Some(volume) = self.get_volume(name).cloned() {
-      self.selected_item = Some(SelectedItem::Volume(volume));
-      self.active_detail_tab = 0;
-    }
-  }
-
-  pub fn select_network(&mut self, id: &str) {
-    if let Some(network) = self.get_network(id).cloned() {
-      self.selected_item = Some(SelectedItem::Network(network));
-      self.active_detail_tab = 0;
-    }
-  }
-
-  pub fn select_pod(&mut self, name: &str, namespace: &str) {
-    if let Some(pod) = self.get_pod(name, namespace).cloned() {
-      self.selected_item = Some(SelectedItem::Pod(pod));
-      self.active_detail_tab = 0;
-    }
-  }
-
-  pub fn clear_selection(&mut self) {
-    self.selected_item = None;
-    self.active_detail_tab = 0;
-  }
-
   // Navigation
   pub fn set_view(&mut self, view: CurrentView) {
     self.current_view = view;
-    self.selected_item = None;
     self.active_detail_tab = 0;
-  }
-
-  pub fn set_active_tab(&mut self, tab: usize) {
-    self.active_detail_tab = tab;
   }
 }
 

@@ -57,7 +57,6 @@ pub struct CreateVolumeOptions {
   pub name: String,
   pub driver: VolumeDriver,
   pub labels: Vec<(String, String)>,
-  pub driver_opts: Vec<(String, String)>,
 }
 
 /// Dialog for creating a new volume
@@ -126,7 +125,6 @@ impl CreateVolumeDialog {
       name,
       driver,
       labels: self.labels.clone(),
-      driver_opts: Vec::new(),
     }
   }
 }

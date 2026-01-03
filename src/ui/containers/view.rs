@@ -215,17 +215,19 @@ impl ContainersView {
           let name_input = name_input_clone.clone();
           let id = container_id.clone();
 
-          vec![Button::new("rename")
-            .label("Rename")
-            .primary()
-            .on_click(move |_ev, window, cx| {
-              let new_name = name_input.read(cx).text().to_string();
-              if !new_name.is_empty() {
-                services::rename_container(id.clone(), new_name, cx);
-                window.close_dialog(cx);
-              }
-            })
-            .into_any_element()]
+          vec![
+            Button::new("rename")
+              .label("Rename")
+              .primary()
+              .on_click(move |_ev, window, cx| {
+                let new_name = name_input.read(cx).text().to_string();
+                if !new_name.is_empty() {
+                  services::rename_container(id.clone(), new_name, cx);
+                  window.close_dialog(cx);
+                }
+              })
+              .into_any_element(),
+          ]
         })
     });
   }
@@ -243,7 +245,11 @@ impl ContainersView {
     };
 
     let repo_input = cx.new(|cx| InputState::new(window, cx).placeholder("Repository (e.g., myrepo/myimage)"));
-    let tag_input = cx.new(|cx| InputState::new(window, cx).placeholder("Tag").default_value("latest".to_string()));
+    let tag_input = cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("Tag")
+        .default_value("latest".to_string())
+    });
     let comment_input = cx.new(|cx| {
       InputState::new(window, cx).placeholder(format!("Comment (optional, from container: {})", container_name))
     });
@@ -277,25 +283,27 @@ impl ContainersView {
           let comment = comment_clone.clone();
           let id = container_id.clone();
 
-          vec![Button::new("commit")
-            .label("Commit")
-            .primary()
-            .on_click(move |_ev, window, cx| {
-              let repo_text = repo.read(cx).text().to_string();
-              let tag_text = tag.read(cx).text().to_string();
-              let comment_text = comment.read(cx).text().to_string();
+          vec![
+            Button::new("commit")
+              .label("Commit")
+              .primary()
+              .on_click(move |_ev, window, cx| {
+                let repo_text = repo.read(cx).text().to_string();
+                let tag_text = tag.read(cx).text().to_string();
+                let comment_text = comment.read(cx).text().to_string();
 
-              if !repo_text.is_empty() {
-                let comment_opt = if comment_text.is_empty() {
-                  None
-                } else {
-                  Some(comment_text)
-                };
-                services::commit_container(id.clone(), repo_text, tag_text, comment_opt, None, cx);
-                window.close_dialog(cx);
-              }
-            })
-            .into_any_element()]
+                if !repo_text.is_empty() {
+                  let comment_opt = if comment_text.is_empty() {
+                    None
+                  } else {
+                    Some(comment_text)
+                  };
+                  services::commit_container(id.clone(), repo_text, tag_text, comment_opt, None, cx);
+                  window.close_dialog(cx);
+                }
+              })
+              .into_any_element(),
+          ]
         })
     });
   }
@@ -344,27 +352,24 @@ impl ContainersView {
           let path = path_clone.clone();
           let id = container_id.clone();
 
-          vec![Button::new("export")
-            .label("Export")
-            .primary()
-            .on_click(move |_ev, window, cx| {
-              let path_text = path.read(cx).text().to_string();
-              if !path_text.is_empty() {
-                services::export_container(id.clone(), path_text, cx);
-                window.close_dialog(cx);
-              }
-            })
-            .into_any_element()]
+          vec![
+            Button::new("export")
+              .label("Export")
+              .primary()
+              .on_click(move |_ev, window, cx| {
+                let path_text = path.read(cx).text().to_string();
+                if !path_text.is_empty() {
+                  services::export_container(id.clone(), path_text, cx);
+                  window.close_dialog(cx);
+                }
+              })
+              .into_any_element(),
+          ]
         })
     });
   }
 
-  fn on_select_container(
-    &mut self,
-    container: &ContainerInfo,
-    window: &mut Window,
-    cx: &mut Context<'_, Self>,
-  ) {
+  fn on_select_container(&mut self, container: &ContainerInfo, window: &mut Window, cx: &mut Context<'_, Self>) {
     self.selected_container = Some(container.clone());
     self.active_tab = 0;
     self.terminal_view = None;
@@ -582,7 +587,11 @@ impl ContainersView {
               // Navigate to directory
               this.container_tab_state.current_path = target;
               if let Some(ref container) = this.selected_container {
-                this.load_container_files(&container.id.clone(), &this.container_tab_state.current_path.clone(), cx);
+                this.load_container_files(
+                  &container.id.clone(),
+                  &this.container_tab_state.current_path.clone(),
+                  cx,
+                );
               }
             } else {
               // View file - set up the editor
@@ -602,12 +611,7 @@ impl ContainersView {
     }
   }
 
-  fn load_container_data(
-    &mut self,
-    container_id: &str,
-    _window: &mut Window,
-    cx: &mut Context<'_, Self>,
-  ) {
+  fn load_container_data(&mut self, container_id: &str, _window: &mut Window, cx: &mut Context<'_, Self>) {
     self.container_tab_state.logs_loading = true;
     self.container_tab_state.inspect_loading = true;
 
@@ -699,8 +703,7 @@ impl Render for ContainersView {
 
     if let Some(ref editor) = self.inspect_editor {
       let inspect = &self.container_tab_state.inspect;
-      if !inspect.is_empty() && !self.container_tab_state.inspect_loading && self.last_synced_inspect != *inspect
-      {
+      if !inspect.is_empty() && !self.container_tab_state.inspect_loading && self.last_synced_inspect != *inspect {
         let inspect_clone = inspect.clone();
         editor.update(cx, |state, cx| {
           state.replace(&inspect_clone, window, cx);

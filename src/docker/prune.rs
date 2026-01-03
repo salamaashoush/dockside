@@ -9,11 +9,16 @@ use super::DockerClient;
 /// Result of a prune operation
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PruneResult {
+  // Docker
   pub containers_deleted: Vec<String>,
   pub images_deleted: Vec<String>,
   pub volumes_deleted: Vec<String>,
   pub networks_deleted: Vec<String>,
   pub space_reclaimed: u64,
+  // Kubernetes
+  pub pods_deleted: Vec<String>,
+  pub deployments_deleted: Vec<String>,
+  pub services_deleted: Vec<String>,
 }
 
 impl PruneResult {
@@ -26,6 +31,9 @@ impl PruneResult {
       + self.images_deleted.len()
       + self.volumes_deleted.len()
       + self.networks_deleted.len()
+      + self.pods_deleted.len()
+      + self.deployments_deleted.len()
+      + self.services_deleted.len()
   }
 
   pub fn is_empty(&self) -> bool {

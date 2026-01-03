@@ -10,17 +10,6 @@ impl ColimaClient {
     Self
   }
 
-  /// Check if colima is installed
-  pub fn is_installed(&self) -> bool {
-    Command::new("colima")
-      .arg("version")
-      .stdout(Stdio::null())
-      .stderr(Stdio::null())
-      .status()
-      .map(|s| s.success())
-      .unwrap_or(false)
-  }
-
   /// Get colima version
   pub fn version(&self) -> Result<String> {
     let output = Command::new("colima")
@@ -366,40 +355,6 @@ impl ColimaClient {
     Ok(())
   }
 
-  /// SSH into a VM
-  pub fn ssh_command(&self, name: Option<&str>) -> Command {
-    let mut cmd = Command::new("colima");
-    cmd.arg("ssh");
-
-    if let Some(n) = name
-      && n != "default"
-    {
-      cmd.arg("--profile").arg(n);
-    }
-
-    cmd
-  }
-
-  /// Get SSH config for a VM
-  pub fn ssh_config(&self, name: Option<&str>) -> Result<String> {
-    let mut cmd = Command::new("colima");
-    cmd.arg("ssh-config");
-
-    if let Some(n) = name
-      && n != "default"
-    {
-      cmd.arg("--profile").arg(n);
-    }
-
-    let output = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output()?;
-
-    if output.status.success() {
-      Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-      Err(anyhow!("Failed to get SSH config"))
-    }
-  }
-
   /// Get the docker socket path for a VM
   pub fn socket_path(&self, name: Option<&str>) -> String {
     let home = dirs::home_dir().unwrap_or_default();
@@ -518,7 +473,6 @@ impl ColimaClient {
       if parts.len() >= 8 {
         let permissions = parts[0].to_string();
         let owner = parts.get(2).unwrap_or(&"").to_string();
-        let group = parts.get(3).unwrap_or(&"").to_string();
         let size: u64 = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
 
         // Date can be in different formats
@@ -560,7 +514,6 @@ impl ColimaClient {
           size,
           permissions,
           owner,
-          group,
           modified,
         });
       }

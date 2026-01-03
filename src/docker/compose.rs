@@ -5,13 +5,11 @@ use super::{ContainerInfo, ContainerState};
 /// Docker Compose label keys
 pub const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
 pub const COMPOSE_SERVICE_LABEL: &str = "com.docker.compose.service";
-pub const COMPOSE_WORKING_DIR_LABEL: &str = "com.docker.compose.project.working_dir";
 
 /// Represents a Docker Compose project with its services
 #[derive(Debug, Clone)]
 pub struct ComposeProject {
   pub name: String,
-  pub working_dir: Option<String>,
   pub services: Vec<ComposeService>,
 }
 
@@ -55,10 +53,8 @@ impl ComposeProject {
 pub struct ComposeService {
   pub name: String,
   pub container_id: String,
-  pub container_name: String,
   pub image: String,
   pub state: ContainerState,
-  pub status: String,
 }
 
 impl ComposeService {
@@ -67,10 +63,8 @@ impl ComposeService {
     Self {
       name: service_name.to_string(),
       container_id: container.id.clone(),
-      container_name: container.name.clone(),
       image: container.image.clone(),
       state: container.state,
-      status: container.status.clone(),
     }
   }
 }
@@ -89,15 +83,12 @@ pub fn extract_compose_projects(containers: &[ContainerInfo]) -> Vec<ComposeProj
         .cloned()
         .unwrap_or_else(|| container.name.clone());
 
-      let working_dir = container.labels.get(COMPOSE_WORKING_DIR_LABEL).cloned();
-
       let service = ComposeService::from_container(container, &service_name);
 
       projects
         .entry(project_name.clone())
         .or_insert_with(|| ComposeProject {
           name: project_name.clone(),
-          working_dir: working_dir.clone(),
           services: Vec::new(),
         })
         .services

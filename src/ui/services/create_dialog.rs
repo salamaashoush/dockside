@@ -45,14 +45,6 @@ impl ServiceType {
     }
   }
 
-  pub fn description(&self) -> &'static str {
-    match self {
-      ServiceType::ClusterIP => "Internal cluster access only",
-      ServiceType::NodePort => "Expose on each node's IP at a static port",
-      ServiceType::LoadBalancer => "External load balancer (cloud provider)",
-    }
-  }
-
   pub fn all() -> Vec<ServiceType> {
     vec![ServiceType::ClusterIP, ServiceType::NodePort, ServiceType::LoadBalancer]
   }
@@ -339,7 +331,7 @@ impl CreateServiceDialog {
                   Button::new("tcp")
                     .label("TCP")
                     .xsmall()
-                    .when(port_protocol_tcp, |b| b.primary())
+                    .when(port_protocol_tcp, Button::primary)
                     .when(!port_protocol_tcp, |b| b.ghost())
                     .on_click(cx.listener(|this, _ev, _window, cx| {
                       this.port_protocol_tcp = true;
@@ -350,7 +342,7 @@ impl CreateServiceDialog {
                   Button::new("udp")
                     .label("UDP")
                     .xsmall()
-                    .when(!port_protocol_tcp, |b| b.primary())
+                    .when(!port_protocol_tcp, Button::primary)
                     .when(port_protocol_tcp, |b| b.ghost())
                     .on_click(cx.listener(|this, _ev, _window, cx| {
                       this.port_protocol_tcp = false;

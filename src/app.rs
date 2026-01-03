@@ -51,7 +51,7 @@ impl DockerApp {
 
     // Subscribe to state changes for re-rendering on view changes
     cx.subscribe(&docker_state, |_this, _state, event: &StateChanged, cx| {
-      if matches!(event, StateChanged::ViewChanged | StateChanged::Loading(_)) {
+      if matches!(event, StateChanged::ViewChanged | StateChanged::Loading) {
         cx.notify();
       }
     })
@@ -68,10 +68,14 @@ impl DockerApp {
     cx.subscribe(&disp, |this, _disp, event: &DispatcherEvent, cx| {
       match event {
         DispatcherEvent::TaskCompleted { message, .. } => {
-          this.pending_notifications.push((NotificationType::Success, message.clone()));
+          this
+            .pending_notifications
+            .push((NotificationType::Success, message.clone()));
         }
         DispatcherEvent::TaskFailed { error, .. } => {
-          this.pending_notifications.push((NotificationType::Error, error.clone()));
+          this
+            .pending_notifications
+            .push((NotificationType::Error, error.clone()));
         }
       }
       cx.notify();

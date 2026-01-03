@@ -174,115 +174,6 @@ pub struct CreateContainerOptions {
   pub network: Option<String>,
 }
 
-impl CreateContainerOptions {
-  pub fn to_docker_args(&self) -> Vec<String> {
-    let mut args = vec!["run".to_string()];
-
-    // Always run detached
-    args.push("-d".to_string());
-
-    // Platform
-    if let Some(platform) = self.platform.as_docker_arg() {
-      args.push("--platform".to_string());
-      args.push(platform.to_string());
-    }
-
-    if let Some(ref name) = self.name
-      && !name.is_empty()
-    {
-      args.push("--name".to_string());
-      args.push(name.clone());
-    }
-
-    if self.remove_after_stop {
-      args.push("--rm".to_string());
-    }
-
-    if let Some(restart) = self.restart_policy.as_docker_arg() {
-      args.push("--restart".to_string());
-      args.push(restart.to_string());
-    }
-
-    if let Some(ref entrypoint) = self.entrypoint
-      && !entrypoint.is_empty()
-    {
-      args.push("--entrypoint".to_string());
-      args.push(entrypoint.clone());
-    }
-
-    if let Some(ref workdir) = self.workdir
-      && !workdir.is_empty()
-    {
-      args.push("--workdir".to_string());
-      args.push(workdir.clone());
-    }
-
-    if self.privileged {
-      args.push("--privileged".to_string());
-    }
-
-    if self.read_only {
-      args.push("--read-only".to_string());
-    }
-
-    if self.docker_init {
-      args.push("--init".to_string());
-    }
-
-    // Environment variables
-    for (key, value) in &self.env_vars {
-      args.push("-e".to_string());
-      args.push(format!("{}={}", key, value));
-    }
-
-    // Port mappings
-    for (host, container, protocol) in &self.ports {
-      args.push("-p".to_string());
-      if protocol == "udp" {
-        args.push(format!("{}:{}/udp", host, container));
-      } else {
-        args.push(format!("{}:{}", host, container));
-      }
-    }
-
-    // Volume mounts
-    for (host, container, ro) in &self.volumes {
-      args.push("-v".to_string());
-      if *ro {
-        args.push(format!("{}:{}:ro", host, container));
-      } else {
-        args.push(format!("{}:{}", host, container));
-      }
-    }
-
-    // Network
-    if let Some(ref network) = self.network
-      && !network.is_empty()
-      && network != "default"
-    {
-      args.push("--network".to_string());
-      args.push(network.clone());
-    }
-
-    args.push(self.image.clone());
-
-    if let Some(ref cmd) = self.command
-      && !cmd.is_empty()
-    {
-      // Split command by whitespace for docker
-      args.extend(cmd.split_whitespace().map(String::from));
-    }
-
-    args
-  }
-}
-
-/// Input row for ports/volumes/env vars
-struct InputRow {
-  input1: Entity<InputState>,
-  input2: Entity<InputState>,
-}
-
 /// Dialog for creating a new container
 pub struct CreateContainerDialog {
   focus_handle: FocusHandle,
@@ -702,7 +593,7 @@ impl CreateContainerDialog {
                                 Button::new("tcp")
                                     .label("TCP")
                                     .xsmall()
-                                    .when(port_protocol_tcp, |b| b.primary())
+                                    .when(port_protocol_tcp, Button::primary)
                                     .when(!port_protocol_tcp, |b| b.ghost())
                                     .on_click(cx.listener(|this, _ev, _window, cx| {
                                         this.port_protocol_tcp = true;
@@ -713,7 +604,7 @@ impl CreateContainerDialog {
                                 Button::new("udp")
                                     .label("UDP")
                                     .xsmall()
-                                    .when(!port_protocol_tcp, |b| b.primary())
+                                    .when(!port_protocol_tcp, Button::primary)
                                     .when(port_protocol_tcp, |b| b.ghost())
                                     .on_click(cx.listener(|this, _ev, _window, cx| {
                                         this.port_protocol_tcp = false;

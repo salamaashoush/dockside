@@ -243,7 +243,7 @@ impl SettingsView {
       let _ = state.settings.save();
 
       if old_theme != theme {
-        cx.emit(SettingsChanged::ThemeChanged(theme.clone()));
+        cx.emit(SettingsChanged::ThemeChanged);
       }
       cx.emit(SettingsChanged::SettingsUpdated);
     });

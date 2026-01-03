@@ -81,6 +81,16 @@ impl MachinesView {
               this.on_tab_change(*tab, window, cx);
             }
           }
+          StateChanged::EditMachineRequest { machine_name } => {
+            // Find the machine and show edit dialog
+            let machine = {
+              let state = state.read(cx);
+              state.colima_vms.iter().find(|vm| vm.name == *machine_name).cloned()
+            };
+            if let Some(machine) = machine {
+              this.show_edit_dialog(&machine, window, cx);
+            }
+          }
           _ => {}
         }
       },
@@ -355,7 +365,9 @@ impl MachinesView {
             } else {
               Some(machine_name.as_str())
             };
-            colima.read_file(name_opt, &file_path, 1000).unwrap_or_else(|_| "Failed to read file".to_string())
+            colima
+              .read_file(name_opt, &file_path, 1000)
+              .unwrap_or_else(|_| "Failed to read file".to_string())
           })
           .await;
 
@@ -610,9 +622,11 @@ impl Render for MachinesView {
       .on_refresh_logs(cx.listener(|this, _: &(), _window, cx| {
         this.on_refresh_logs(cx);
       }))
-      .on_log_type_change(cx.listener(|this, log_type: &crate::state::MachineLogType, _window, cx| {
-        this.on_log_type_change(*log_type, cx);
-      }))
+      .on_log_type_change(
+        cx.listener(|this, log_type: &crate::state::MachineLogType, _window, cx| {
+          this.on_log_type_change(*log_type, cx);
+        }),
+      )
       .on_file_select(cx.listener(|this, path: &str, window, cx| {
         this.on_file_select(path, window, cx);
       }))

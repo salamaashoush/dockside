@@ -43,15 +43,6 @@ impl DeploymentsView {
         DeploymentListEvent::NewDeployment => {
           this.show_create_dialog(window, cx);
         }
-        DeploymentListEvent::ScaleDeployment(deployment) => {
-          this.show_scale_dialog(
-            deployment.name.clone(),
-            deployment.namespace.clone(),
-            deployment.replicas,
-            window,
-            cx,
-          );
-        }
       },
     )
     .detach();

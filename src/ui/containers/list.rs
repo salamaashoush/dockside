@@ -548,7 +548,7 @@ impl Render for ContainerList {
           .child(
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))
-              .when(search_visible, |b| b.primary())
+              .when(search_visible, Button::primary)
               .when(!search_visible, |b| b.ghost())
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {

@@ -7,6 +7,7 @@ use gpui_component::{
   h_flex,
   input::{Input, InputState},
   label::Label,
+  scroll::ScrollableElement,
   switch::Switch,
   theme::ActiveTheme,
   v_flex,
@@ -173,6 +174,8 @@ impl Render for CreateMachineDialog {
 
     v_flex()
             .w_full()
+            .max_h(px(500.))
+            .overflow_y_scrollbar()
             // Name row
             .child(render_form_row(
                 "Name",

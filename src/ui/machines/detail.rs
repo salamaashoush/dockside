@@ -304,31 +304,21 @@ impl MachineDetail {
       .filter(|s| !s.is_empty());
 
     if is_loading {
-      return v_flex()
-        .flex_1()
-        .w_full()
-        .items_center()
-        .justify_center()
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading processes..."),
-        );
+      return v_flex().flex_1().w_full().items_center().justify_center().child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("Loading processes..."),
+      );
     }
 
     let Some(procs) = processes else {
-      return v_flex()
-        .flex_1()
-        .w_full()
-        .items_center()
-        .justify_center()
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("No process data available"),
-        );
+      return v_flex().flex_1().w_full().items_center().justify_center().child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("No process data available"),
+      );
     };
 
     // Parse process lines
@@ -506,17 +496,12 @@ impl MachineDetail {
       .filter(|s| !s.is_empty());
 
     if is_loading {
-      return v_flex()
-        .flex_1()
-        .w_full()
-        .items_center()
-        .justify_center()
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading stats..."),
-        );
+      return v_flex().flex_1().w_full().items_center().justify_center().child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("Loading stats..."),
+      );
     }
 
     v_flex()
@@ -765,7 +750,7 @@ impl MachineDetail {
           Button::new("log-system")
             .label("System")
             .compact()
-            .when(current_log_type == MachineLogType::System, |b| b.primary())
+            .when(current_log_type == MachineLogType::System, Button::primary)
             .when(current_log_type != MachineLogType::System, |b| b.ghost())
             .when_some(on_system, |btn, cb| {
               btn.on_click(move |_ev, window, cx| {
@@ -777,7 +762,7 @@ impl MachineDetail {
           Button::new("log-docker")
             .label("Docker")
             .compact()
-            .when(current_log_type == MachineLogType::Docker, |b| b.primary())
+            .when(current_log_type == MachineLogType::Docker, Button::primary)
             .when(current_log_type != MachineLogType::Docker, |b| b.ghost())
             .when_some(on_docker, |btn, cb| {
               btn.on_click(move |_ev, window, cx| {
@@ -789,7 +774,7 @@ impl MachineDetail {
           Button::new("log-containerd")
             .label("Containerd")
             .compact()
-            .when(current_log_type == MachineLogType::Containerd, |b| b.primary())
+            .when(current_log_type == MachineLogType::Containerd, Button::primary)
             .when(current_log_type != MachineLogType::Containerd, |b| b.ghost())
             .when_some(on_containerd, |btn, cb| {
               btn.on_click(move |_ev, window, cx| {
@@ -800,38 +785,79 @@ impl MachineDetail {
     };
 
     if is_loading {
-      return div().size_full().flex().flex_col().child(
-        h_flex()
-          .w_full()
-          .px(px(16.))
-          .py(px(8.))
-          .items_center()
-          .justify_between()
-          .flex_shrink_0()
-          .child(log_type_selector)
-          .child(
-            Button::new("refresh-logs")
-              .icon(IconName::Redo)
-              .ghost()
-              .compact()
-              .opacity(0.5),
-          ),
-      ).child(
-        v_flex()
-          .flex_1()
-          .items_center()
-          .justify_center()
-          .child(
+      return div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(
+          h_flex()
+            .w_full()
+            .px(px(16.))
+            .py(px(8.))
+            .items_center()
+            .justify_between()
+            .flex_shrink_0()
+            .child(log_type_selector)
+            .child(
+              Button::new("refresh-logs")
+                .icon(IconName::Redo)
+                .ghost()
+                .compact()
+                .opacity(0.5),
+            ),
+        )
+        .child(
+          v_flex().flex_1().items_center().justify_center().child(
             div()
               .text_sm()
               .text_color(colors.muted_foreground)
               .child("Loading logs..."),
           ),
-      );
+        );
     }
 
     if let Some(ref editor) = self.logs_editor {
-      return div().size_full().flex().flex_col().child(
+      return div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(
+          h_flex()
+            .w_full()
+            .px(px(16.))
+            .py(px(8.))
+            .items_center()
+            .justify_between()
+            .flex_shrink_0()
+            .child(log_type_selector)
+            .child(
+              Button::new("refresh-logs")
+                .icon(IconName::Redo)
+                .ghost()
+                .compact()
+                .when_some(on_refresh, |btn, cb| {
+                  btn.on_click(move |_ev, window, cx| {
+                    cb(&(), window, cx);
+                  })
+                }),
+            ),
+        )
+        .child(
+          div()
+            .flex_1()
+            .min_h_0()
+            .child(Input::new(editor).size_full().appearance(false)),
+        );
+    }
+
+    // Fallback to plain text
+    let logs_content = self.machine_state.as_ref().map(|s| s.logs.clone()).unwrap_or_default();
+
+    div()
+      .size_full()
+      .flex()
+      .flex_col()
+      .child(
         h_flex()
           .w_full()
           .px(px(16.))
@@ -851,47 +877,9 @@ impl MachineDetail {
                 })
               }),
           ),
-      ).child(
-        div()
-          .flex_1()
-          .min_h_0()
-          .child(Input::new(editor).size_full().appearance(false)),
-      );
-    }
-
-    // Fallback to plain text
-    let logs_content = self
-      .machine_state
-      .as_ref()
-      .map(|s| s.logs.clone())
-      .unwrap_or_default();
-
-    div().size_full().flex().flex_col().child(
-      h_flex()
-        .w_full()
-        .px(px(16.))
-        .py(px(8.))
-        .items_center()
-        .justify_between()
-        .flex_shrink_0()
-        .child(log_type_selector)
-        .child(
-          Button::new("refresh-logs")
-            .icon(IconName::Redo)
-            .ghost()
-            .compact()
-            .when_some(on_refresh, |btn, cb| {
-              btn.on_click(move |_ev, window, cx| {
-                cb(&(), window, cx);
-              })
-            }),
-        ),
-    ).child(
-      div()
-        .flex_1()
-        .min_h_0()
-        .p(px(16.))
-        .child(
+      )
+      .child(
+        div().flex_1().min_h_0().p(px(16.)).child(
           div()
             .size_full()
             .overflow_y_scrollbar()
@@ -902,7 +890,7 @@ impl MachineDetail {
             .text_color(colors.foreground)
             .child(logs_content),
         ),
-    )
+      )
   }
 
   fn render_terminal_tab(&self, cx: &App) -> gpui::Div {
@@ -1115,7 +1103,13 @@ impl MachineDetail {
     // Terminal, Logs, and Files tabs need full height without scroll (they handle their own scrolling)
     let is_full_height_tab = self.active_tab == 3 || self.active_tab == 4 || self.active_tab == 5;
 
-    let mut result = div().size_full().bg(colors.sidebar).flex().flex_col().overflow_hidden().child(toolbar);
+    let mut result = div()
+      .size_full()
+      .bg(colors.sidebar)
+      .flex()
+      .flex_col()
+      .overflow_hidden()
+      .child(toolbar);
 
     if is_full_height_tab {
       let content = match self.active_tab {

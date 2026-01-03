@@ -26,13 +26,6 @@ impl KubeClient {
     Ok(Self { client })
   }
 
-  /// Check if we can connect to the cluster
-  pub async fn is_available(&self) -> bool {
-    // Try to list namespaces as a health check
-    let api: Api<Namespace> = Api::all(self.client.clone());
-    api.list(&ListParams::default().limit(1)).await.is_ok()
-  }
-
   /// List all namespaces
   pub async fn list_namespaces(&self) -> Result<Vec<NamespaceInfo>> {
     let api: Api<Namespace> = Api::all(self.client.clone());
@@ -46,12 +39,7 @@ impl KubeClient {
       .iter()
       .map(|ns| {
         let name = ns.metadata.name.clone().unwrap_or_default();
-        let status = ns
-          .status
-          .as_ref()
-          .and_then(|s| s.phase.clone())
-          .unwrap_or_else(|| "Active".to_string());
-        NamespaceInfo { name, status }
+        NamespaceInfo { name }
       })
       .collect();
 
@@ -79,16 +67,6 @@ impl KubeClient {
 
     let pod_list = pods.items.iter().map(PodInfo::from_pod).collect();
     Ok(pod_list)
-  }
-
-  /// Get a specific pod
-  pub async fn get_pod(&self, name: &str, namespace: &str) -> Result<PodInfo> {
-    let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
-    let pod = api
-      .get(name)
-      .await
-      .context(format!("Failed to get pod {} in namespace {}", name, namespace))?;
-    Ok(PodInfo::from_pod(&pod))
   }
 
   /// Delete a pod
@@ -125,11 +103,6 @@ impl KubeClient {
     ))?;
 
     Ok(logs)
-  }
-
-  /// Get raw client for advanced operations
-  pub fn client(&self) -> &Client {
-    &self.client
   }
 
   /// Force delete a pod (grace period 0)
@@ -361,16 +334,6 @@ impl KubeClient {
     Ok(service_list)
   }
 
-  /// Get a specific service
-  pub async fn get_service(&self, name: &str, namespace: &str) -> Result<ServiceInfo> {
-    let api: Api<Service> = Api::namespaced(self.client.clone(), namespace);
-    let svc = api
-      .get(name)
-      .await
-      .context(format!("Failed to get service {} in namespace {}", name, namespace))?;
-    Ok(ServiceInfo::from_service(&svc))
-  }
-
   /// Delete a service
   pub async fn delete_service(&self, name: &str, namespace: &str) -> Result<()> {
     let api: Api<Service> = Api::namespaced(self.client.clone(), namespace);
@@ -414,16 +377,6 @@ impl KubeClient {
 
     let deployment_list = deployments.items.iter().map(DeploymentInfo::from_deployment).collect();
     Ok(deployment_list)
-  }
-
-  /// Get a specific deployment
-  pub async fn get_deployment(&self, name: &str, namespace: &str) -> Result<DeploymentInfo> {
-    let api: Api<Deployment> = Api::namespaced(self.client.clone(), namespace);
-    let dep = api
-      .get(name)
-      .await
-      .context(format!("Failed to get deployment {} in namespace {}", name, namespace))?;
-    Ok(DeploymentInfo::from_deployment(&dep))
   }
 
   /// Delete a deployment
@@ -741,9 +694,4 @@ pub struct ServicePortConfig {
   pub target_port: i32,
   pub node_port: i32,
   pub protocol: String,
-}
-
-/// Try to create a KubeClient, returning None if not available
-pub async fn try_create_client() -> Option<KubeClient> {
-  KubeClient::new().await.ok()
 }

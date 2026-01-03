@@ -94,6 +94,12 @@ impl ListDelegate for ServiceListDelegate {
     let subtitle = format!("{} - {}", service.namespace, service.service_type);
     let ports_display = service.ports_display();
 
+    // Check if this is a system service (don't allow delete)
+    let is_system_service = matches!(
+      service.namespace.as_str(),
+      "kube-system" | "kube-public" | "kube-node-lease"
+    ) || (service.namespace == "default" && service.name == "kubernetes");
+
     // Three-dot menu button
     let row = ix.row;
     let menu_button = Button::new(("menu", row))
@@ -104,22 +110,28 @@ impl ListDelegate for ServiceListDelegate {
         let name = service_name.clone();
         let ns = service_namespace.clone();
 
+        let mut menu = menu.item(PopupMenuItem::new("View YAML").icon(IconName::File).on_click({
+          let name = name.clone();
+          let ns = ns.clone();
+          move |_, _, cx| {
+            services::open_service_yaml(name.clone(), ns.clone(), cx);
+          }
+        }));
+
+        // Only show delete for non-system services
+        if !is_system_service {
+          menu = menu
+            .separator()
+            .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
+              let name = name.clone();
+              let ns = ns.clone();
+              move |_, _, cx| {
+                services::delete_service(name.clone(), ns.clone(), cx);
+              }
+            }));
+        }
+
         menu
-          .item(PopupMenuItem::new("View YAML").icon(IconName::File).on_click({
-            let name = name.clone();
-            let ns = ns.clone();
-            move |_, _, cx| {
-              services::open_service_yaml(name.clone(), ns.clone(), cx);
-            }
-          }))
-          .separator()
-          .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
-            let name = name.clone();
-            let ns = ns.clone();
-            move |_, _, cx| {
-              services::delete_service(name.clone(), ns.clone(), cx);
-            }
-          }))
       });
 
     // Build item content with menu button INSIDE
@@ -452,7 +464,7 @@ impl Render for ServiceList {
           .child(
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))
-              .when(search_visible, |b| b.primary())
+              .when(search_visible, Button::primary)
               .when(!search_visible, |b| b.ghost())
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {

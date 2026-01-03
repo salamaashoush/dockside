@@ -55,12 +55,6 @@ impl Tokio {
     })
   }
 
-  /// Get a handle to the Tokio runtime for use in async contexts.
-  /// This version uses App context.
-  pub fn handle(cx: &App) -> tokio::runtime::Handle {
-    GlobalTokio::global(cx).runtime.handle().clone()
-  }
-
   /// Get the tokio runtime handle without App context.
   /// Useful for use in Entity contexts (Context<T>) where App is not directly accessible.
   pub fn runtime_handle() -> tokio::runtime::Handle {

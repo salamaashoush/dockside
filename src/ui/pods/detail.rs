@@ -162,46 +162,6 @@ impl PodDetail {
       )
   }
 
-  fn render_container_selector(&self, pod: &PodInfo, cx: &App) -> Option<gpui::AnyElement> {
-    // Only show selector if pod has multiple containers
-    if pod.containers.len() <= 1 {
-      return None;
-    }
-
-    let colors = &cx.theme().colors;
-    let selected = self
-      .pod_state
-      .as_ref()
-      .and_then(|s| s.selected_container.clone())
-      .unwrap_or_else(|| pod.containers.first().map(|c| c.name.clone()).unwrap_or_default());
-
-    let on_select = self.on_container_select.clone();
-
-    Some(
-      h_flex()
-        .gap(px(8.))
-        .items_center()
-        .child(div().text_xs().text_color(colors.muted_foreground).child("Container:"))
-        .children(pod.containers.iter().enumerate().map(|(idx, container)| {
-          let name = container.name.clone();
-          let is_selected = name == selected;
-          let on_select = on_select.clone();
-
-          Button::new(("container-btn", idx))
-            .label(name.clone())
-            .small()
-            .when(is_selected, |b| b.primary())
-            .when(!is_selected, |b| b.ghost())
-            .on_click(move |_ev, window, cx| {
-              if let Some(ref cb) = on_select {
-                cb(&name, window, cx);
-              }
-            })
-        }))
-        .into_any_element(),
-    )
-  }
-
   fn render_info_tab(&self, pod: &PodInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
@@ -346,15 +306,12 @@ impl PodDetail {
     let is_loading = state.map(|s| s.logs_loading).unwrap_or(false);
 
     if is_loading {
-      return v_flex()
-        .size_full()
-        .p(px(16.))
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading logs..."),
-        );
+      return v_flex().size_full().p(px(16.)).child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("Loading logs..."),
+      );
     }
 
     if let Some(ref editor) = self.logs_editor {
@@ -441,12 +398,7 @@ impl PodDetail {
       return v_flex()
         .size_full()
         .p(px(16.))
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading..."),
-        );
+        .child(div().text_sm().text_color(colors.muted_foreground).child("Loading..."));
     }
 
     if let Some(ref editor) = self.describe_editor {
@@ -481,12 +433,7 @@ impl PodDetail {
       return v_flex()
         .size_full()
         .p(px(16.))
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading..."),
-        );
+        .child(div().text_sm().text_color(colors.muted_foreground).child("Loading..."));
     }
 
     if let Some(ref editor) = self.yaml_editor {
@@ -580,7 +527,13 @@ impl PodDetail {
     // Terminal tab needs full height without scroll
     let is_terminal_tab = self.active_tab == 2;
 
-    let mut result = div().size_full().overflow_hidden().bg(colors.sidebar).flex().flex_col().child(toolbar);
+    let mut result = div()
+      .size_full()
+      .overflow_hidden()
+      .bg(colors.sidebar)
+      .flex()
+      .flex_col()
+      .child(toolbar);
 
     if is_terminal_tab {
       result = result.child(div().flex_1().min_h_0().w_full().child(content));

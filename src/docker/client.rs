@@ -41,28 +41,8 @@ impl DockerClient {
     Ok(())
   }
 
-  pub fn is_connected(&self) -> bool {
-    self.inner.is_some()
-  }
-
   pub fn client(&self) -> Result<&Docker> {
     self.inner.as_ref().ok_or_else(|| anyhow!("Not connected to Docker"))
-  }
-
-  pub async fn version(&self) -> Result<bollard::models::SystemVersion> {
-    let docker = self.client()?;
-    docker
-      .version()
-      .await
-      .map_err(|e| anyhow!("Failed to get Docker version: {}", e))
-  }
-
-  pub async fn info(&self) -> Result<bollard::models::SystemInfo> {
-    let docker = self.client()?;
-    docker
-      .info()
-      .await
-      .map_err(|e| anyhow!("Failed to get Docker info: {}", e))
   }
 }
 

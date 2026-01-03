@@ -48,22 +48,6 @@ impl NetworkInfo {
     if self.id.len() >= 12 { &self.id[..12] } else { &self.id }
   }
 
-  pub fn subnet(&self) -> Option<&str> {
-    self
-      .ipam
-      .as_ref()
-      .and_then(|ipam| ipam.config.first())
-      .and_then(|config| config.subnet.as_deref())
-  }
-
-  pub fn gateway(&self) -> Option<&str> {
-    self
-      .ipam
-      .as_ref()
-      .and_then(|ipam| ipam.config.first())
-      .and_then(|config| config.gateway.as_deref())
-  }
-
   pub fn container_count(&self) -> usize {
     self.containers.len()
   }

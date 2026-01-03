@@ -63,10 +63,6 @@ impl SetupDialog {
     self.homebrew_installed = is_homebrew_installed();
   }
 
-  pub fn is_ready(&self) -> bool {
-    self.colima_installed && self.docker_installed
-  }
-
   fn render_status_item(&self, name: &'static str, installed: bool, cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
 

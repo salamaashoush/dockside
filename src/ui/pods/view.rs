@@ -37,15 +37,8 @@ impl PodsView {
 
     // Subscribe to pod list events
     cx.subscribe_in(&pod_list, window, |this, _list, event: &PodListEvent, window, cx| {
-      match event {
-        PodListEvent::Selected(pod) => {
-          this.on_select_pod(pod, window, cx);
-        }
-        PodListEvent::NamespaceChanged(_ns) => {
-          // Namespace change is handled by the list
-          cx.notify();
-        }
-      }
+      let PodListEvent::Selected(pod) = event;
+      this.on_select_pod(pod, window, cx);
     })
     .detach();
 

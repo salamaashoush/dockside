@@ -302,15 +302,12 @@ impl ContainerDetail {
     let is_loading = state.map(|s| s.logs_loading).unwrap_or(false);
 
     if is_loading {
-      return v_flex()
-        .size_full()
-        .p(px(16.))
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading logs..."),
-        );
+      return v_flex().size_full().p(px(16.)).child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("Loading logs..."),
+      );
     }
 
     if let Some(ref editor) = self.logs_editor {
@@ -374,12 +371,7 @@ impl ContainerDetail {
       return v_flex()
         .size_full()
         .p(px(16.))
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading..."),
-        );
+        .child(div().text_sm().text_color(colors.muted_foreground).child("Loading..."));
     }
 
     if let Some(ref editor) = self.inspect_editor {
@@ -589,7 +581,13 @@ impl ContainerDetail {
     let is_full_height_tab = self.active_tab == 1 || self.active_tab == 2 || self.active_tab == 3;
 
     // Content based on active tab
-    let mut result = div().size_full().overflow_hidden().bg(colors.sidebar).flex().flex_col().child(toolbar);
+    let mut result = div()
+      .size_full()
+      .overflow_hidden()
+      .bg(colors.sidebar)
+      .flex()
+      .flex_col()
+      .child(toolbar);
 
     if is_full_height_tab {
       let content = match self.active_tab {

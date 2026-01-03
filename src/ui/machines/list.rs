@@ -260,6 +260,16 @@ impl ListDelegate for MachineListDelegate {
 
                 menu = menu
                   .separator()
+                  .item(PopupMenuItem::new("Edit").icon(IconName::Settings).on_click({
+                    let n = n.clone();
+                    move |_, _, cx| {
+                      docker_state(cx).update(cx, |_, cx| {
+                        cx.emit(StateChanged::EditMachineRequest {
+                          machine_name: n.clone(),
+                        });
+                      });
+                    }
+                  }))
                   .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
                     let n = n.clone();
                     move |_, _, cx| {
@@ -506,7 +516,7 @@ impl Render for MachineList {
           .child(
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))
-              .when(search_visible, |b| b.primary())
+              .when(search_visible, Button::primary)
               .when(!search_visible, |b| b.ghost())
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {

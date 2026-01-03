@@ -96,13 +96,6 @@ impl ServiceDetail {
     cx.notify();
   }
 
-  pub fn clear(&mut self, cx: &mut Context<'_, Self>) {
-    self.service = None;
-    self.active_tab = 0;
-    self.yaml_content.clear();
-    cx.notify();
-  }
-
   fn render_info_tab(&self, service: &ServiceInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
@@ -541,15 +534,12 @@ impl ServiceDetail {
     let colors = &cx.theme().colors;
 
     if self.yaml_content.is_empty() {
-      return v_flex()
-        .size_full()
-        .p(px(16.))
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading YAML..."),
-        );
+      return v_flex().size_full().p(px(16.)).child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("Loading YAML..."),
+      );
     }
 
     if let Some(ref editor) = self.yaml_editor {

@@ -22,8 +22,6 @@ pub enum TerminalSessionType {
     container: Option<String>,
     shell: Option<String>,
   },
-  /// Custom command
-  Custom { program: String, args: Vec<String> },
 }
 
 impl TerminalSessionType {
@@ -87,33 +85,9 @@ impl TerminalSessionType {
         cmd.arg(shell.as_deref().unwrap_or("/bin/sh"));
         cmd
       }
-      Self::Custom { program, args } => {
-        let mut cmd = CommandBuilder::new(program);
-        for arg in args {
-          cmd.arg(arg);
-        }
-        cmd
-      }
     };
     cmd.env("TERM", "xterm-256color");
     cmd
-  }
-
-  pub fn display_name(&self) -> String {
-    match self {
-      Self::ColimaSsh { profile } => {
-        format!("SSH: {}", profile.as_deref().unwrap_or("default"))
-      }
-      Self::DockerExec { container_id, .. } => {
-        format!("Container: {}", &container_id[..12.min(container_id.len())])
-      }
-      Self::KubectlExec {
-        pod_name, namespace, ..
-      } => {
-        format!("Pod: {}/{}", namespace, pod_name)
-      }
-      Self::Custom { program, .. } => format!("Terminal: {}", program),
-    }
   }
 }
 
@@ -186,23 +160,15 @@ impl Default for TerminalLine {
   }
 }
 
-/// A terminal cell with text and color
+/// A terminal cell with text
 #[derive(Debug, Clone)]
 pub struct TerminalCell {
   pub char: char,
-  pub fg: (u8, u8, u8),
-  pub bg: (u8, u8, u8),
-  pub bold: bool,
 }
 
 impl Default for TerminalCell {
   fn default() -> Self {
-    Self {
-      char: ' ',
-      fg: (169, 177, 214), // Tokyo Night foreground
-      bg: (26, 27, 38),    // Tokyo Night background
-      bold: false,
-    }
+    Self { char: ' ' }
   }
 }
 
@@ -213,7 +179,6 @@ pub struct TerminalContent {
   pub cursor_row: usize,
   pub cursor_col: usize,
   pub cursor_visible: bool,
-  pub cols: usize,
   pub rows: usize,
   pub total_lines: usize,
   pub scroll_offset: usize,
@@ -226,7 +191,6 @@ impl Default for TerminalContent {
       cursor_row: 0,
       cursor_col: 0,
       cursor_visible: true,
-      cols: 80,
       rows: 24,
       total_lines: 0,
       scroll_offset: 0,
@@ -287,12 +251,7 @@ impl TerminalBuffer {
 
   pub fn put_char(&mut self, c: char) {
     self.ensure_cell(self.cursor_row, self.cursor_col);
-    self.lines[self.cursor_row].cells[self.cursor_col] = TerminalCell {
-      char: c,
-      fg: self.current_fg,
-      bg: self.current_bg,
-      bold: self.current_bold,
-    };
+    self.lines[self.cursor_row].cells[self.cursor_col] = TerminalCell { char: c };
     self.cursor_col += 1;
 
     // Wrap at column limit
@@ -394,7 +353,6 @@ impl TerminalBuffer {
       cursor_row: self.cursor_row.saturating_sub(visible_start),
       cursor_col: self.cursor_col,
       cursor_visible: self.scroll_offset == 0,
-      cols: self.cols,
       rows: self.rows,
       total_lines,
       scroll_offset: self.scroll_offset as usize,
@@ -656,10 +614,6 @@ impl PtyTerminal {
 
   pub fn scroll(&self, delta: i32) {
     self.buffer.lock().scroll(delta);
-  }
-
-  pub fn get_content(&self) -> TerminalContent {
-    self.buffer.lock().get_content()
   }
 
   pub fn close(&mut self) {

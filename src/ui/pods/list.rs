@@ -19,7 +19,6 @@ use crate::state::{DockerState, StateChanged, docker_state};
 /// Pod list events emitted to parent
 pub enum PodListEvent {
   Selected(PodInfo),
-  NamespaceChanged(String),
 }
 
 /// Delegate for the pod list
@@ -89,6 +88,12 @@ impl ListDelegate for PodListDelegate {
     let is_running = matches!(pod.phase, PodPhase::Running);
     let pod_name = pod.name.clone();
     let pod_namespace = pod.namespace.clone();
+
+    // Check if this is a system pod (don't allow delete)
+    let is_system_pod = matches!(
+      pod.namespace.as_str(),
+      "kube-system" | "kube-public" | "kube-node-lease"
+    );
 
     let icon_bg = match pod.phase {
       PodPhase::Running => colors.success,
@@ -162,21 +167,26 @@ impl ListDelegate for PodListDelegate {
                   services::restart_pod(name.clone(), ns.clone(), cx);
                 }
               }),
-          )
-          .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
-            let name = name.clone();
-            let ns = ns.clone();
-            move |_, _, cx| {
-              services::delete_pod(name.clone(), ns.clone(), cx);
-            }
-          }))
-          .item(PopupMenuItem::new("Force Delete").icon(IconName::Close).on_click({
-            let name = name.clone();
-            let ns = ns.clone();
-            move |_, _, cx| {
-              services::force_delete_pod(name.clone(), ns.clone(), cx);
-            }
-          }));
+          );
+
+        // Only show delete options for non-system pods
+        if !is_system_pod {
+          menu = menu
+            .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
+              let name = name.clone();
+              let ns = ns.clone();
+              move |_, _, cx| {
+                services::delete_pod(name.clone(), ns.clone(), cx);
+              }
+            }))
+            .item(PopupMenuItem::new("Force Delete").icon(IconName::Close).on_click({
+              let name = name.clone();
+              let ns = ns.clone();
+              move |_, _, cx| {
+                services::force_delete_pod(name.clone(), ns.clone(), cx);
+              }
+            }));
+        }
 
         menu
       });
@@ -533,7 +543,7 @@ impl Render for PodList {
           .child(
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))
-              .when(search_visible, |b| b.primary())
+              .when(search_visible, Button::primary)
               .when(!search_visible, |b| b.ghost())
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {

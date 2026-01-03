@@ -17,15 +17,11 @@ pub trait FileEntry: Clone {
   fn path(&self) -> &str;
   fn is_dir(&self) -> bool;
   fn is_symlink(&self) -> bool;
-  fn size(&self) -> u64;
   fn permissions(&self) -> &str;
   fn display_size(&self) -> String;
 
   /// Optional extended fields for VM file entries
   fn owner(&self) -> Option<&str> {
-    None
-  }
-  fn group(&self) -> Option<&str> {
     None
   }
   fn modified(&self) -> Option<&str> {
@@ -48,9 +44,6 @@ impl FileEntry for crate::docker::ContainerFileEntry {
   fn is_symlink(&self) -> bool {
     self.is_symlink
   }
-  fn size(&self) -> u64 {
-    self.size
-  }
   fn permissions(&self) -> &str {
     &self.permissions
   }
@@ -71,9 +64,6 @@ impl FileEntry for crate::docker::VolumeFileEntry {
   }
   fn is_symlink(&self) -> bool {
     self.is_symlink
-  }
-  fn size(&self) -> u64 {
-    self.size
   }
   fn permissions(&self) -> &str {
     &self.permissions
@@ -96,9 +86,6 @@ impl FileEntry for crate::colima::VmFileEntry {
   fn is_symlink(&self) -> bool {
     self.is_symlink
   }
-  fn size(&self) -> u64 {
-    self.size
-  }
   fn permissions(&self) -> &str {
     &self.permissions
   }
@@ -107,9 +94,6 @@ impl FileEntry for crate::colima::VmFileEntry {
   }
   fn owner(&self) -> Option<&str> {
     Some(&self.owner)
-  }
-  fn group(&self) -> Option<&str> {
-    Some(&self.group)
   }
   fn modified(&self) -> Option<&str> {
     Some(&self.modified)
@@ -143,11 +127,6 @@ impl FileExplorerState {
       ..Default::default()
     }
   }
-
-  pub fn with_path(mut self, path: impl Into<String>) -> Self {
-    self.current_path = path.into();
-    self
-  }
 }
 
 /// Configuration options for the file explorer
@@ -180,18 +159,8 @@ impl FileExplorerConfig {
     self
   }
 
-  pub fn show_modified(mut self, show: bool) -> Self {
-    self.show_modified = show;
-    self
-  }
-
   pub fn empty_message(mut self, msg: impl Into<String>) -> Self {
     self.empty_message = msg.into();
-    self
-  }
-
-  pub fn disabled_message(mut self, msg: impl Into<String>) -> Self {
-    self.disabled_message = Some(msg.into());
     self
   }
 }
@@ -441,11 +410,7 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
     let on_close = self.on_close_viewer.clone();
 
     // Extract file name from path
-    let file_name = file_path
-      .rsplit('/')
-      .next()
-      .unwrap_or(file_path)
-      .to_string();
+    let file_name = file_path.rsplit('/').next().unwrap_or(file_path).to_string();
 
     div()
       .size_full()
@@ -492,17 +457,12 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
       )
       .when(is_loading, |el| {
         el.child(
-          div()
-            .flex_1()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-              div()
-                .text_sm()
-                .text_color(colors.muted_foreground)
-                .child("Loading file..."),
-            ),
+          div().flex_1().flex().items_center().justify_center().child(
+            div()
+              .text_sm()
+              .text_color(colors.muted_foreground)
+              .child("Loading file..."),
+          ),
         )
       })
       .when(!is_loading, |el| {

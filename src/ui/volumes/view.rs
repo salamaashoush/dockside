@@ -83,7 +83,7 @@ impl VolumesView {
             cx.notify();
           }
         }
-        StateChanged::VolumeFilesError { volume_name, error: _ } => {
+        StateChanged::VolumeFilesError { volume_name } => {
           // Handle error for the currently selected volume
           if let Some(ref selected) = this.selected_volume
             && &selected.name == volume_name
@@ -321,9 +321,7 @@ impl Render for VolumesView {
     // Sync file content editor
     if let Some(ref editor) = self.file_content_editor {
       let content = &self.volume_tab_state.file_content;
-      if !content.is_empty()
-        && !self.volume_tab_state.file_content_loading
-        && self.last_synced_file_content != *content
+      if !content.is_empty() && !self.volume_tab_state.file_content_loading && self.last_synced_file_content != *content
       {
         let content_clone = content.clone();
         editor.update(cx, |state, cx| {

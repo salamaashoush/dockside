@@ -29,16 +29,8 @@ impl ContainerStats {
     format!("{}/s", format_bytes(self.network_rx))
   }
 
-  pub fn display_network_tx(&self) -> String {
-    format!("{}/s", format_bytes(self.network_tx))
-  }
-
   pub fn display_block_read(&self) -> String {
     format!("{}/s", format_bytes(self.block_read))
-  }
-
-  pub fn display_block_write(&self) -> String {
-    format!("{}/s", format_bytes(self.block_write))
   }
 }
 

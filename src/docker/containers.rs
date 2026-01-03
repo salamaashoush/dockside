@@ -2,9 +2,8 @@ use anyhow::Result;
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::models::{ContainerCreateBody, HostConfig};
 use bollard::query_parameters::{
-  CommitContainerOptions, CreateContainerOptions, DownloadFromContainerOptions, KillContainerOptions,
-  ListContainersOptions, LogsOptions, RemoveContainerOptions, RenameContainerOptions, RestartContainerOptions,
-  StartContainerOptions, StopContainerOptions, TopOptions, UploadToContainerOptions,
+  CommitContainerOptions, CreateContainerOptions, KillContainerOptions, ListContainersOptions, LogsOptions,
+  RemoveContainerOptions, RenameContainerOptions, RestartContainerOptions, StartContainerOptions, StopContainerOptions,
 };
 use chrono::{DateTime, Utc};
 use futures::stream::StreamExt;
@@ -254,7 +253,12 @@ impl DockerClient {
   pub async fn rename_container(&self, id: &str, new_name: &str) -> Result<()> {
     let docker = self.client()?;
     docker
-      .rename_container(id, RenameContainerOptions { name: new_name.to_string() })
+      .rename_container(
+        id,
+        RenameContainerOptions {
+          name: new_name.to_string(),
+        },
+      )
       .await?;
     Ok(())
   }
@@ -285,14 +289,6 @@ impl DockerClient {
     Ok(result.id)
   }
 
-  pub async fn get_container_top(&self, id: &str) -> Result<Vec<Vec<String>>> {
-    let docker = self.client()?;
-    let result = docker
-      .top_processes(id, Some(TopOptions { ps_args: "aux".to_string() }))
-      .await?;
-    Ok(result.processes.unwrap_or_default())
-  }
-
   pub async fn export_container(&self, id: &str, output_path: &str) -> Result<()> {
     use futures::TryStreamExt;
     use tokio::io::AsyncWriteExt;
@@ -306,37 +302,6 @@ impl DockerClient {
       file.write_all(&chunk).await?;
     }
     file.flush().await?;
-    Ok(())
-  }
-
-  pub async fn copy_from_container(&self, id: &str, path: &str) -> Result<Vec<u8>> {
-    use futures::TryStreamExt;
-
-    let docker = self.client()?;
-    let stream = docker.download_from_container(id, Some(DownloadFromContainerOptions { path: path.to_string() }));
-
-    let mut data = Vec::new();
-    futures::pin_mut!(stream);
-    while let Some(chunk) = stream.try_next().await? {
-      data.extend_from_slice(&chunk);
-    }
-    Ok(data)
-  }
-
-  pub async fn copy_to_container(&self, id: &str, path: &str, data: Vec<u8>) -> Result<()> {
-    use bytes::Bytes;
-    let docker = self.client()?;
-    docker
-      .upload_to_container(
-        id,
-        Some(UploadToContainerOptions {
-          path: path.to_string(),
-          no_overwrite_dir_non_dir: None,
-          copy_uidgid: None,
-        }),
-        bollard::body_full(Bytes::from(data)),
-      )
-      .await?;
     Ok(())
   }
 

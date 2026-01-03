@@ -494,7 +494,7 @@ impl CreateDeploymentDialog {
                 Button::new("tcp")
                   .label("TCP")
                   .xsmall()
-                  .when(port_protocol_tcp, |b| b.primary())
+                  .when(port_protocol_tcp, Button::primary)
                   .when(!port_protocol_tcp, |b| b.ghost())
                   .on_click(cx.listener(|this, _ev, _window, cx| {
                     this.port_protocol_tcp = true;
@@ -505,7 +505,7 @@ impl CreateDeploymentDialog {
                 Button::new("udp")
                   .label("UDP")
                   .xsmall()
-                  .when(!port_protocol_tcp, |b| b.primary())
+                  .when(!port_protocol_tcp, Button::primary)
                   .when(port_protocol_tcp, |b| b.ghost())
                   .on_click(cx.listener(|this, _ev, _window, cx| {
                     this.port_protocol_tcp = false;

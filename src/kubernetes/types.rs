@@ -32,10 +32,6 @@ impl PodPhase {
   pub fn is_pending(&self) -> bool {
     matches!(self, PodPhase::Pending)
   }
-
-  pub fn is_failed(&self) -> bool {
-    matches!(self, PodPhase::Failed)
-  }
 }
 
 impl std::fmt::Display for PodPhase {
@@ -57,37 +53,15 @@ pub struct PodContainer {
   pub image: String,
   pub ready: bool,
   pub restart_count: i32,
-  pub state: String,
 }
 
 impl PodContainer {
   pub fn from_status(status: &ContainerStatus) -> Self {
-    let state = if status.state.as_ref().map(|s| s.running.is_some()).unwrap_or(false) {
-      "Running".to_string()
-    } else if status.state.as_ref().map(|s| s.waiting.is_some()).unwrap_or(false) {
-      status
-        .state
-        .as_ref()
-        .and_then(|s| s.waiting.as_ref())
-        .and_then(|w| w.reason.clone())
-        .unwrap_or_else(|| "Waiting".to_string())
-    } else if status.state.as_ref().map(|s| s.terminated.is_some()).unwrap_or(false) {
-      status
-        .state
-        .as_ref()
-        .and_then(|s| s.terminated.as_ref())
-        .and_then(|t| t.reason.clone())
-        .unwrap_or_else(|| "Terminated".to_string())
-    } else {
-      "Unknown".to_string()
-    };
-
     Self {
       name: status.name.clone(),
       image: status.image.clone(),
       ready: status.ready,
       restart_count: status.restart_count,
-      state,
     }
   }
 }
@@ -105,7 +79,6 @@ pub struct PodInfo {
   pub ip: Option<String>,
   pub containers: Vec<PodContainer>,
   pub labels: HashMap<String, String>,
-  pub creation_timestamp: Option<DateTime<Utc>>,
 }
 
 impl PodInfo {
@@ -157,7 +130,6 @@ impl PodInfo {
       ip,
       containers: container_statuses,
       labels,
-      creation_timestamp,
     }
   }
 }
@@ -182,7 +154,6 @@ fn format_age(creation: DateTime<Utc>) -> String {
 #[derive(Debug, Clone)]
 pub struct NamespaceInfo {
   pub name: String,
-  pub status: String,
 }
 
 // ============================================================================
@@ -211,7 +182,6 @@ pub struct ServiceInfo {
   pub selector: HashMap<String, String>,
   pub age: String,
   pub labels: HashMap<String, String>,
-  pub creation_timestamp: Option<DateTime<Utc>>,
 }
 
 impl ServiceInfo {
@@ -275,7 +245,6 @@ impl ServiceInfo {
       selector,
       age,
       labels,
-      creation_timestamp,
     }
   }
 
@@ -312,7 +281,6 @@ pub struct DeploymentInfo {
   pub age: String,
   pub labels: HashMap<String, String>,
   pub images: Vec<String>,
-  pub creation_timestamp: Option<DateTime<Utc>>,
 }
 
 impl DeploymentInfo {
@@ -351,7 +319,6 @@ impl DeploymentInfo {
       age,
       labels,
       images,
-      creation_timestamp,
     }
   }
 

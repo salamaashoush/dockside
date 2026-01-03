@@ -145,22 +145,6 @@ impl ThemeName {
   pub fn theme_name(&self) -> &str {
     self.display_name()
   }
-
-  pub fn is_dark(&self) -> bool {
-    match self {
-      ThemeName::CatppuccinLatte
-      | ThemeName::GruvboxLight
-      | ThemeName::AyuLight
-      | ThemeName::SolarizedLight
-      | ThemeName::EverforestLight
-      | ThemeName::FlexokiLight
-      | ThemeName::HybridLight
-      | ThemeName::MolokaiLight
-      | ThemeName::MellifluousLight
-      | ThemeName::MacOSClassicLight => false,
-      _ => true,
-    }
-  }
 }
 
 /// Application settings
@@ -230,8 +214,7 @@ impl AppSettings {
 /// Events emitted when settings change
 #[derive(Debug, Clone)]
 pub enum SettingsChanged {
-  ThemeChanged(ThemeName),
-  RefreshIntervalChanged,
+  ThemeChanged,
   SettingsUpdated,
 }
 
@@ -245,41 +228,6 @@ impl SettingsState {
     Self {
       settings: AppSettings::load(),
     }
-  }
-
-  pub fn update_theme(&mut self, theme: ThemeName) {
-    self.settings.theme = theme;
-    let _ = self.settings.save();
-  }
-
-  pub fn update_docker_socket(&mut self, socket: String) {
-    self.settings.docker_socket = socket;
-    let _ = self.settings.save();
-  }
-
-  pub fn update_colima_profile(&mut self, profile: String) {
-    self.settings.default_colima_profile = profile;
-    let _ = self.settings.save();
-  }
-
-  pub fn update_container_refresh(&mut self, interval: u64) {
-    self.settings.container_refresh_interval = interval;
-    let _ = self.settings.save();
-  }
-
-  pub fn update_stats_refresh(&mut self, interval: u64) {
-    self.settings.stats_refresh_interval = interval;
-    let _ = self.settings.save();
-  }
-
-  pub fn update_max_log_lines(&mut self, lines: usize) {
-    self.settings.max_log_lines = lines;
-    let _ = self.settings.save();
-  }
-
-  pub fn update_terminal_font_size(&mut self, size: f32) {
-    self.settings.terminal_font_size = size;
-    let _ = self.settings.save();
   }
 }
 

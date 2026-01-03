@@ -20,7 +20,6 @@ use crate::state::{DockerState, StateChanged, docker_state};
 pub enum DeploymentListEvent {
   Selected(DeploymentInfo),
   NewDeployment,
-  ScaleDeployment(DeploymentInfo),
 }
 
 /// Delegate for the deployment list
@@ -86,6 +85,12 @@ impl ListDelegate for DeploymentListDelegate {
     let deployment_name = deployment.name.clone();
     let deployment_namespace = deployment.namespace.clone();
 
+    // Check if this is a system deployment (don't allow delete)
+    let is_system_deployment = matches!(
+      deployment.namespace.as_str(),
+      "kube-system" | "kube-public" | "kube-node-lease"
+    );
+
     // Color based on ready status
     let is_healthy = deployment.ready_replicas == deployment.replicas && deployment.replicas > 0;
     let icon_bg = if is_healthy {
@@ -110,7 +115,7 @@ impl ListDelegate for DeploymentListDelegate {
         let name = deployment_name.clone();
         let ns = deployment_namespace.clone();
 
-        menu
+        let mut menu = menu
           .item(PopupMenuItem::new("Scale").icon(IconName::Settings2).on_click({
             let name = name.clone();
             let ns = ns.clone();
@@ -136,15 +141,22 @@ impl ListDelegate for DeploymentListDelegate {
             move |_, _, cx| {
               services::open_deployment_yaml(name.clone(), ns.clone(), cx);
             }
-          }))
-          .separator()
-          .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
-            let name = name.clone();
-            let ns = ns.clone();
-            move |_, _, cx| {
-              services::delete_deployment(name.clone(), ns.clone(), cx);
-            }
-          }))
+          }));
+
+        // Only show delete for non-system deployments
+        if !is_system_deployment {
+          menu = menu
+            .separator()
+            .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
+              let name = name.clone();
+              let ns = ns.clone();
+              move |_, _, cx| {
+                services::delete_deployment(name.clone(), ns.clone(), cx);
+              }
+            }));
+        }
+
+        menu
       });
 
     // Build item content with menu button INSIDE
@@ -486,7 +498,7 @@ impl Render for DeploymentList {
           .child(
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))
-              .when(search_visible, |b| b.primary())
+              .when(search_visible, Button::primary)
               .when(!search_visible, |b| b.ghost())
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {

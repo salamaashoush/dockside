@@ -222,7 +222,6 @@ pub struct VmFileEntry {
   pub size: u64,
   pub permissions: String,
   pub owner: String,
-  pub group: String,
   pub modified: String,
 }
 

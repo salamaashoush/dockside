@@ -75,7 +75,12 @@ impl ComposeView {
     )
   }
 
-  fn render_project(&self, project: &ComposeProject, is_expanded: bool, cx: &mut Context<'_, Self>) -> impl IntoElement {
+  fn render_project(
+    &self,
+    project: &ComposeProject,
+    is_expanded: bool,
+    cx: &mut Context<'_, Self>,
+  ) -> impl IntoElement {
     let colors = cx.theme().colors;
     let project_name = project.name.clone();
     let project_name_for_toggle = project_name.clone();
@@ -195,7 +200,6 @@ impl ComposeView {
 
   fn render_service(&self, service: &ComposeService, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let colors = cx.theme().colors;
-    let container_id = service.container_id.clone();
 
     let status_color = if service.state.is_running() {
       colors.success
@@ -214,9 +218,8 @@ impl ComposeView {
             .cursor_pointer()
             .hover(|el| el.bg(colors.list_hover))
             .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                // Navigate to containers view and select this container
+                // Navigate to containers view
                 services::set_view(crate::state::CurrentView::Containers, cx);
-                services::select_container(container_id.clone(), cx);
             }))
             // Service name
             .child(

@@ -74,14 +74,7 @@ impl DockerClient {
   pub async fn remove_image(&self, id: &str, force: bool) -> Result<()> {
     let docker = self.client()?;
     docker
-      .remove_image(
-        id,
-        Some(RemoveImageOptions {
-          force,
-          noprune: false,
-        }),
-        None,
-      )
+      .remove_image(id, Some(RemoveImageOptions { force, noprune: false }), None)
       .await?;
     Ok(())
   }
