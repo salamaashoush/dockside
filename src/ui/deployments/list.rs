@@ -272,7 +272,7 @@ impl DeploymentList {
           cx.emit(DeploymentListEvent::Selected(deployment.clone()));
         }
       }
-      _ => {}
+      ListEvent::Cancel => {}
     })
     .detach();
 

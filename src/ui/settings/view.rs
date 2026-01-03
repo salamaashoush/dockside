@@ -251,7 +251,7 @@ impl SettingsView {
     cx.notify();
   }
 
-  fn render_section_header(&self, title: &str, cx: &Context<'_, Self>) -> impl IntoElement {
+  fn render_section_header(title: &str, cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
     div()
       .w_full()
@@ -265,7 +265,6 @@ impl SettingsView {
   }
 
   fn render_form_row(
-    &self,
     label: &'static str,
     description: &'static str,
     content: impl IntoElement,
@@ -322,50 +321,50 @@ impl Render for SettingsView {
                 .max_w(px(700.))
                 .pb(px(48.)) // Bottom padding for scroll visibility
                 // Appearance section
-                .child(self.render_section_header("Appearance", cx))
-                .child(self.render_form_row(
+                .child(Self::render_section_header("Appearance", cx))
+                .child(Self::render_form_row(
                     "Theme",
                     "Choose the color theme for the application",
                     Select::new(theme_select).w_full().small(),
                     cx,
                 ))
                 // Docker section
-                .child(self.render_section_header("Docker", cx))
-                .child(self.render_form_row(
+                .child(Self::render_section_header("Docker", cx))
+                .child(Self::render_form_row(
                     "Docker Socket",
                     "Path to Docker socket (leave empty for default)",
                     Input::new(docker_socket_input).small().w_full(),
                     cx,
                 ))
-                .child(self.render_form_row(
+                .child(Self::render_form_row(
                     "Default Colima Profile",
                     "Name of the default Colima VM profile",
                     Input::new(colima_profile_input).small().w_full(),
                     cx,
                 ))
                 // Refresh intervals section
-                .child(self.render_section_header("Refresh Intervals", cx))
-                .child(self.render_form_row(
+                .child(Self::render_section_header("Refresh Intervals", cx))
+                .child(Self::render_form_row(
                     "Container Refresh",
                     "How often to refresh container list (seconds)",
                     Input::new(container_refresh_input).small().w_full(),
                     cx,
                 ))
-                .child(self.render_form_row(
+                .child(Self::render_form_row(
                     "Stats Refresh",
                     "How often to refresh stats (seconds)",
                     Input::new(stats_refresh_input).small().w_full(),
                     cx,
                 ))
                 // Display section
-                .child(self.render_section_header("Display", cx))
-                .child(self.render_form_row(
+                .child(Self::render_section_header("Display", cx))
+                .child(Self::render_form_row(
                     "Max Log Lines",
                     "Maximum number of log lines to display",
                     Input::new(log_lines_input).small().w_full(),
                     cx,
                 ))
-                .child(self.render_form_row(
+                .child(Self::render_form_row(
                     "Terminal Font Size",
                     "Font size for terminal views (pixels)",
                     Input::new(font_size_input).small().w_full(),

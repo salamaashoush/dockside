@@ -17,6 +17,9 @@ use gpui_component::{
 };
 use std::rc::Rc;
 
+/// Type alias for tab change callback to reduce complexity
+type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
+
 /// Theme colors struct for passing to helper methods
 #[derive(Clone)]
 struct DialogColors {
@@ -38,7 +41,7 @@ pub enum Platform {
 }
 
 impl Platform {
-  pub fn label(&self) -> &'static str {
+  pub fn label(self) -> &'static str {
     match self {
       Platform::Auto => "auto",
       Platform::LinuxAmd64 => "linux/amd64",
@@ -47,7 +50,7 @@ impl Platform {
     }
   }
 
-  pub fn as_docker_arg(&self) -> Option<&'static str> {
+  pub fn as_docker_arg(self) -> Option<&'static str> {
     match self {
       Platform::Auto => None,
       Platform::LinuxAmd64 => Some("linux/amd64"),
@@ -89,7 +92,7 @@ pub enum RestartPolicy {
 }
 
 impl RestartPolicy {
-  pub fn label(&self) -> &'static str {
+  pub fn label(self) -> &'static str {
     match self {
       RestartPolicy::No => "no",
       RestartPolicy::Always => "always",
@@ -98,7 +101,7 @@ impl RestartPolicy {
     }
   }
 
-  pub fn as_docker_arg(&self) -> Option<&'static str> {
+  pub fn as_docker_arg(self) -> Option<&'static str> {
     match self {
       RestartPolicy::No => None,
       RestartPolicy::Always => Some("always"),
@@ -403,7 +406,7 @@ impl CreateContainerDialog {
     }
   }
 
-  fn render_form_row(&self, label: &'static str, content: impl IntoElement, colors: &DialogColors) -> gpui::Div {
+  fn render_form_row(label: &'static str, content: impl IntoElement, colors: &DialogColors) -> gpui::Div {
     h_flex()
       .w_full()
       .py(px(12.))
@@ -417,7 +420,6 @@ impl CreateContainerDialog {
   }
 
   fn render_form_row_with_desc(
-    &self,
     label: &'static str,
     description: &'static str,
     content: impl IntoElement,
@@ -440,7 +442,7 @@ impl CreateContainerDialog {
       .child(content)
   }
 
-  fn render_section_header(&self, title: &'static str, colors: &DialogColors) -> gpui::Div {
+  fn render_section_header(title: &'static str, colors: &DialogColors) -> gpui::Div {
     div()
       .w_full()
       .py(px(8.))
@@ -466,26 +468,26 @@ impl CreateContainerDialog {
     v_flex()
             .w_full()
             // Image row (required)
-            .child(self.render_form_row(
+            .child(Self::render_form_row(
                 "Image",
                 div().w(px(250.)).child(Input::new(&image_input).small()),
                 colors,
             ))
             // Name row
-            .child(self.render_form_row(
+            .child(Self::render_form_row(
                 "Name",
                 div().w(px(250.)).child(Input::new(&name_input).small()),
                 colors,
             ))
             // Platform
-            .child(self.render_form_row_with_desc(
+            .child(Self::render_form_row_with_desc(
                 "Platform",
                 "Target platform for the container",
                 div().w(px(150.)).child(Select::new(&platform_select).small()),
                 colors,
             ))
             // Remove after stop
-            .child(self.render_form_row_with_desc(
+            .child(Self::render_form_row_with_desc(
                 "Remove after stop",
                 "Automatically delete after stop (--rm)",
                 Switch::new("remove-after-stop")
@@ -497,32 +499,32 @@ impl CreateContainerDialog {
                 colors,
             ))
             // Restart policy
-            .child(self.render_form_row_with_desc(
+            .child(Self::render_form_row_with_desc(
                 "Restart policy",
                 "When to restart the container",
                 div().w(px(150.)).child(Select::new(&restart_policy_select).small()),
                 colors,
             ))
             // Command section
-            .child(self.render_section_header("Command", colors))
-            .child(self.render_form_row(
+            .child(Self::render_section_header("Command", colors))
+            .child(Self::render_form_row(
                 "Command",
                 div().w(px(250.)).child(Input::new(&command_input).small()),
                 colors,
             ))
-            .child(self.render_form_row(
+            .child(Self::render_form_row(
                 "Entrypoint",
                 div().w(px(250.)).child(Input::new(&entrypoint_input).small()),
                 colors,
             ))
-            .child(self.render_form_row(
+            .child(Self::render_form_row(
                 "Working dir",
                 div().w(px(250.)).child(Input::new(&workdir_input).small()),
                 colors,
             ))
             // Advanced section
-            .child(self.render_section_header("Advanced", colors))
-            .child(self.render_form_row_with_desc(
+            .child(Self::render_section_header("Advanced", colors))
+            .child(Self::render_form_row_with_desc(
                 "Privileged",
                 "Full access to host (--privileged)",
                 Switch::new("privileged")
@@ -533,7 +535,7 @@ impl CreateContainerDialog {
                     })),
                 colors,
             ))
-            .child(self.render_form_row_with_desc(
+            .child(Self::render_form_row_with_desc(
                 "Read-only",
                 "Read-only root filesystem (--read-only)",
                 Switch::new("read-only")
@@ -544,7 +546,7 @@ impl CreateContainerDialog {
                     })),
                 colors,
             ))
-            .child(self.render_form_row_with_desc(
+            .child(Self::render_form_row_with_desc(
                 "Docker init",
                 "Use docker-init process (--init)",
                 Switch::new("docker-init")
@@ -946,11 +948,10 @@ impl Render for CreateContainerDialog {
       "Network".to_string(),
     ];
 
-    let on_tab_change: Rc<dyn Fn(&usize, &mut Window, &mut App)> =
-      Rc::new(cx.listener(|this, idx: &usize, _window, cx| {
-        this.active_tab = *idx;
-        cx.notify();
-      }));
+    let on_tab_change: TabChangeCallback = Rc::new(cx.listener(|this, idx: &usize, _window, cx| {
+      this.active_tab = *idx;
+      cx.notify();
+    }));
 
     v_flex()
             .w_full()

@@ -95,9 +95,10 @@ impl KubeClient {
       params.tail_lines = Some(lines);
     }
 
-    let logs = api.logs(name, &params).await.context(format!(
-      "Failed to get logs for pod {name} in namespace {namespace}"
-    ))?;
+    let logs = api
+      .logs(name, &params)
+      .await
+      .context(format!("Failed to get logs for pod {name} in namespace {namespace}"))?;
 
     Ok(logs)
   }
@@ -109,9 +110,10 @@ impl KubeClient {
       grace_period_seconds: Some(0),
       ..DeleteParams::default()
     };
-    api.delete(name, &dp).await.context(format!(
-      "Failed to force delete pod {name} in namespace {namespace}"
-    ))?;
+    api
+      .delete(name, &dp)
+      .await
+      .context(format!("Failed to force delete pod {name} in namespace {namespace}"))?;
     Ok(())
   }
 
@@ -193,11 +195,7 @@ impl KubeClient {
     let mut output = String::new();
 
     // Basic info
-    let _ = writeln!(
-      output,
-      "Name:         {}",
-      pod.metadata.name.as_deref().unwrap_or("")
-    );
+    let _ = writeln!(output, "Name:         {}", pod.metadata.name.as_deref().unwrap_or(""));
     let _ = writeln!(
       output,
       "Namespace:    {}",
@@ -238,16 +236,8 @@ impl KubeClient {
     }
 
     if let Some(status) = &pod.status {
-      let _ = writeln!(
-        output,
-        "Status:       {}",
-        status.phase.as_deref().unwrap_or("Unknown")
-      );
-      let _ = writeln!(
-        output,
-        "IP:           {}",
-        status.pod_ip.as_deref().unwrap_or("<none>")
-      );
+      let _ = writeln!(output, "Status:       {}", status.phase.as_deref().unwrap_or("Unknown"));
+      let _ = writeln!(output, "IP:           {}", status.pod_ip.as_deref().unwrap_or("<none>"));
 
       if let Some(conditions) = &status.conditions {
         output.push_str("\nConditions:\n");
@@ -293,11 +283,7 @@ impl KubeClient {
     if let Some(spec) = &pod.spec
       && let Some(containers) = spec.containers.first()
     {
-      let _ = writeln!(
-        output,
-        "\nImage:        {}",
-        containers.image.as_deref().unwrap_or("")
-      );
+      let _ = writeln!(output, "\nImage:        {}", containers.image.as_deref().unwrap_or(""));
     }
 
     Ok(output)
@@ -380,9 +366,10 @@ impl KubeClient {
   /// Delete a deployment
   pub async fn delete_deployment(&self, name: &str, namespace: &str) -> Result<()> {
     let api: Api<Deployment> = Api::namespaced(self.client.clone(), namespace);
-    api.delete(name, &DeleteParams::default()).await.context(format!(
-      "Failed to delete deployment {name} in namespace {namespace}"
-    ))?;
+    api
+      .delete(name, &DeleteParams::default())
+      .await
+      .context(format!("Failed to delete deployment {name} in namespace {namespace}"))?;
     Ok(())
   }
 

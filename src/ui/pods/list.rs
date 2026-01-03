@@ -299,7 +299,7 @@ impl PodList {
           cx.emit(PodListEvent::Selected(pod.clone()));
         }
       }
-      _ => {}
+      ListEvent::Cancel => {}
     })
     .detach();
 

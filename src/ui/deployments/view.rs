@@ -41,54 +41,44 @@ impl DeploymentsView {
           cx.notify();
         }
         DeploymentListEvent::NewDeployment => {
-          this.show_create_dialog(window, cx);
+          Self::show_create_dialog(window, cx);
         }
       },
     )
     .detach();
 
     // Subscribe to docker state changes
-    cx.subscribe_in(
-      &docker_state,
-      window,
-      |this, _state, event: &StateChanged, window, cx| {
-        match event {
-          StateChanged::DeploymentTabRequest {
-            deployment_name,
-            namespace,
-            tab: _,
-          } => {
-            let state = _state.read(cx);
-            if let Some(dep) = state.get_deployment(deployment_name, namespace) {
-              this.selected_deployment = Some(dep.clone());
-              cx.notify();
-            }
+    cx.subscribe_in(&docker_state, window, |this, ds, event: &StateChanged, window, cx| {
+      match event {
+        StateChanged::DeploymentTabRequest {
+          deployment_name,
+          namespace,
+          tab: _,
+        } => {
+          let state = ds.read(cx);
+          if let Some(dep) = state.get_deployment(deployment_name, namespace) {
+            this.selected_deployment = Some(dep.clone());
+            cx.notify();
           }
-          StateChanged::DeploymentsUpdated => {
-            // Update selected deployment if it still exists
-            if let Some(ref current) = this.selected_deployment {
-              let state = _state.read(cx);
-              this.selected_deployment = state.get_deployment(&current.name, &current.namespace).cloned();
-              cx.notify();
-            }
-          }
-          StateChanged::DeploymentScaleRequest {
-            deployment_name,
-            namespace,
-            current_replicas,
-          } => {
-            this.show_scale_dialog(
-              deployment_name.clone(),
-              namespace.clone(),
-              *current_replicas,
-              window,
-              cx,
-            );
-          }
-          _ => {}
         }
-      },
-    )
+        StateChanged::DeploymentsUpdated => {
+          // Update selected deployment if it still exists
+          if let Some(ref current) = this.selected_deployment {
+            let state = ds.read(cx);
+            this.selected_deployment = state.get_deployment(&current.name, &current.namespace).cloned();
+            cx.notify();
+          }
+        }
+        StateChanged::DeploymentScaleRequest {
+          deployment_name,
+          namespace,
+          current_replicas,
+        } => {
+          Self::show_scale_dialog(deployment_name, namespace, *current_replicas, window, cx);
+        }
+        _ => {}
+      }
+    })
     .detach();
 
     // Trigger initial data load
@@ -102,7 +92,7 @@ impl DeploymentsView {
     }
   }
 
-  fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(CreateDeploymentDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, cx| {
@@ -137,14 +127,14 @@ impl DeploymentsView {
   }
 
   fn show_scale_dialog(
-    &mut self,
-    deployment_name: String,
-    namespace: String,
+    deployment_name: &str,
+    namespace: &str,
     current_replicas: i32,
     window: &mut Window,
     cx: &mut Context<'_, Self>,
   ) {
-    let dialog_entity = cx.new(|cx| ScaleDialog::new(deployment_name.clone(), namespace.clone(), current_replicas, cx));
+    let dialog_entity =
+      cx.new(|cx| ScaleDialog::new(deployment_name.to_string(), namespace.to_string(), current_replicas, cx));
 
     window.open_dialog(cx, move |dialog, _window, cx| {
       let _colors = cx.theme().colors;

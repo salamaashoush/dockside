@@ -90,7 +90,8 @@ impl CreateMachineDialog {
   pub fn get_options(&self, cx: &App) -> ColimaStartOptions {
     let name = self
       .name_input
-      .as_ref().map_or_else(|| "default".to_string(), |s| s.read(cx).text().to_string());
+      .as_ref()
+      .map_or_else(|| "default".to_string(), |s| s.read(cx).text().to_string());
     let cpus: u32 = self
       .cpus_input
       .as_ref()

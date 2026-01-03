@@ -49,7 +49,7 @@ impl ComposeView {
     cx.notify();
   }
 
-  fn render_empty(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+  fn render_empty(cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
 
     div().size_full().flex().items_center().justify_center().child(
@@ -75,12 +75,7 @@ impl ComposeView {
     )
   }
 
-  fn render_project(
-    &self,
-    project: &ComposeProject,
-    is_expanded: bool,
-    cx: &mut Context<'_, Self>,
-  ) -> impl IntoElement {
+  fn render_project(project: &ComposeProject, is_expanded: bool, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let colors = cx.theme().colors;
     let project_name = project.name.clone();
     let project_name_for_toggle = project_name.clone();
@@ -188,7 +183,7 @@ impl ComposeView {
                         project
                             .services
                             .iter()
-                            .map(|service| self.render_service(service, cx).into_any_element())
+                            .map(|service| Self::render_service(service, cx).into_any_element())
                             .collect::<Vec<_>>(),
                     )
                 } else {
@@ -198,7 +193,7 @@ impl ComposeView {
             )
   }
 
-  fn render_service(&self, service: &ComposeService, cx: &mut Context<'_, Self>) -> impl IntoElement {
+  fn render_service(service: &ComposeService, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let colors = cx.theme().colors;
 
     let status_color = if service.state.is_running() {
@@ -306,13 +301,13 @@ impl Render for ComposeView {
             .child({
                 // Pre-render content to avoid closure escaping issues
                 let content = if projects.is_empty() {
-                    self.render_empty(cx).into_any_element()
+                    Self::render_empty(cx).into_any_element()
                 } else {
                     v_flex()
                         .w_full()
                         .children(projects.iter().map(|project| {
                             let is_expanded = self.expanded_projects.contains(&project.name);
-                            self.render_project(project, is_expanded, cx).into_any_element()
+                            Self::render_project(project, is_expanded, cx).into_any_element()
                         }))
                         .into_any_element()
                 };

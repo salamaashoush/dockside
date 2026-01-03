@@ -18,6 +18,9 @@ use std::rc::Rc;
 
 use crate::kubernetes::{CreateServiceOptions, ServicePortConfig};
 
+/// Type alias for tab change callback to reduce complexity
+type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
+
 #[derive(Clone)]
 struct DialogColors {
   border: Hsla,
@@ -37,7 +40,7 @@ pub enum ServiceType {
 }
 
 impl ServiceType {
-  pub fn label(&self) -> &'static str {
+  pub fn label(self) -> &'static str {
     match self {
       ServiceType::ClusterIP => "ClusterIP",
       ServiceType::NodePort => "NodePort",
@@ -169,14 +172,13 @@ impl CreateServiceDialog {
       .map(|s| s.read(cx).text().to_string())
       .unwrap_or_default();
 
-    let namespace = self
-      .namespace_input
-      .as_ref()
-      .map(|s| {
+    let namespace = self.namespace_input.as_ref().map_or_else(
+      || "default".to_string(),
+      |s| {
         let text = s.read(cx).text().to_string();
         if text.is_empty() { "default".to_string() } else { text }
-      })
-      .unwrap_or_else(|| "default".to_string());
+      },
+    );
 
     let service_type = self
       .service_type_select
@@ -213,7 +215,7 @@ impl CreateServiceDialog {
     }
   }
 
-  fn render_form_row(&self, label: &'static str, content: impl IntoElement, colors: &DialogColors) -> gpui::Div {
+  fn render_form_row(label: &'static str, content: impl IntoElement, colors: &DialogColors) -> gpui::Div {
     h_flex()
       .w_full()
       .py(px(12.))
@@ -227,7 +229,6 @@ impl CreateServiceDialog {
   }
 
   fn render_form_row_with_desc(
-    &self,
     label: &'static str,
     description: &'static str,
     content: impl IntoElement,
@@ -257,13 +258,17 @@ impl CreateServiceDialog {
 
     v_flex()
       .w_full()
-      .child(self.render_form_row("Name", div().w(px(250.)).child(Input::new(&name_input).small()), colors))
-      .child(self.render_form_row(
+      .child(Self::render_form_row(
+        "Name",
+        div().w(px(250.)).child(Input::new(&name_input).small()),
+        colors,
+      ))
+      .child(Self::render_form_row(
         "Namespace",
         div().w(px(250.)).child(Input::new(&namespace_input).small()),
         colors,
       ))
-      .child(self.render_form_row_with_desc(
+      .child(Self::render_form_row_with_desc(
         "Service Type",
         "How the service is exposed",
         div().w(px(150.)).child(Select::new(&service_type_select).small()),
@@ -568,11 +573,10 @@ impl Render for CreateServiceDialog {
       format!("Selectors ({selectors_count})"),
     ];
 
-    let on_tab_change: Rc<dyn Fn(&usize, &mut Window, &mut App)> =
-      Rc::new(cx.listener(|this, idx: &usize, _window, cx| {
-        this.active_tab = *idx;
-        cx.notify();
-      }));
+    let on_tab_change: TabChangeCallback = Rc::new(cx.listener(|this, idx: &usize, _window, cx| {
+      this.active_tab = *idx;
+      cx.notify();
+    }));
 
     v_flex()
       .w_full()

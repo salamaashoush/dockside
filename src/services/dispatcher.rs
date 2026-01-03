@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::colima::{ColimaClient, ColimaStartOptions};
-use crate::docker::DockerClient;
+use crate::docker::{ContainerCreateConfig, ContainerFlags, DockerClient};
 use crate::services::{Tokio, complete_task, fail_task, start_task};
 use crate::state::{CurrentView, ImageInspectData, StateChanged, docker_state, settings_state};
 
@@ -71,7 +71,7 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
     let result = cx
       .background_executor()
       .spawn(async move {
-        match ColimaClient::start(options) {
+        match ColimaClient::start(&options) {
           Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
@@ -116,7 +116,7 @@ pub fn start_machine(name: String, cx: &mut App) {
       .background_executor()
       .spawn(async move {
         let options = ColimaStartOptions::new().with_name(name.clone());
-        match ColimaClient::start(options) {
+        match ColimaClient::start(&options) {
           Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
@@ -217,7 +217,7 @@ pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
         }
 
         // Start with new options (edit mode)
-        match ColimaClient::start(options) {
+        match ColimaClient::start(&options) {
           Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
@@ -296,20 +296,20 @@ pub fn restart_machine(name: String, cx: &mut App) {
 }
 
 /// Start Colima with optional profile name (None = default profile)
-pub fn start_colima(profile: Option<String>, cx: &mut App) {
-  let name = profile.clone().unwrap_or_else(|| "default".to_string());
+pub fn start_colima(profile: Option<&str>, cx: &mut App) {
+  let name = profile.unwrap_or("default").to_string();
   start_machine(name, cx);
 }
 
 /// Stop Colima with optional profile name (None = default profile)
-pub fn stop_colima(profile: Option<String>, cx: &mut App) {
-  let name = profile.unwrap_or_else(|| "default".to_string());
+pub fn stop_colima(profile: Option<&str>, cx: &mut App) {
+  let name = profile.unwrap_or("default").to_string();
   stop_machine(name, cx);
 }
 
 /// Restart Colima with optional profile name (None = default profile)
-pub fn restart_colima(profile: Option<String>, cx: &mut App) {
-  let name = profile.unwrap_or_else(|| "default".to_string());
+pub fn restart_colima(profile: Option<&str>, cx: &mut App) {
+  let name = profile.unwrap_or("default").to_string();
   let task_id = start_task(cx, format!("Restarting '{name}'..."));
   let name_clone = name.clone();
 
@@ -1268,25 +1268,27 @@ pub fn create_container(options: crate::ui::containers::CreateContainerOptions, 
       .as_ref()
       .map(|e| e.split_whitespace().map(String::from).collect());
 
-    let container_id = docker
-      .create_container(
-        &options.image,
-        options.name.as_deref(),
-        options.platform.as_docker_arg(),
-        command,
-        entrypoint,
-        options.workdir.as_deref(),
-        options.remove_after_stop,
-        options.restart_policy.as_docker_arg(),
-        options.privileged,
-        options.read_only,
-        options.docker_init,
-        options.env_vars,
-        options.ports,
-        options.volumes,
-        options.network.as_deref(),
-      )
-      .await?;
+    let config = ContainerCreateConfig {
+      image: options.image,
+      name: options.name,
+      platform: options.platform.as_docker_arg().map(String::from),
+      command,
+      entrypoint,
+      working_dir: options.workdir,
+      restart_policy: options.restart_policy.as_docker_arg().map(String::from),
+      flags: ContainerFlags {
+        auto_remove: options.remove_after_stop,
+        privileged: options.privileged,
+        read_only: options.read_only,
+        init: options.docker_init,
+      },
+      env_vars: options.env_vars,
+      ports: options.ports,
+      volumes: options.volumes,
+      network: options.network,
+    };
+
+    let container_id = docker.create_container(config).await?;
 
     // Start the container if requested
     if start_after {
@@ -2021,7 +2023,7 @@ pub fn compose_restart(project_name: String, cx: &mut App) {
 // PRUNE OPERATIONS
 // ============================================================================
 
-pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<crate::ui::PruneDialog> {
+pub fn prune_docker(options: &crate::ui::PruneOptions, cx: &mut App) -> Entity<crate::ui::PruneDialog> {
   use crate::docker::PruneResult;
 
   let task_id = start_task(cx, "Pruning Docker resources...".to_string());
@@ -2075,79 +2077,77 @@ pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<cr
 
     // Kubernetes pruning
     let needs_k8s = prune_k8s_pods || prune_k8s_deployments || prune_k8s_services;
-    if needs_k8s
-      && let Ok(kube_client) = crate::kubernetes::KubeClient::new().await {
-        // Helper to check if namespace is a system namespace
-        let is_system_namespace = |ns: &str| {
-          matches!(ns, "kube-system" | "kube-public" | "kube-node-lease")
-        };
+    if needs_k8s && let Ok(kube_client) = crate::kubernetes::KubeClient::new().await {
+      // Helper to check if namespace is a system namespace
+      let is_system_namespace = |ns: &str| matches!(ns, "kube-system" | "kube-public" | "kube-node-lease");
 
-        // Helper to check if resource is a system resource
-        let is_system_resource = |ns: &str, name: &str| {
-          is_system_namespace(ns) || (ns == "default" && name == "kubernetes")
-        };
+      // Helper to check if resource is a system resource
+      let is_system_resource =
+        |ns: &str, name: &str| is_system_namespace(ns) || (ns == "default" && name == "kubernetes");
 
-        // Prune deployments first (this will cascade delete their pods)
-        if prune_k8s_deployments
-          && let Ok(deployments) = kube_client.list_deployments(None).await {
-            for deployment in deployments {
-              // Skip system namespaces
-              if is_system_namespace(&deployment.namespace) {
-                continue;
-              }
-              if kube_client
-                .delete_deployment(&deployment.name, &deployment.namespace)
-                .await
-                .is_ok()
-              {
-                result
-                  .deployments_deleted
-                  .push(format!("{}/{}", deployment.namespace, deployment.name));
-              }
-            }
+      // Prune deployments first (this will cascade delete their pods)
+      if prune_k8s_deployments && let Ok(deployments) = kube_client.list_deployments(None).await {
+        for deployment in deployments {
+          // Skip system namespaces
+          if is_system_namespace(&deployment.namespace) {
+            continue;
           }
-
-        // Prune services
-        if prune_k8s_services
-          && let Ok(services) = kube_client.list_services(None).await {
-            for service in services {
-              // Skip system namespaces and default kubernetes service
-              if is_system_resource(&service.namespace, &service.name) {
-                continue;
-              }
-              if kube_client.delete_service(&service.name, &service.namespace).await.is_ok() {
-                result.services_deleted.push(format!("{}/{}", service.namespace, service.name));
-              }
-            }
+          if kube_client
+            .delete_deployment(&deployment.name, &deployment.namespace)
+            .await
+            .is_ok()
+          {
+            result
+              .deployments_deleted
+              .push(format!("{}/{}", deployment.namespace, deployment.name));
           }
-
-        // Prune pods (only orphans if deployments were pruned, or based on status)
-        if prune_k8s_pods
-          && let Ok(pods) = kube_client.list_pods(None).await {
-            for pod in pods {
-              // Skip system namespaces
-              if is_system_namespace(&pod.namespace) {
-                continue;
-              }
-
-              // If prune_k8s_pods_all is true, delete all pods
-              // Otherwise, only delete completed/failed pods
-              let should_delete = if prune_k8s_pods_all {
-                true
-              } else {
-                matches!(
-                  pod.phase,
-                  crate::kubernetes::PodPhase::Succeeded | crate::kubernetes::PodPhase::Failed
-                )
-              };
-
-              if should_delete
-                && kube_client.delete_pod(&pod.name, &pod.namespace).await.is_ok() {
-                  result.pods_deleted.push(format!("{}/{}", pod.namespace, pod.name));
-                }
-            }
-          }
+        }
       }
+
+      // Prune services
+      if prune_k8s_services && let Ok(services) = kube_client.list_services(None).await {
+        for service in services {
+          // Skip system namespaces and default kubernetes service
+          if is_system_resource(&service.namespace, &service.name) {
+            continue;
+          }
+          if kube_client
+            .delete_service(&service.name, &service.namespace)
+            .await
+            .is_ok()
+          {
+            result
+              .services_deleted
+              .push(format!("{}/{}", service.namespace, service.name));
+          }
+        }
+      }
+
+      // Prune pods (only orphans if deployments were pruned, or based on status)
+      if prune_k8s_pods && let Ok(pods) = kube_client.list_pods(None).await {
+        for pod in pods {
+          // Skip system namespaces
+          if is_system_namespace(&pod.namespace) {
+            continue;
+          }
+
+          // If prune_k8s_pods_all is true, delete all pods
+          // Otherwise, only delete completed/failed pods
+          let should_delete = if prune_k8s_pods_all {
+            true
+          } else {
+            matches!(
+              pod.phase,
+              crate::kubernetes::PodPhase::Succeeded | crate::kubernetes::PodPhase::Failed
+            )
+          };
+
+          if should_delete && kube_client.delete_pod(&pod.name, &pod.namespace).await.is_ok() {
+            result.pods_deleted.push(format!("{}/{}", pod.namespace, pod.name));
+          }
+        }
+      }
+    }
 
     Ok::<_, anyhow::Error>(result)
   });

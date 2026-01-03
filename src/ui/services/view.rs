@@ -33,28 +33,28 @@ impl ServicesView {
       window,
       |this, _list, event: &ServiceListEvent, window, cx| match event {
         ServiceListEvent::Selected(service) => {
-          this.selected_service = Some(service.clone());
+          this.selected_service = Some(service.as_ref().clone());
           this.detail.update(cx, |detail, cx| {
-            detail.set_service(service.clone(), cx);
+            detail.set_service(service.as_ref().clone(), cx);
           });
           cx.notify();
         }
         ServiceListEvent::NewService => {
-          this.show_create_dialog(window, cx);
+          Self::show_create_dialog(window, cx);
         }
       },
     )
     .detach();
 
     // Subscribe to docker state changes
-    cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
+    cx.subscribe(&docker_state, |this, ds, event: &StateChanged, cx| {
       match event {
         StateChanged::ServiceTabRequest {
           service_name,
           namespace,
           tab: _,
         } => {
-          let state = _state.read(cx);
+          let state = ds.read(cx);
           if let Some(svc) = state.get_service(service_name, namespace) {
             this.selected_service = Some(svc.clone());
             cx.notify();
@@ -63,7 +63,7 @@ impl ServicesView {
         StateChanged::ServicesUpdated => {
           // Update selected service if it still exists
           if let Some(ref current) = this.selected_service {
-            let state = _state.read(cx);
+            let state = ds.read(cx);
             this.selected_service = state.get_service(&current.name, &current.namespace).cloned();
             cx.notify();
           }
@@ -84,7 +84,7 @@ impl ServicesView {
     }
   }
 
-  fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(CreateServiceDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, cx| {

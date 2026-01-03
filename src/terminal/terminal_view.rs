@@ -41,7 +41,7 @@ impl TerminalView {
     };
 
     view.connect(cx);
-    view.start_polling(cx);
+    Self::start_polling(cx);
 
     view
   }
@@ -51,7 +51,7 @@ impl TerminalView {
   }
 
   pub fn connect(&mut self, cx: &mut Context<'_, Self>) {
-    match PtyTerminal::new(self.session_type.clone()) {
+    match PtyTerminal::new(&self.session_type) {
       Ok(terminal) => {
         self.buffer = terminal.buffer();
         self.terminal = Some(terminal);
@@ -66,7 +66,7 @@ impl TerminalView {
     cx.notify();
   }
 
-  fn start_polling(&mut self, cx: &mut Context<'_, Self>) {
+  fn start_polling(cx: &mut Context<'_, Self>) {
     cx.spawn(async move |this, cx| {
       loop {
         gpui::Timer::after(std::time::Duration::from_millis(16)).await;
@@ -114,7 +114,8 @@ impl Render for TerminalView {
     // Estimate available height: window height minus toolbar/tabs (~120px) minus padding (24px)
     let window_height: f32 = window.viewport_size().height.into();
     let available_height = (window_height - 144.0).max(200.0);
-    let display_rows = (available_height / line_height) as usize;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let display_rows = ((available_height / line_height).round() as usize).clamp(10, 10000);
 
     let mut buffer = self.buffer.lock();
     buffer.set_display_rows(display_rows);
@@ -260,6 +261,7 @@ impl Render for TerminalView {
     }
 
     // Scrollbar - show when there's more content than visible
+    #[allow(clippy::cast_precision_loss)] // GUI rendering - precision loss acceptable for line counts
     let scrollbar = if content.total_lines > content.rows {
       let track_height = content.rows as f32 * line_height - 16.0; // Match visible area minus padding
       let visible_ratio = content.rows as f32 / content.total_lines as f32;
@@ -349,7 +351,8 @@ impl Render for TerminalView {
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, _cx| {
                 let delta = event.delta.pixel_delta(px(1.0));
                 let y_pixels: f32 = delta.y.into();
-                let lines = (y_pixels / this.line_height) as i32;
+                #[allow(clippy::cast_possible_truncation)]
+                let lines = (y_pixels / this.line_height).round() as i32;
                 if lines != 0 {
                     this.scroll(-lines);
                 }

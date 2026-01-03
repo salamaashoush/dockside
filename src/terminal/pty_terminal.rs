@@ -115,7 +115,7 @@ pub enum TerminalKey {
 }
 
 impl TerminalKey {
-  pub fn to_bytes(&self) -> Vec<u8> {
+  pub fn to_bytes(self) -> Vec<u8> {
     match self {
       Self::Char(c) => {
         let mut buf = [0u8; 4];
@@ -263,12 +263,13 @@ impl TerminalBuffer {
   }
 
   pub fn newline(&mut self) {
+    const MAX_LINES: usize = 10000;
+
     self.cursor_row += 1;
     self.cursor_col = 0;
     self.ensure_line(self.cursor_row);
 
-    // Limit scrollback to 10000 lines
-    const MAX_LINES: usize = 10000;
+    // Limit scrollback to MAX_LINES
     if self.lines.len() > MAX_LINES {
       let excess = self.lines.len() - MAX_LINES;
       self.lines.drain(0..excess);
@@ -325,6 +326,7 @@ impl TerminalBuffer {
   }
 
   pub fn scroll(&mut self, delta: i32) {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     let max_scroll = self.lines.len().saturating_sub(self.rows) as i32;
     self.scroll_offset = (self.scroll_offset + delta).clamp(0, max_scroll.max(0));
   }
@@ -339,8 +341,9 @@ impl TerminalBuffer {
 
   pub fn get_content(&self) -> TerminalContent {
     let total_lines = self.lines.len();
+    let scroll_offset_usize = usize::try_from(self.scroll_offset).unwrap_or(0);
     let visible_start = if self.scroll_offset > 0 {
-      total_lines.saturating_sub(self.rows + self.scroll_offset as usize)
+      total_lines.saturating_sub(self.rows + scroll_offset_usize)
     } else {
       total_lines.saturating_sub(self.rows)
     };
@@ -355,7 +358,7 @@ impl TerminalBuffer {
       cursor_visible: self.scroll_offset == 0,
       rows: self.rows,
       total_lines,
-      scroll_offset: self.scroll_offset as usize,
+      scroll_offset: scroll_offset_usize,
     }
   }
 }
@@ -370,25 +373,24 @@ impl TerminalPerformer {
     Self { buffer }
   }
 
+  /// Safely convert u16 to u8, clamping to 255
+  fn to_u8(val: u16) -> u8 {
+    val.min(255) as u8
+  }
+
   fn ansi_color_to_rgb(code: u8) -> (u8, u8, u8) {
     // Tokyo Night color palette
     match code {
-      0 => (26, 27, 38),     // Black
-      1 => (247, 118, 142),  // Red
-      2 => (158, 206, 106),  // Green
-      3 => (224, 175, 104),  // Yellow
-      4 => (122, 162, 247),  // Blue
-      5 => (187, 154, 247),  // Magenta
-      6 => (125, 207, 255),  // Cyan
-      7 => (192, 202, 245),  // White
-      8 => (65, 77, 104),    // Bright Black
-      9 => (247, 118, 142),  // Bright Red
-      10 => (158, 206, 106), // Bright Green
-      11 => (224, 175, 104), // Bright Yellow
-      12 => (122, 162, 247), // Bright Blue
-      13 => (187, 154, 247), // Bright Magenta
-      14 => (125, 207, 255), // Bright Cyan
-      15 => (255, 255, 255), // Bright White
+      0 => (26, 27, 38),         // Black
+      1 | 9 => (247, 118, 142),  // Red / Bright Red
+      2 | 10 => (158, 206, 106), // Green / Bright Green
+      3 | 11 => (224, 175, 104), // Yellow / Bright Yellow
+      4 | 12 => (122, 162, 247), // Blue / Bright Blue
+      5 | 13 => (187, 154, 247), // Magenta / Bright Magenta
+      6 | 14 => (125, 207, 255), // Cyan / Bright Cyan
+      7 => (192, 202, 245),      // White
+      8 => (65, 77, 104),        // Bright Black
+      15 => (255, 255, 255),     // Bright White
       // 216 color cube (16-231)
       16..=231 => {
         let n = code - 16;
@@ -450,37 +452,45 @@ impl vte::Perform for TerminalPerformer {
             1 => buf.set_bold(true),
             22 => buf.set_bold(false),
             30..=37 => {
-              let rgb = Self::ansi_color_to_rgb(params[i] as u8 - 30);
+              let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i]) - 30);
               buf.set_fg(rgb.0, rgb.1, rgb.2);
             }
             38 => {
               if i + 2 < params.len() && params[i + 1] == 5 {
-                let rgb = Self::ansi_color_to_rgb(params[i + 2] as u8);
+                let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i + 2]));
                 buf.set_fg(rgb.0, rgb.1, rgb.2);
                 i += 2;
               } else if i + 4 < params.len() && params[i + 1] == 2 {
-                buf.set_fg(params[i + 2] as u8, params[i + 3] as u8, params[i + 4] as u8);
+                buf.set_fg(
+                  Self::to_u8(params[i + 2]),
+                  Self::to_u8(params[i + 3]),
+                  Self::to_u8(params[i + 4]),
+                );
                 i += 4;
               }
             }
             39 => buf.set_fg(169, 177, 214),
             40..=47 => {
-              let rgb = Self::ansi_color_to_rgb(params[i] as u8 - 40);
+              let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i]) - 40);
               buf.set_bg(rgb.0, rgb.1, rgb.2);
             }
             48 => {
               if i + 2 < params.len() && params[i + 1] == 5 {
-                let rgb = Self::ansi_color_to_rgb(params[i + 2] as u8);
+                let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i + 2]));
                 buf.set_bg(rgb.0, rgb.1, rgb.2);
                 i += 2;
               } else if i + 4 < params.len() && params[i + 1] == 2 {
-                buf.set_bg(params[i + 2] as u8, params[i + 3] as u8, params[i + 4] as u8);
+                buf.set_bg(
+                  Self::to_u8(params[i + 2]),
+                  Self::to_u8(params[i + 3]),
+                  Self::to_u8(params[i + 4]),
+                );
                 i += 4;
               }
             }
             49 => buf.set_bg(26, 27, 38),
             90..=97 => {
-              let rgb = Self::ansi_color_to_rgb(params[i] as u8 - 90 + 8);
+              let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i]) - 90 + 8);
               buf.set_fg(rgb.0, rgb.1, rgb.2);
             }
             _ => {}
@@ -538,7 +548,7 @@ pub struct PtyTerminal {
 }
 
 impl PtyTerminal {
-  pub fn new(session_type: TerminalSessionType) -> Result<Self> {
+  pub fn new(session_type: &TerminalSessionType) -> Result<Self> {
     let pty_system = native_pty_system();
 
     let pair = pty_system.openpty(PtySize {

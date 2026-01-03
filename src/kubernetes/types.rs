@@ -25,11 +25,11 @@ impl PodPhase {
     }
   }
 
-  pub fn is_running(&self) -> bool {
+  pub fn is_running(self) -> bool {
     matches!(self, PodPhase::Running)
   }
 
-  pub fn is_pending(&self) -> bool {
+  pub fn is_pending(self) -> bool {
     matches!(self, PodPhase::Pending)
   }
 }
@@ -209,14 +209,13 @@ impl ServiceInfo {
             name: p.name.clone(),
             protocol: p.protocol.clone().unwrap_or_else(|| "TCP".to_string()),
             port: p.port,
-            target_port: p
-              .target_port
-              .as_ref()
-              .map(|tp| match tp {
+            target_port: p.target_port.as_ref().map_or_else(
+              || p.port.to_string(),
+              |tp| match tp {
                 k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(i) => i.to_string(),
                 k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::String(s) => s.clone(),
-              })
-              .unwrap_or_else(|| p.port.to_string()),
+              },
+            ),
             node_port: p.node_port,
           })
           .collect()

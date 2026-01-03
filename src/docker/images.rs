@@ -35,7 +35,7 @@ impl ImageInfo {
   }
 
   pub fn display_size(&self) -> String {
-    bytesize::ByteSize(self.size as u64).to_string()
+    bytesize::ByteSize(u64::try_from(self.size).unwrap_or(0)).to_string()
   }
 }
 

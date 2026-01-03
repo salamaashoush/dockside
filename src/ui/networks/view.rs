@@ -35,10 +35,10 @@ impl NetworksView {
       window,
       |this, _list, event: &NetworkListEvent, window, cx| match event {
         NetworkListEvent::Selected(network) => {
-          this.on_select_network(network, cx);
+          this.on_select_network(network.as_ref(), cx);
         }
         NetworkListEvent::CreateNetwork => {
-          this.show_create_dialog(window, cx);
+          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -73,7 +73,7 @@ impl NetworksView {
     }
   }
 
-  fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(CreateNetworkDialog::new);
     let colors = cx.theme().colors;
 

@@ -142,7 +142,7 @@ impl VolumeDetail {
     self
   }
 
-  fn render_empty(&self, cx: &App) -> gpui::Div {
+  fn render_empty(cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     div()
@@ -168,7 +168,7 @@ impl VolumeDetail {
       )
   }
 
-  fn render_info_tab(&self, volume: &VolumeInfo, cx: &App) -> gpui::Div {
+  fn render_info_tab(volume: &VolumeInfo, cx: &App) -> gpui::Div {
     let _colors = &cx.theme().colors;
 
     // Basic info rows
@@ -183,13 +183,13 @@ impl VolumeDetail {
             .w_full()
             .p(px(16.))
             .gap(px(12.))
-            .child(self.render_section(None, basic_info, cx))
+            .child(Self::render_section(None, basic_info, cx))
             // Labels section if not empty
             .when(!volume.labels.is_empty(), |el| {
-                el.child(self.render_labels_section(volume, cx))
+                el.child(Self::render_labels_section(volume, cx))
             })
             // Additional info
-            .child(self.render_section(
+            .child(Self::render_section(
                 Some("Details"),
                 vec![
                     ("Driver", volume.driver.clone()),
@@ -200,7 +200,7 @@ impl VolumeDetail {
             ))
   }
 
-  fn render_section(&self, header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
+  fn render_section(header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut section = v_flex().gap(px(1.));
@@ -224,13 +224,13 @@ impl VolumeDetail {
         rows
           .into_iter()
           .enumerate()
-          .map(|(i, (label, value))| self.render_section_row(label, value, i == 0, cx)),
+          .map(|(i, (label, value))| Self::render_section_row(label, value, i == 0, cx)),
       );
 
     section.child(rows_container)
   }
 
-  fn render_section_row(&self, label: &str, value: String, is_first: bool, cx: &App) -> gpui::Div {
+  fn render_section_row(label: &str, value: String, is_first: bool, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut row = h_flex()
@@ -262,7 +262,7 @@ impl VolumeDetail {
     row
   }
 
-  fn render_labels_section(&self, volume: &VolumeInfo, cx: &App) -> gpui::Div {
+  fn render_labels_section(volume: &VolumeInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut labels: Vec<_> = volume.labels.iter().collect();
@@ -394,7 +394,7 @@ impl VolumeDetail {
     let colors = &cx.theme().colors;
 
     let Some(volume) = &self.volume else {
-      return self.render_empty(cx).into_any_element();
+      return Self::render_empty(cx).into_any_element();
     };
 
     let volume_name = volume.name.clone();
@@ -460,7 +460,7 @@ impl VolumeDetail {
       );
     } else {
       // Info tab with scroll container
-      let content = self.render_info_tab(volume, cx);
+      let content = Self::render_info_tab(volume, cx);
       result = result.child(
         div()
           .id("volume-detail-scroll")

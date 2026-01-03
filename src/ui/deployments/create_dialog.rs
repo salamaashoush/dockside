@@ -18,6 +18,9 @@ use std::rc::Rc;
 
 use crate::kubernetes::{ContainerPortConfig, CreateDeploymentOptions};
 
+/// Type alias for tab change callback to reduce complexity
+type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
+
 #[derive(Clone)]
 struct DialogColors {
   border: Hsla,
@@ -37,7 +40,7 @@ pub enum ImagePullPolicy {
 }
 
 impl ImagePullPolicy {
-  pub fn label(&self) -> &'static str {
+  pub fn label(self) -> &'static str {
     match self {
       ImagePullPolicy::IfNotPresent => "IfNotPresent",
       ImagePullPolicy::Always => "Always",
@@ -226,14 +229,13 @@ impl CreateDeploymentDialog {
       .map(|s| s.read(cx).text().to_string())
       .unwrap_or_default();
 
-    let namespace = self
-      .namespace_input
-      .as_ref()
-      .map(|s| {
+    let namespace = self.namespace_input.as_ref().map_or_else(
+      || "default".to_string(),
+      |s| {
         let text = s.read(cx).text().to_string();
         if text.is_empty() { "default".to_string() } else { text }
-      })
-      .unwrap_or_else(|| "default".to_string());
+      },
+    );
 
     let image = self
       .image_input
@@ -243,7 +245,8 @@ impl CreateDeploymentDialog {
 
     let replicas: i32 = self
       .replicas_input
-      .as_ref().map_or_else(|| "1".to_string(), |s| s.read(cx).text().to_string())
+      .as_ref()
+      .map_or_else(|| "1".to_string(), |s| s.read(cx).text().to_string())
       .parse()
       .unwrap_or(1);
 
@@ -336,7 +339,7 @@ impl CreateDeploymentDialog {
     }
   }
 
-  fn render_form_row(&self, label: &'static str, content: impl IntoElement, colors: &DialogColors) -> gpui::Div {
+  fn render_form_row(label: &'static str, content: impl IntoElement, colors: &DialogColors) -> gpui::Div {
     h_flex()
       .w_full()
       .py(px(12.))
@@ -350,7 +353,6 @@ impl CreateDeploymentDialog {
   }
 
   fn render_form_row_with_desc(
-    &self,
     label: &'static str,
     description: &'static str,
     content: impl IntoElement,
@@ -373,7 +375,7 @@ impl CreateDeploymentDialog {
       .child(content)
   }
 
-  fn render_section_header(&self, title: &'static str, colors: &DialogColors) -> gpui::Div {
+  fn render_section_header(title: &'static str, colors: &DialogColors) -> gpui::Div {
     div()
       .w_full()
       .py(px(8.))
@@ -391,23 +393,27 @@ impl CreateDeploymentDialog {
 
     v_flex()
       .w_full()
-      .child(self.render_form_row("Name", div().w(px(250.)).child(Input::new(&name_input).small()), colors))
-      .child(self.render_form_row(
+      .child(Self::render_form_row(
+        "Name",
+        div().w(px(250.)).child(Input::new(&name_input).small()),
+        colors,
+      ))
+      .child(Self::render_form_row(
         "Namespace",
         div().w(px(250.)).child(Input::new(&namespace_input).small()),
         colors,
       ))
-      .child(self.render_form_row(
+      .child(Self::render_form_row(
         "Image",
         div().w(px(250.)).child(Input::new(&image_input).small()),
         colors,
       ))
-      .child(self.render_form_row(
+      .child(Self::render_form_row(
         "Replicas",
         div().w(px(100.)).child(Input::new(&replicas_input).small()),
         colors,
       ))
-      .child(self.render_form_row_with_desc(
+      .child(Self::render_form_row_with_desc(
         "Image Pull Policy",
         "When to pull the container image",
         div().w(px(150.)).child(Select::new(&pull_policy_select).small()),
@@ -425,40 +431,40 @@ impl CreateDeploymentDialog {
 
     v_flex()
       .w_full()
-      .child(self.render_section_header("Resource Limits", colors))
-      .child(self.render_form_row_with_desc(
+      .child(Self::render_section_header("Resource Limits", colors))
+      .child(Self::render_form_row_with_desc(
         "CPU Limit",
         "Maximum CPU (e.g. 500m, 1)",
         div().w(px(150.)).child(Input::new(&cpu_limit).small()),
         colors,
       ))
-      .child(self.render_form_row_with_desc(
+      .child(Self::render_form_row_with_desc(
         "Memory Limit",
         "Maximum memory (e.g. 256Mi, 1Gi)",
         div().w(px(150.)).child(Input::new(&memory_limit).small()),
         colors,
       ))
-      .child(self.render_section_header("Resource Requests", colors))
-      .child(self.render_form_row_with_desc(
+      .child(Self::render_section_header("Resource Requests", colors))
+      .child(Self::render_form_row_with_desc(
         "CPU Request",
         "Minimum CPU (e.g. 100m)",
         div().w(px(150.)).child(Input::new(&cpu_request).small()),
         colors,
       ))
-      .child(self.render_form_row_with_desc(
+      .child(Self::render_form_row_with_desc(
         "Memory Request",
         "Minimum memory (e.g. 128Mi)",
         div().w(px(150.)).child(Input::new(&memory_request).small()),
         colors,
       ))
-      .child(self.render_section_header("Command", colors))
-      .child(self.render_form_row_with_desc(
+      .child(Self::render_section_header("Command", colors))
+      .child(Self::render_form_row_with_desc(
         "Command",
         "Container command (comma-separated)",
         div().w(px(200.)).child(Input::new(&command_input).small()),
         colors,
       ))
-      .child(self.render_form_row_with_desc(
+      .child(Self::render_form_row_with_desc(
         "Args",
         "Container args (comma-separated)",
         div().w(px(200.)).child(Input::new(&args_input).small()),
@@ -792,11 +798,10 @@ impl Render for CreateDeploymentDialog {
       format!("Labels ({labels_count})"),
     ];
 
-    let on_tab_change: Rc<dyn Fn(&usize, &mut Window, &mut App)> =
-      Rc::new(cx.listener(|this, idx: &usize, _window, cx| {
-        this.active_tab = *idx;
-        cx.notify();
-      }));
+    let on_tab_change: TabChangeCallback = Rc::new(cx.listener(|this, idx: &usize, _window, cx| {
+      this.active_tab = *idx;
+      cx.notify();
+    }));
 
     v_flex()
       .w_full()

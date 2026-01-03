@@ -72,7 +72,7 @@ impl CreateNetworkDialog {
     }
   }
 
-  fn render_form_row(&self, label: &'static str, content: impl IntoElement, cx: &App) -> gpui::Div {
+  fn render_form_row(label: &'static str, content: impl IntoElement, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     h_flex()
@@ -129,7 +129,7 @@ impl Render for CreateNetworkDialog {
             )
             // IPv6 toggle
             .child(
-                self.render_form_row(
+                Self::render_form_row(
                     "IPv6",
                     Switch::new("ipv6")
                         .checked(enable_ipv6)
@@ -142,7 +142,7 @@ impl Render for CreateNetworkDialog {
             )
             // Subnet input
             .child(
-                self.render_form_row(
+                Self::render_form_row(
                     "Subnet (IPv4)",
                     div().w(px(150.)).child(Input::new(&subnet_input).small()),
                     cx,

@@ -13,7 +13,6 @@ mod ui;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::Result;
 use gpui::{App, AppContext, Bounds, SharedString, Timer, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 use gpui_component::{
   Root,
@@ -55,7 +54,7 @@ fn get_themes_dir() -> Option<PathBuf> {
   None
 }
 
-fn main() -> Result<()> {
+fn main() {
   tracing_subscriber::registry()
     .with(tracing_subscriber::fmt::layer())
     .init();
@@ -96,7 +95,6 @@ fn main() -> Result<()> {
           title: Some("Deckhand".into()),
           appears_transparent: true,
           traffic_light_position: Some(gpui::point(px(9.), px(9.))),
-          ..Default::default()
         }),
         ..Default::default()
       },
@@ -136,8 +134,6 @@ fn main() -> Result<()> {
     })
     .detach();
   });
-
-  Ok(())
 }
 
 /// Handle tray menu events

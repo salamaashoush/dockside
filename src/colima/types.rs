@@ -1,3 +1,6 @@
+// Allow precision loss for display formatting of byte sizes
+#![allow(clippy::cast_precision_loss)]
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -9,7 +12,7 @@ pub enum VmStatus {
 }
 
 impl VmStatus {
-  pub fn is_running(&self) -> bool {
+  pub fn is_running(self) -> bool {
     matches!(self, VmStatus::Running)
   }
 }
@@ -50,7 +53,7 @@ pub enum VmArch {
 }
 
 impl VmArch {
-  pub fn display_name(&self) -> &'static str {
+  pub fn display_name(self) -> &'static str {
     match self {
       VmArch::Aarch64 => "ARM64 (aarch64)",
       VmArch::X86_64 => "x86_64",
@@ -84,7 +87,7 @@ impl std::fmt::Display for VmType {
 }
 
 impl VmType {
-  pub fn display_name(&self) -> &'static str {
+  pub fn display_name(self) -> &'static str {
     match self {
       VmType::Vz => "macOS Virtualization.Framework",
       VmType::Qemu => "QEMU",
@@ -168,13 +171,15 @@ impl ColimaVm {
   pub fn display_driver(&self) -> String {
     self.driver.clone().unwrap_or_else(|| {
       self
-        .vm_type.map_or_else(|| "Unknown".to_string(), |v| v.display_name().to_string())
+        .vm_type
+        .map_or_else(|| "Unknown".to_string(), |v| v.display_name().to_string())
     })
   }
 
   pub fn display_mount_type(&self) -> String {
     self
-      .mount_type.map_or_else(|| "virtiofs".to_string(), |m| m.to_string())
+      .mount_type
+      .map_or_else(|| "virtiofs".to_string(), |m| m.to_string())
   }
 }
 

@@ -29,7 +29,7 @@ impl ServiceDetail {
     let docker_state = docker_state(cx);
 
     // Subscribe to state changes
-    cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
+    cx.subscribe(&docker_state, |this, ds, event: &StateChanged, cx| {
       match event {
         StateChanged::ServiceYamlLoaded {
           service_name,
@@ -50,7 +50,7 @@ impl ServiceDetail {
           tab,
         } => {
           // Find and select the service
-          let state = _state.read(cx);
+          let state = ds.read(cx);
           if let Some(svc) = state.get_service(service_name, namespace) {
             this.service = Some(svc.clone());
             this.active_tab = *tab;
@@ -61,7 +61,7 @@ impl ServiceDetail {
         StateChanged::ServicesUpdated => {
           // Refresh current service if still exists
           if let Some(ref current) = this.service {
-            let state = _state.read(cx);
+            let state = ds.read(cx);
             if let Some(updated) = state.get_service(&current.name, &current.namespace) {
               this.service = Some(updated.clone());
               cx.notify();
@@ -96,7 +96,7 @@ impl ServiceDetail {
     cx.notify();
   }
 
-  fn render_info_tab(&self, service: &ServiceInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_info_tab(service: &ServiceInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let info_row = |label: &str, value: String| {
@@ -206,7 +206,7 @@ impl ServiceDetail {
     div().size_full().p(px(16.)).child(content)
   }
 
-  fn render_ports_tab(&self, service: &ServiceInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_ports_tab(service: &ServiceInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     if service.ports.is_empty() {
@@ -562,7 +562,7 @@ impl ServiceDetail {
     )
   }
 
-  fn render_empty(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_empty(cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     div().size_full().flex().items_center().justify_center().child(
@@ -612,18 +612,20 @@ impl Render for ServiceDetail {
 
     // Sync yaml editor content
     if let Some(ref editor) = self.yaml_editor
-      && !self.yaml_content.is_empty() && self.last_synced_yaml != self.yaml_content {
-        let yaml_clone = self.yaml_content.clone();
-        editor.update(cx, |state, cx| {
-          state.replace(&yaml_clone, window, cx);
-        });
-        self.last_synced_yaml = self.yaml_content.clone();
-      }
+      && !self.yaml_content.is_empty()
+      && self.last_synced_yaml != self.yaml_content
+    {
+      let yaml_clone = self.yaml_content.clone();
+      editor.update(cx, |state, cx| {
+        state.replace(&yaml_clone, window, cx);
+      });
+      self.last_synced_yaml = self.yaml_content.clone();
+    }
 
     let colors = cx.theme().colors;
 
     let Some(service) = self.service.clone() else {
-      return div().size_full().child(self.render_empty(cx));
+      return div().size_full().child(Self::render_empty(cx));
     };
 
     let active_tab = self.active_tab;
@@ -673,8 +675,8 @@ impl Render for ServiceDetail {
 
     // Tab content
     let content = match active_tab {
-      0 => self.render_info_tab(&service, cx),
-      1 => self.render_ports_tab(&service, cx),
+      0 => Self::render_info_tab(&service, cx),
+      1 => Self::render_ports_tab(&service, cx),
       2 => self.render_endpoints_tab(&service, cx),
       3 => self.render_yaml_tab(&service, cx),
       _ => div(),

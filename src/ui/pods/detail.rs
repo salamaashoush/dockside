@@ -136,7 +136,7 @@ impl PodDetail {
     self
   }
 
-  fn render_empty(&self, cx: &App) -> gpui::Div {
+  fn render_empty(cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     div()
@@ -162,7 +162,7 @@ impl PodDetail {
       )
   }
 
-  fn render_info_tab(&self, pod: &PodInfo, cx: &App) -> gpui::Div {
+  fn render_info_tab(pod: &PodInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let info_row = |label: &str, value: String| {
@@ -457,7 +457,7 @@ impl PodDetail {
     let colors = &cx.theme().colors;
 
     let Some(pod) = &self.pod else {
-      return self.render_empty(cx).into_any_element();
+      return Self::render_empty(cx).into_any_element();
     };
 
     let pod_name = pod.name.clone();
@@ -514,7 +514,7 @@ impl PodDetail {
       2 => self.render_terminal_tab(pod, cx),
       3 => self.render_describe_tab(cx),
       4 => self.render_yaml_tab(cx),
-      _ => self.render_info_tab(pod, cx),
+      _ => Self::render_info_tab(pod, cx),
     };
 
     // Terminal tab needs full height without scroll

@@ -87,7 +87,7 @@ impl ColimaClient {
       _ => VmArch::Aarch64,
     };
 
-    let cpus = value["cpus"].as_u64().or_else(|| value["cpu"].as_u64()).unwrap_or(2) as u32;
+    let cpus = u32::try_from(value["cpus"].as_u64().or_else(|| value["cpu"].as_u64()).unwrap_or(2)).unwrap_or(2);
     let memory = value["memory"].as_u64().unwrap_or(2 * 1024 * 1024 * 1024);
     let disk = value["disk"].as_u64().unwrap_or(60 * 1024 * 1024 * 1024);
     let kubernetes = value["kubernetes"].as_bool().unwrap_or(false);
@@ -156,7 +156,7 @@ impl ColimaClient {
       _ => None,
     };
 
-    let cpus = value["cpu"].as_u64().or_else(|| value["cpus"].as_u64()).unwrap_or(2) as u32;
+    let cpus = u32::try_from(value["cpu"].as_u64().or_else(|| value["cpus"].as_u64()).unwrap_or(2)).unwrap_or(2);
     let memory = value["memory"].as_u64().unwrap_or(2 * 1024 * 1024 * 1024);
     let disk = value["disk"].as_u64().unwrap_or(60 * 1024 * 1024 * 1024);
     let kubernetes = value["kubernetes"].as_bool().unwrap_or(false);
@@ -216,7 +216,7 @@ impl ColimaClient {
   }
 
   /// Start a VM with options
-  pub fn start(options: ColimaStartOptions) -> Result<()> {
+  pub fn start(options: &ColimaStartOptions) -> Result<()> {
     let mut cmd = Command::new("colima");
     cmd.arg("start");
 
@@ -424,9 +424,7 @@ impl ColimaClient {
   pub fn get_system_logs(name: Option<&str>, lines: u32) -> Result<String> {
     Self::run_command(
       name,
-      &format!(
-        "sudo journalctl --no-pager -n {lines} 2>/dev/null || echo 'Unable to fetch logs'"
-      ),
+      &format!("sudo journalctl --no-pager -n {lines} 2>/dev/null || echo 'Unable to fetch logs'"),
     )
   }
 
@@ -434,9 +432,7 @@ impl ColimaClient {
   pub fn get_docker_logs(name: Option<&str>, lines: u32) -> Result<String> {
     Self::run_command(
       name,
-      &format!(
-        "sudo journalctl -u docker --no-pager -n {lines} 2>/dev/null || echo 'Unable to fetch Docker logs'"
-      ),
+      &format!("sudo journalctl -u docker --no-pager -n {lines} 2>/dev/null || echo 'Unable to fetch Docker logs'"),
     )
   }
 
@@ -530,9 +526,7 @@ impl ColimaClient {
   pub fn read_file(name: Option<&str>, path: &str, max_lines: u32) -> Result<String> {
     Self::run_command(
       name,
-      &format!(
-        "head -n {max_lines} {path} 2>/dev/null || echo 'Unable to read file'"
-      ),
+      &format!("head -n {max_lines} {path} 2>/dev/null || echo 'Unable to read file'"),
     )
   }
 

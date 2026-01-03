@@ -325,7 +325,7 @@ impl MachineList {
           cx.emit(MachineListEvent::Selected(machine.clone()));
         }
       }
-      _ => {}
+      ListEvent::Cancel => {}
     })
     .detach();
 
@@ -385,7 +385,7 @@ impl MachineList {
     cx.notify();
   }
 
-  fn render_empty(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_empty(cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -571,7 +571,7 @@ impl Render for MachineList {
     };
 
     let content: gpui::Div = if machines_empty && !is_filtering {
-      self.render_empty(cx)
+      Self::render_empty(cx)
     } else if machines_empty && is_filtering {
       self.render_no_results(cx)
     } else {

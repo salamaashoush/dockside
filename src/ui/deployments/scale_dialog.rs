@@ -41,7 +41,8 @@ impl ScaleDialog {
   pub fn get_replicas(&self, cx: &App) -> i32 {
     self
       .replicas_input
-      .as_ref().map_or_else(|| self.current_replicas.to_string(), |s| s.read(cx).text().to_string())
+      .as_ref()
+      .map_or_else(|| self.current_replicas.to_string(), |s| s.read(cx).text().to_string())
       .parse::<i32>()
       .unwrap_or(self.current_replicas)
   }

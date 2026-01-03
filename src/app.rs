@@ -101,8 +101,8 @@ impl DockerApp {
 
     if !colima_installed || !docker_installed {
       // Defer showing the dialog until after the window is ready
-      cx.defer_in(window, |this, window, cx| {
-        this.show_setup_dialog(window, cx);
+      cx.defer_in(window, |_this, window, cx| {
+        Self::show_setup_dialog(window, cx);
       });
     }
 
@@ -123,7 +123,7 @@ impl DockerApp {
     }
   }
 
-  fn show_setup_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_setup_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(SetupDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, cx| {
@@ -163,7 +163,7 @@ impl DockerApp {
     });
   }
 
-  fn show_prune_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_prune_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(PruneDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, _cx| {
@@ -185,7 +185,7 @@ impl DockerApp {
                 move |_ev, window, cx| {
                   let options = dialog.read(cx).get_options();
                   if !options.is_empty() {
-                    crate::services::prune_docker(options, cx);
+                    crate::services::prune_docker(&options, cx);
                     window.close_dialog(cx);
                   }
                 }
@@ -303,8 +303,8 @@ impl DockerApp {
                         .child(
                             SidebarMenuItem::new("Prune")
                                 .icon(Icon::new(AppIcon::Trash))
-                                .on_click(cx.listener(|this, _ev, window, cx| {
-                                    this.show_prune_dialog(window, cx);
+                                .on_click(cx.listener(|_this, _ev, window, cx| {
+                                    Self::show_prune_dialog(window, cx);
                                 })),
                         )
                         .child(
@@ -337,7 +337,7 @@ impl DockerApp {
     }
   }
 
-  fn render_task_bar(&self, cx: &App) -> Option<impl IntoElement + use<>> {
+  fn render_task_bar(cx: &App) -> Option<impl IntoElement + use<>> {
     let tasks = task_manager(cx);
     let running_tasks: Vec<_> = tasks.read(cx).running_tasks().into_iter().cloned().collect();
 
@@ -380,7 +380,7 @@ impl Render for DockerApp {
 
     let sidebar = self.render_sidebar(cx);
     let content = self.render_content(cx);
-    let task_bar = self.render_task_bar(cx);
+    let task_bar = Self::render_task_bar(cx);
 
     // Get colors after mutable borrows are done
     let colors = &cx.theme().colors;

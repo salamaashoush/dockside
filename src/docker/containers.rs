@@ -8,9 +8,17 @@ use bollard::query_parameters::{
 use chrono::{DateTime, Utc};
 use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::DockerClient;
+
+/// Build Docker's exposed ports map from a set of port keys.
+/// Docker API requires empty objects as values for exposed ports.
+/// This function encapsulates the creation pattern required by the bollard library.
+#[allow(clippy::zero_sized_map_values)] // Required by bollard library's API
+fn build_exposed_ports_map(port_keys: HashSet<String>) -> HashMap<String, HashMap<(), ()>> {
+  port_keys.into_iter().map(|key| (key, HashMap::new())).collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContainerState {
@@ -40,11 +48,11 @@ impl std::fmt::Display for ContainerState {
 }
 
 impl ContainerState {
-  pub fn is_running(&self) -> bool {
+  pub fn is_running(self) -> bool {
     matches!(self, ContainerState::Running)
   }
 
-  pub fn is_paused(&self) -> bool {
+  pub fn is_paused(self) -> bool {
     matches!(self, ContainerState::Paused)
   }
 
@@ -68,6 +76,32 @@ pub struct PortMapping {
   pub public_port: Option<u16>,
   pub protocol: String,
   pub ip: Option<String>,
+}
+
+/// Boolean flags for container creation
+#[derive(Debug, Clone, Default)]
+pub struct ContainerFlags {
+  pub auto_remove: bool,
+  pub privileged: bool,
+  pub read_only: bool,
+  pub init: bool,
+}
+
+/// Configuration options for creating a new container
+#[derive(Debug, Clone, Default)]
+pub struct ContainerCreateConfig {
+  pub image: String,
+  pub name: Option<String>,
+  pub platform: Option<String>,
+  pub command: Option<Vec<String>>,
+  pub entrypoint: Option<Vec<String>>,
+  pub working_dir: Option<String>,
+  pub restart_policy: Option<String>,
+  pub flags: ContainerFlags,
+  pub env_vars: Vec<(String, String)>,
+  pub ports: Vec<(String, String, String)>, // (host_port, container_port, protocol)
+  pub volumes: Vec<(String, String, bool)>, // (host_path, container_path, read_only)
+  pub network: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,7 +172,8 @@ impl DockerClient {
       let id = container.id.unwrap_or_default();
       let names = container.names.unwrap_or_default();
       let name = names
-        .first().map_or_else(|| id.clone(), |n| n.trim_start_matches('/').to_string());
+        .first()
+        .map_or_else(|| id.clone(), |n| n.trim_start_matches('/').to_string());
 
       let ports = container
         .ports
@@ -304,38 +339,23 @@ impl DockerClient {
   }
 
   /// Create a new container from an image
-  pub async fn create_container(
-    &self,
-    image: &str,
-    name: Option<&str>,
-    platform: Option<&str>,
-    command: Option<Vec<String>>,
-    entrypoint: Option<Vec<String>>,
-    working_dir: Option<&str>,
-    auto_remove: bool,
-    restart_policy: Option<&str>,
-    privileged: bool,
-    read_only: bool,
-    init: bool,
-    env_vars: Vec<(String, String)>,
-    ports: Vec<(String, String, String)>, // (host_port, container_port, protocol)
-    volumes: Vec<(String, String, bool)>, // (host_path, container_path, read_only)
-    network: Option<&str>,
-  ) -> Result<String> {
+  pub async fn create_container(&self, cfg: ContainerCreateConfig) -> Result<String> {
     let docker = self.client()?;
 
     // Build host config
-    let mut host_config = HostConfig::default();
-    host_config.auto_remove = Some(auto_remove);
-    host_config.privileged = Some(privileged);
-    host_config.readonly_rootfs = Some(read_only);
-    host_config.init = Some(init);
+    let mut host_config = HostConfig {
+      auto_remove: Some(cfg.flags.auto_remove),
+      privileged: Some(cfg.flags.privileged),
+      readonly_rootfs: Some(cfg.flags.read_only),
+      init: Some(cfg.flags.init),
+      ..Default::default()
+    };
 
-    if let Some(policy) = restart_policy
+    if let Some(ref policy) = cfg.restart_policy
       && policy != "no"
     {
       host_config.restart_policy = Some(bollard::models::RestartPolicy {
-        name: Some(match policy {
+        name: Some(match policy.as_str() {
           "always" => bollard::models::RestartPolicyNameEnum::ALWAYS,
           "on-failure" => bollard::models::RestartPolicyNameEnum::ON_FAILURE,
           "unless-stopped" => bollard::models::RestartPolicyNameEnum::UNLESS_STOPPED,
@@ -346,9 +366,9 @@ impl DockerClient {
     }
 
     // Port bindings
-    if !ports.is_empty() {
+    if !cfg.ports.is_empty() {
       let mut port_bindings: HashMap<String, Option<Vec<bollard::models::PortBinding>>> = HashMap::new();
-      for (host_port, container_port, protocol) in &ports {
+      for (host_port, container_port, protocol) in &cfg.ports {
         let key = format!("{container_port}/{protocol}");
         let binding = bollard::models::PortBinding {
           host_ip: Some("0.0.0.0".to_string()),
@@ -360,8 +380,9 @@ impl DockerClient {
     }
 
     // Volume bindings
-    if !volumes.is_empty() {
-      let binds: Vec<String> = volumes
+    if !cfg.volumes.is_empty() {
+      let binds: Vec<String> = cfg
+        .volumes
         .iter()
         .map(|(host, container, ro)| {
           if *ro {
@@ -375,37 +396,37 @@ impl DockerClient {
     }
 
     // Network mode
-    if let Some(net) = network
+    if let Some(ref net) = cfg.network
       && !net.is_empty()
     {
-      host_config.network_mode = Some(net.to_string());
+      host_config.network_mode = Some(net.clone());
     }
 
     // Environment variables
-    let env: Option<Vec<String>> = if env_vars.is_empty() {
+    let env: Option<Vec<String>> = if cfg.env_vars.is_empty() {
       None
     } else {
-      Some(env_vars.iter().map(|(k, v)| format!("{k}={v}")).collect())
+      Some(cfg.env_vars.iter().map(|(k, v)| format!("{k}={v}")).collect())
     };
 
-    // Exposed ports (for port mappings)
-    let exposed_ports: Option<HashMap<String, HashMap<(), ()>>> = if ports.is_empty() {
+    // Exposed ports (for port mappings) - Docker API requires empty object values
+    let exposed_ports = if cfg.ports.is_empty() {
       None
     } else {
-      let mut exposed = HashMap::new();
-      for (_, container_port, protocol) in &ports {
-        let key = format!("{container_port}/{protocol}");
-        exposed.insert(key, HashMap::new());
-      }
-      Some(exposed)
+      let port_keys: HashSet<String> = cfg
+        .ports
+        .iter()
+        .map(|(_, container_port, protocol)| format!("{container_port}/{protocol}"))
+        .collect();
+      Some(build_exposed_ports_map(port_keys))
     };
 
     // Build container config
     let config = ContainerCreateBody {
-      image: Some(image.to_string()),
-      cmd: command,
-      entrypoint,
-      working_dir: working_dir.map(String::from),
+      image: Some(cfg.image.clone()),
+      cmd: cfg.command,
+      entrypoint: cfg.entrypoint,
+      working_dir: cfg.working_dir,
       env,
       exposed_ports,
       host_config: Some(host_config),
@@ -413,9 +434,9 @@ impl DockerClient {
     };
 
     // Create options
-    let options = name.map(|n| CreateContainerOptions {
-      name: Some(n.to_string()),
-      platform: platform.map(String::from).unwrap_or_default(),
+    let options = cfg.name.as_ref().map(|n| CreateContainerOptions {
+      name: Some(n.clone()),
+      platform: cfg.platform.clone().unwrap_or_default(),
     });
 
     let response = docker.create_container(options, config).await?;

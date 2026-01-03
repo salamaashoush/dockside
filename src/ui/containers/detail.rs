@@ -209,7 +209,7 @@ impl ContainerDetail {
     self
   }
 
-  fn render_empty(&self, cx: &App) -> gpui::Div {
+  fn render_empty(cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     div()
@@ -235,7 +235,7 @@ impl ContainerDetail {
       )
   }
 
-  fn render_info_tab(&self, container: &ContainerInfo, cx: &App) -> gpui::Div {
+  fn render_info_tab(container: &ContainerInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let info_row = |label: &str, value: String| {
@@ -472,7 +472,7 @@ impl ContainerDetail {
     let colors = &cx.theme().colors;
 
     let Some(container) = &self.container else {
-      return self.render_empty(cx).into_any_element();
+      return Self::render_empty(cx).into_any_element();
     };
 
     let is_running = container.state.is_running();
@@ -592,13 +592,13 @@ impl ContainerDetail {
         1 => self.render_logs_tab(cx).into_any_element(),
         2 => self.render_terminal_tab(cx).into_any_element(),
         3 => self.render_files_tab(is_running, window, cx),
-        _ => self.render_info_tab(container, cx).into_any_element(),
+        _ => Self::render_info_tab(container, cx).into_any_element(),
       };
       result = result.child(div().flex_1().min_h_0().w_full().overflow_hidden().child(content));
     } else {
       let content = match self.active_tab {
         4 => self.render_inspect_tab(cx),
-        _ => self.render_info_tab(container, cx),
+        _ => Self::render_info_tab(container, cx),
       };
       result = result.child(
         div()

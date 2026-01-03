@@ -59,7 +59,7 @@ impl NetworkDetail {
     self
   }
 
-  fn render_empty(&self, cx: &App) -> gpui::Div {
+  fn render_empty(cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     div()
@@ -85,7 +85,7 @@ impl NetworkDetail {
       )
   }
 
-  fn render_info_tab(&self, network: &NetworkInfo, cx: &App) -> gpui::Div {
+  fn render_info_tab(network: &NetworkInfo, cx: &App) -> gpui::Div {
     let _colors = &cx.theme().colors;
 
     // Basic info rows
@@ -109,7 +109,7 @@ impl NetworkDetail {
       .w_full()
       .p(px(16.))
       .gap(px(12.))
-      .child(self.render_section(None, basic_info, cx));
+      .child(Self::render_section(None, basic_info, cx));
 
     // IPAM section
     if let Some(ref ipam) = network.ipam {
@@ -132,29 +132,29 @@ impl NetworkDetail {
       }
 
       if !ipam_rows.is_empty() {
-        content = content.child(self.render_section(Some("IPAM Configuration"), ipam_rows, cx));
+        content = content.child(Self::render_section(Some("IPAM Configuration"), ipam_rows, cx));
       }
     }
 
     // Connected containers section
     if !network.containers.is_empty() {
-      content = content.child(self.render_containers_section(network, cx));
+      content = content.child(Self::render_containers_section(network, cx));
     }
 
     // Labels section if not empty
     if !network.labels.is_empty() {
-      content = content.child(self.render_labels_section(network, cx));
+      content = content.child(Self::render_labels_section(network, cx));
     }
 
     // Options section if not empty
     if !network.options.is_empty() {
-      content = content.child(self.render_options_section(network, cx));
+      content = content.child(Self::render_options_section(network, cx));
     }
 
     content
   }
 
-  fn render_section(&self, header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
+  fn render_section(header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut section = v_flex().gap(px(1.));
@@ -178,13 +178,13 @@ impl NetworkDetail {
         rows
           .into_iter()
           .enumerate()
-          .map(|(i, (label, value))| self.render_section_row(label, value, i == 0, cx)),
+          .map(|(i, (label, value))| Self::render_section_row(label, value, i == 0, cx)),
       );
 
     section.child(rows_container)
   }
 
-  fn render_section_row(&self, label: &str, value: String, is_first: bool, cx: &App) -> gpui::Div {
+  fn render_section_row(label: &str, value: String, is_first: bool, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut row = h_flex()
@@ -216,7 +216,7 @@ impl NetworkDetail {
     row
   }
 
-  fn render_containers_section(&self, network: &NetworkInfo, cx: &App) -> gpui::Div {
+  fn render_containers_section(network: &NetworkInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -298,7 +298,7 @@ impl NetworkDetail {
       )
   }
 
-  fn render_labels_section(&self, network: &NetworkInfo, cx: &App) -> gpui::Div {
+  fn render_labels_section(network: &NetworkInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut labels: Vec<_> = network.labels.iter().collect();
@@ -376,7 +376,7 @@ impl NetworkDetail {
       )
   }
 
-  fn render_options_section(&self, network: &NetworkInfo, cx: &App) -> gpui::Div {
+  fn render_options_section(network: &NetworkInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut options: Vec<_> = network.options.iter().collect();
@@ -458,7 +458,7 @@ impl NetworkDetail {
     let colors = &cx.theme().colors;
 
     let Some(network) = &self.network else {
-      return self.render_empty(cx).into_any_element();
+      return Self::render_empty(cx).into_any_element();
     };
 
     let network_id = network.id.clone();
@@ -512,7 +512,7 @@ impl NetworkDetail {
       });
 
     // Content based on active tab
-    let content = self.render_info_tab(network, cx);
+    let content = Self::render_info_tab(network, cx);
 
     div()
       .size_full()

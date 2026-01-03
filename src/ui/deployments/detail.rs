@@ -30,7 +30,7 @@ impl DeploymentDetail {
     let docker_state = docker_state(cx);
 
     // Subscribe to state changes
-    cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
+    cx.subscribe(&docker_state, |this, ds, event: &StateChanged, cx| {
       match event {
         StateChanged::DeploymentYamlLoaded {
           deployment_name,
@@ -51,7 +51,7 @@ impl DeploymentDetail {
           tab,
         } => {
           // Find and select the deployment
-          let state = _state.read(cx);
+          let state = ds.read(cx);
           if let Some(dep) = state.get_deployment(deployment_name, namespace) {
             this.deployment = Some(dep.clone());
             this.active_tab = *tab;
@@ -62,7 +62,7 @@ impl DeploymentDetail {
         StateChanged::DeploymentsUpdated => {
           // Refresh current deployment if still exists
           if let Some(ref current) = this.deployment {
-            let state = _state.read(cx);
+            let state = ds.read(cx);
             if let Some(updated) = state.get_deployment(&current.name, &current.namespace) {
               this.deployment = Some(updated.clone());
               cx.notify();
@@ -97,7 +97,7 @@ impl DeploymentDetail {
     cx.notify();
   }
 
-  fn render_info_tab(&self, deployment: &DeploymentInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_info_tab(deployment: &DeploymentInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let info_row = |label: &str, value: String| {
@@ -525,7 +525,7 @@ impl DeploymentDetail {
     )
   }
 
-  fn render_empty(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_empty(cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     div().size_full().flex().items_center().justify_center().child(
@@ -579,18 +579,20 @@ impl Render for DeploymentDetail {
 
     // Sync yaml editor content
     if let Some(ref editor) = self.yaml_editor
-      && !self.yaml_content.is_empty() && self.last_synced_yaml != self.yaml_content {
-        let yaml_clone = self.yaml_content.clone();
-        editor.update(cx, |state, cx| {
-          state.replace(&yaml_clone, window, cx);
-        });
-        self.last_synced_yaml = self.yaml_content.clone();
-      }
+      && !self.yaml_content.is_empty()
+      && self.last_synced_yaml != self.yaml_content
+    {
+      let yaml_clone = self.yaml_content.clone();
+      editor.update(cx, |state, cx| {
+        state.replace(&yaml_clone, window, cx);
+      });
+      self.last_synced_yaml = self.yaml_content.clone();
+    }
 
     let colors = cx.theme().colors;
 
     let Some(deployment) = self.deployment.clone() else {
-      return div().size_full().child(self.render_empty(cx));
+      return div().size_full().child(Self::render_empty(cx));
     };
 
     let active_tab = self.active_tab;
@@ -631,7 +633,7 @@ impl Render for DeploymentDetail {
 
     // Tab content
     let content = match active_tab {
-      0 => self.render_info_tab(&deployment, cx),
+      0 => Self::render_info_tab(&deployment, cx),
       1 => self.render_pods_tab(&deployment, cx),
       2 => self.render_yaml_tab(&deployment, cx),
       _ => div(),

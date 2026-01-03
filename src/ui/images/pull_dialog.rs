@@ -21,7 +21,7 @@ pub enum PullPlatform {
 }
 
 impl PullPlatform {
-  pub fn label(&self) -> &'static str {
+  pub fn label(self) -> &'static str {
     match self {
       PullPlatform::Default => "Default",
       PullPlatform::LinuxAmd64 => "linux/amd64",
@@ -29,7 +29,7 @@ impl PullPlatform {
     }
   }
 
-  pub fn as_docker_arg(&self) -> Option<&'static str> {
+  pub fn as_docker_arg(self) -> Option<&'static str> {
     match self {
       PullPlatform::Default => None,
       PullPlatform::LinuxAmd64 => Some("linux/amd64"),

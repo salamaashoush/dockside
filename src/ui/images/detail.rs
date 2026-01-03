@@ -67,7 +67,7 @@ impl ImageDetail {
     self
   }
 
-  fn render_empty(&self, cx: &App) -> gpui::Div {
+  fn render_empty(cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     div()
@@ -117,7 +117,7 @@ impl ImageDetail {
       .w_full()
       .p(px(16.))
       .gap(px(12.))
-      .child(self.render_section(None, basic_info, cx));
+      .child(Self::render_section(None, basic_info, cx));
 
     // Config section if we have inspect data
     if let Some(ref data) = self.inspect_data {
@@ -136,35 +136,39 @@ impl ImageDetail {
       }
 
       if !config_rows.is_empty() {
-        content = content.child(self.render_section(Some("Config"), config_rows, cx));
+        content = content.child(Self::render_section(Some("Config"), config_rows, cx));
       }
 
       // Environment section
       if !data.config_env.is_empty() {
-        content = content.child(self.render_env_section(&data.config_env, cx));
+        content = content.child(Self::render_env_section(&data.config_env, cx));
       }
 
       // Exposed ports
       if !data.config_exposed_ports.is_empty() {
         let ports_str = data.config_exposed_ports.join(", ");
-        content = content.child(self.render_section(Some("Exposed Ports"), vec![("Ports", ports_str)], cx));
+        content = content.child(Self::render_section(
+          Some("Exposed Ports"),
+          vec![("Ports", ports_str)],
+          cx,
+        ));
       }
 
       // Used by section
       if !data.used_by.is_empty() {
-        content = content.child(self.render_used_by_section(&data.used_by, cx));
+        content = content.child(Self::render_used_by_section(&data.used_by, cx));
       }
     }
 
     // Labels section if not empty
     if !image.labels.is_empty() {
-      content = content.child(self.render_labels_section(image, cx));
+      content = content.child(Self::render_labels_section(image, cx));
     }
 
     content
   }
 
-  fn render_section(&self, header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
+  fn render_section(header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut section = v_flex().gap(px(1.));
@@ -188,13 +192,13 @@ impl ImageDetail {
         rows
           .into_iter()
           .enumerate()
-          .map(|(i, (label, value))| self.render_section_row(label, value, i == 0, cx)),
+          .map(|(i, (label, value))| Self::render_section_row(label, value, i == 0, cx)),
       );
 
     section.child(rows_container)
   }
 
-  fn render_section_row(&self, label: &str, value: String, is_first: bool, cx: &App) -> gpui::Div {
+  fn render_section_row(label: &str, value: String, is_first: bool, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut row = h_flex()
@@ -226,7 +230,7 @@ impl ImageDetail {
     row
   }
 
-  fn render_env_section(&self, env: &[(String, String)], cx: &App) -> gpui::Div {
+  fn render_env_section(env: &[(String, String)], cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -301,7 +305,7 @@ impl ImageDetail {
       )
   }
 
-  fn render_used_by_section(&self, containers: &[String], cx: &App) -> gpui::Div {
+  fn render_used_by_section(containers: &[String], cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -337,7 +341,7 @@ impl ImageDetail {
       )
   }
 
-  fn render_labels_section(&self, image: &ImageInfo, cx: &App) -> gpui::Div {
+  fn render_labels_section(image: &ImageInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut labels: Vec<_> = image.labels.iter().collect();
@@ -419,7 +423,7 @@ impl ImageDetail {
     let colors = &cx.theme().colors;
 
     let Some(image) = &self.image else {
-      return self.render_empty(cx).into_any_element();
+      return Self::render_empty(cx).into_any_element();
     };
 
     let image_id = image.id.clone();

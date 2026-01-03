@@ -47,10 +47,10 @@ impl ContainersView {
       window,
       |this, _list, event: &ContainerListEvent, window, cx| match event {
         ContainerListEvent::Selected(container) => {
-          this.on_select_container(container, window, cx);
+          this.on_select_container(container.as_ref(), window, cx);
         }
         ContainerListEvent::NewContainer => {
-          this.show_create_dialog(window, cx);
+          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -94,19 +94,19 @@ impl ContainersView {
             container_id,
             current_name,
           } => {
-            this.show_rename_dialog(container_id.clone(), current_name.clone(), window, cx);
+            Self::show_rename_dialog(container_id.clone(), current_name.clone(), window, cx);
           }
           StateChanged::CommitContainerRequest {
             container_id,
             container_name,
           } => {
-            this.show_commit_dialog(container_id.clone(), container_name.clone(), window, cx);
+            Self::show_commit_dialog(container_id, container_name, window, cx);
           }
           StateChanged::ExportContainerRequest {
             container_id,
             container_name,
           } => {
-            this.show_export_dialog(container_id.clone(), container_name.clone(), window, cx);
+            Self::show_export_dialog(container_id, container_name, window, cx);
           }
           _ => {}
         }
@@ -142,7 +142,7 @@ impl ContainersView {
     }
   }
 
-  fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(CreateContainerDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, cx| {
@@ -192,13 +192,7 @@ impl ContainersView {
     });
   }
 
-  fn show_rename_dialog(
-    &mut self,
-    container_id: String,
-    current_name: String,
-    window: &mut Window,
-    cx: &mut Context<'_, Self>,
-  ) {
+  fn show_rename_dialog(container_id: String, current_name: String, window: &mut Window, cx: &mut Context<'_, Self>) {
     use gpui_component::input::{Input, InputState};
 
     let name_input = cx.new(|cx| InputState::new(window, cx).default_value(current_name));
@@ -232,13 +226,7 @@ impl ContainersView {
     });
   }
 
-  fn show_commit_dialog(
-    &mut self,
-    container_id: String,
-    container_name: String,
-    window: &mut Window,
-    cx: &mut Context<'_, Self>,
-  ) {
+  fn show_commit_dialog(container_id: &str, container_name: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
     use gpui_component::{
       input::{Input, InputState},
       v_flex,
@@ -253,6 +241,7 @@ impl ContainersView {
     let comment_input = cx.new(|cx| {
       InputState::new(window, cx).placeholder(format!("Comment (optional, from container: {container_name})"))
     });
+    let container_id = container_id.to_string();
 
     window.open_dialog(cx, move |dialog, _window, cx| {
       let colors = cx.theme().colors;
@@ -308,13 +297,7 @@ impl ContainersView {
     });
   }
 
-  fn show_export_dialog(
-    &mut self,
-    container_id: String,
-    container_name: String,
-    window: &mut Window,
-    cx: &mut Context<'_, Self>,
-  ) {
+  fn show_export_dialog(container_id: &str, container_name: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
     use gpui_component::{
       input::{Input, InputState},
       v_flex,
@@ -328,6 +311,7 @@ impl ContainersView {
     );
 
     let path_input = cx.new(|cx| InputState::new(window, cx).default_value(default_path));
+    let container_id = container_id.to_string();
 
     window.open_dialog(cx, move |dialog, _window, cx| {
       let colors = cx.theme().colors;
@@ -496,7 +480,7 @@ impl ContainersView {
 
     // Load file content
     if let Some(ref container) = self.selected_container {
-      self.load_container_file_content(&container.id.clone(), path, cx);
+      Self::load_container_file_content(&container.id.clone(), path, cx);
     }
   }
 
@@ -508,7 +492,7 @@ impl ContainersView {
     cx.notify();
   }
 
-  fn load_container_file_content(&mut self, container_id: &str, path: &str, cx: &mut Context<'_, Self>) {
+  fn load_container_file_content(container_id: &str, path: &str, cx: &mut Context<'_, Self>) {
     let id = container_id.to_string();
     let path = path.to_string();
     let tokio_handle = services::Tokio::runtime_handle();
@@ -600,7 +584,7 @@ impl ContainersView {
               this.container_tab_state.selected_file = Some(target.clone());
               this.container_tab_state.file_content_loading = true;
               if let Some(ref container) = this.selected_container {
-                this.load_container_file_content(&container.id.clone(), &target, cx);
+                Self::load_container_file_content(&container.id.clone(), &target, cx);
               }
             }
           }

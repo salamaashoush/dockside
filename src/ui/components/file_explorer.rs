@@ -250,7 +250,7 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
 
     // Check if disabled
     if let Some(ref disabled_msg) = self.config.disabled_message {
-      return self.render_disabled(disabled_msg, cx).into_any_element();
+      return Self::render_disabled(disabled_msg, cx).into_any_element();
     }
 
     // Check if viewing file content
@@ -380,7 +380,7 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
       .into_any_element()
   }
 
-  fn render_disabled(&self, message: &str, cx: &App) -> gpui::Div {
+  fn render_disabled(message: &str, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -538,17 +538,18 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
 
     // Owner column (optional)
     if self.config.show_owner
-      && let Some(owner) = file.owner() {
-        row = row.child(
-          div()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .w(px(60.))
-            .overflow_hidden()
-            .text_ellipsis()
-            .child(owner.to_string()),
-        );
-      }
+      && let Some(owner) = file.owner()
+    {
+      row = row.child(
+        div()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .w(px(60.))
+          .overflow_hidden()
+          .text_ellipsis()
+          .child(owner.to_string()),
+      );
+    }
 
     // Permissions column
     row = row.child(
@@ -561,17 +562,18 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
 
     // Modified column (optional)
     if self.config.show_modified
-      && let Some(modified) = file.modified() {
-        row = row.child(
-          div()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .w(px(120.))
-            .overflow_hidden()
-            .text_ellipsis()
-            .child(modified.to_string()),
-        );
-      }
+      && let Some(modified) = file.modified()
+    {
+      row = row.child(
+        div()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .w(px(120.))
+          .overflow_hidden()
+          .text_ellipsis()
+          .child(modified.to_string()),
+      );
+    }
 
     row
   }

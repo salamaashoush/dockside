@@ -39,10 +39,10 @@ impl VolumesView {
       window,
       |this, _list, event: &VolumeListEvent, window, cx| match event {
         VolumeListEvent::Selected(volume) => {
-          this.on_select_volume(volume, cx);
+          this.on_select_volume(volume.as_ref(), cx);
         }
         VolumeListEvent::NewVolume => {
-          this.show_create_dialog(window, cx);
+          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -109,7 +109,7 @@ impl VolumesView {
     }
   }
 
-  fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(CreateVolumeDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, _cx| {
@@ -206,7 +206,7 @@ impl VolumesView {
 
     // Load file content
     if let Some(ref volume) = self.selected_volume {
-      self.load_volume_file_content(&volume.name.clone(), path, cx);
+      Self::load_volume_file_content(&volume.name.clone(), path, cx);
     }
   }
 
@@ -262,7 +262,7 @@ impl VolumesView {
           if let Some((target, is_dir)) = result {
             if is_dir {
               // Navigate to directory
-              this.volume_tab_state.current_path = target.clone();
+              this.volume_tab_state.current_path.clone_from(&target);
               if let Some(ref volume) = this.selected_volume {
                 this.volume_tab_state.files_loading = true;
                 cx.notify();
@@ -275,7 +275,7 @@ impl VolumesView {
               this.volume_tab_state.selected_file = Some(target.clone());
               this.volume_tab_state.file_content_loading = true;
               if let Some(ref volume) = this.selected_volume {
-                this.load_volume_file_content(&volume.name.clone(), &target, cx);
+                Self::load_volume_file_content(&volume.name.clone(), &target, cx);
               }
             }
           }
@@ -286,7 +286,7 @@ impl VolumesView {
     }
   }
 
-  fn load_volume_file_content(&mut self, volume_name: &str, path: &str, cx: &mut Context<'_, Self>) {
+  fn load_volume_file_content(volume_name: &str, path: &str, cx: &mut Context<'_, Self>) {
     let name = volume_name.to_string();
     let path = path.to_string();
     let tokio_handle = services::Tokio::runtime_handle();

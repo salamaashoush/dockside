@@ -63,7 +63,7 @@ impl SetupDialog {
     self.homebrew_installed = is_homebrew_installed();
   }
 
-  fn render_status_item(&self, name: &'static str, installed: bool, cx: &Context<'_, Self>) -> impl IntoElement {
+  fn render_status_item(name: &'static str, installed: bool, cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
 
     h_flex()
@@ -105,7 +105,6 @@ impl SetupDialog {
   }
 
   fn render_install_step(
-    &self,
     step: usize,
     title: &'static str,
     command: &'static str,
@@ -206,9 +205,9 @@ impl Render for SetupDialog {
                             .text_xs()
                             .font_weight(gpui::FontWeight::SEMIBOLD),
                     )
-                    .child(self.render_status_item("Homebrew", self.homebrew_installed, cx))
-                    .child(self.render_status_item("Docker CLI", self.docker_installed, cx))
-                    .child(self.render_status_item("Colima", self.colima_installed, cx)),
+                    .child(Self::render_status_item("Homebrew", self.homebrew_installed, cx))
+                    .child(Self::render_status_item("Docker CLI", self.docker_installed, cx))
+                    .child(Self::render_status_item("Colima", self.colima_installed, cx)),
             )
             // Installation instructions
             .child(
@@ -225,7 +224,7 @@ impl Render for SetupDialog {
                             .font_weight(gpui::FontWeight::SEMIBOLD),
                     )
                     .when(!self.homebrew_installed, |el| {
-                        el.child(self.render_install_step(
+                        el.child(Self::render_install_step(
                             1,
                             "Install Homebrew",
                             "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"",
@@ -234,7 +233,7 @@ impl Render for SetupDialog {
                         ))
                     })
                     .when(!self.docker_installed, |el| {
-                        el.child(self.render_install_step(
+                        el.child(Self::render_install_step(
                             if self.homebrew_installed { 1 } else { 2 },
                             "Install Docker CLI",
                             "brew install docker docker-compose",
@@ -243,7 +242,7 @@ impl Render for SetupDialog {
                         ))
                     })
                     .when(!self.colima_installed, |el| {
-                        el.child(self.render_install_step(
+                        el.child(Self::render_install_step(
                             if self.homebrew_installed && self.docker_installed { 1 }
                             else if self.homebrew_installed || self.docker_installed { 2 }
                             else { 3 },
@@ -253,10 +252,11 @@ impl Render for SetupDialog {
                             cx,
                         ))
                     })
-                    .child(self.render_install_step(
+                    .child(Self::render_install_step(
                         if self.homebrew_installed && self.docker_installed && self.colima_installed { 1 }
                         else if !self.homebrew_installed && !self.docker_installed && !self.colima_installed { 4 }
-                        else if (!self.homebrew_installed && !self.docker_installed) || (!self.homebrew_installed && !self.colima_installed) || (!self.docker_installed && !self.colima_installed) { 3 }
+                        else if !self.homebrew_installed && (!self.docker_installed || !self.colima_installed)
+                          || !self.docker_installed && !self.colima_installed { 3 }
                         else { 2 },
                         "Start Colima",
                         "colima start",

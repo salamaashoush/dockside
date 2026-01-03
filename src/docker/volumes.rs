@@ -30,9 +30,10 @@ pub struct VolumeUsage {
 
 impl VolumeInfo {
   pub fn display_size(&self) -> String {
-    self
-      .usage_data
-      .as_ref().map_or_else(|| "Unknown".to_string(), |u| bytesize::ByteSize(u.size as u64).to_string())
+    self.usage_data.as_ref().map_or_else(
+      || "Unknown".to_string(),
+      |u| bytesize::ByteSize(u64::try_from(u.size).unwrap_or(0)).to_string(),
+    )
   }
 
   pub fn is_in_use(&self) -> bool {
@@ -193,7 +194,7 @@ impl DockerClient {
     // Wait for container to finish
     let mut wait_stream =
       docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
-    while let Some(_) = wait_stream.next().await {}
+    while (wait_stream.next().await).is_some() {}
 
     // Get the logs (output of ls command)
     let log_options = LogsOptions {
@@ -324,7 +325,7 @@ impl DockerClient {
     // Wait for container to finish
     let mut wait_stream =
       docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
-    while let Some(_) = wait_stream.next().await {}
+    while (wait_stream.next().await).is_some() {}
 
     // Get the logs (output of cat command)
     let log_options = LogsOptions {
@@ -397,7 +398,7 @@ impl DockerClient {
 
     let mut wait_stream =
       docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
-    while let Some(_) = wait_stream.next().await {}
+    while (wait_stream.next().await).is_some() {}
 
     let log_options = LogsOptions {
       stdout: true,
@@ -476,7 +477,7 @@ impl DockerClient {
 
     let mut wait_stream =
       docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
-    while let Some(_) = wait_stream.next().await {}
+    while (wait_stream.next().await).is_some() {}
 
     let log_options = LogsOptions {
       stdout: true,

@@ -1,3 +1,6 @@
+// Allow precision loss for display formatting of byte sizes and percentages
+#![allow(clippy::cast_precision_loss)]
+
 use anyhow::Result;
 use bollard::query_parameters::StatsOptions;
 use futures::StreamExt;

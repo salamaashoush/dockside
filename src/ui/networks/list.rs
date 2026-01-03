@@ -17,7 +17,7 @@ use crate::state::{DockerState, StateChanged, docker_state};
 
 /// Network list events emitted to parent
 pub enum NetworkListEvent {
-  Selected(NetworkInfo),
+  Selected(Box<NetworkInfo>),
   CreateNetwork,
 }
 
@@ -249,10 +249,10 @@ impl NetworkList {
       ListEvent::Select(ix) | ListEvent::Confirm(ix) => {
         let delegate = state.read(cx).delegate();
         if let Some(network) = delegate.get_network(*ix) {
-          cx.emit(NetworkListEvent::Selected(network.clone()));
+          cx.emit(NetworkListEvent::Selected(Box::new(network.clone())));
         }
       }
-      _ => {}
+      ListEvent::Cancel => {}
     })
     .detach();
 
@@ -312,7 +312,7 @@ impl NetworkList {
     cx.notify();
   }
 
-  fn render_empty(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_empty(cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -490,7 +490,7 @@ impl Render for NetworkList {
     };
 
     let content: gpui::Div = if networks_empty && !is_filtering {
-      self.render_empty(cx)
+      Self::render_empty(cx)
     } else if networks_empty && is_filtering {
       self.render_no_results(cx)
     } else {

@@ -17,7 +17,7 @@ use crate::state::{DockerState, StateChanged, docker_state};
 
 /// Image list events emitted to parent
 pub enum ImageListEvent {
-  Selected(ImageInfo),
+  Selected(Box<ImageInfo>),
   PullImage,
 }
 
@@ -140,9 +140,9 @@ impl ListDelegate for ImageListDelegate {
     let size_text = image.display_size();
 
     // Age display
-    let age_text = image
-      .created
-      .map(|created| {
+    let age_text = image.created.map_or_else(
+      || "Unknown".to_string(),
+      |created| {
         let now = chrono::Utc::now();
         let duration = now.signed_duration_since(created);
         if duration.num_days() > 365 {
@@ -156,8 +156,8 @@ impl ListDelegate for ImageListDelegate {
         } else {
           "just now".to_string()
         }
-      })
-      .unwrap_or_else(|| "Unknown".to_string());
+      },
+    );
 
     // Platform badge
     let platform = image.architecture.as_ref().map(|arch| {
@@ -289,10 +289,10 @@ impl ImageList {
       ListEvent::Select(ix) | ListEvent::Confirm(ix) => {
         let delegate = state.read(cx).delegate();
         if let Some(image) = delegate.get_image(*ix) {
-          cx.emit(ImageListEvent::Selected(image.clone()));
+          cx.emit(ImageListEvent::Selected(Box::new(image.clone())));
         }
       }
-      _ => {}
+      ListEvent::Cancel => {}
     })
     .detach();
 
@@ -352,7 +352,7 @@ impl ImageList {
     cx.notify();
   }
 
-  fn render_empty(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_empty(cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -390,7 +390,7 @@ impl ImageList {
   fn calculate_total_size(&self, cx: &App) -> String {
     let state = self.docker_state.read(cx);
     let total: i64 = state.images.iter().map(|i| i.size).sum();
-    bytesize::ByteSize(total as u64).to_string()
+    bytesize::ByteSize(u64::try_from(total).unwrap_or(0)).to_string()
   }
 
   fn render_no_results(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
@@ -535,7 +535,7 @@ impl Render for ImageList {
     };
 
     let content: gpui::Div = if images_empty && !is_filtering {
-      self.render_empty(cx)
+      Self::render_empty(cx)
     } else if filtered_empty && is_filtering {
       self.render_no_results(cx)
     } else {

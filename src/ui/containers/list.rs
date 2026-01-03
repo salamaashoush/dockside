@@ -18,7 +18,7 @@ use crate::state::{DockerState, StateChanged, docker_state};
 
 /// Container list events emitted to parent
 pub enum ContainerListEvent {
-  Selected(ContainerInfo),
+  Selected(Box<ContainerInfo>),
   NewContainer,
 }
 
@@ -362,10 +362,10 @@ impl ContainerList {
         let delegate = state.read(cx).delegate();
         let filtered = delegate.filtered_containers(cx);
         if let Some(container) = filtered.get(ix.row) {
-          cx.emit(ContainerListEvent::Selected(container.clone()));
+          cx.emit(ContainerListEvent::Selected(Box::new(container.clone())));
         }
       }
-      _ => {}
+      ListEvent::Cancel => {}
     })
     .detach();
 
@@ -425,7 +425,7 @@ impl ContainerList {
     cx.notify();
   }
 
-  fn render_empty(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_empty(cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -603,7 +603,7 @@ impl Render for ContainerList {
     };
 
     let content: gpui::Div = if containers_empty && !is_filtering {
-      self.render_empty(cx)
+      Self::render_empty(cx)
     } else if containers_empty && is_filtering {
       self.render_no_results(cx)
     } else {

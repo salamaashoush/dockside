@@ -197,7 +197,7 @@ impl MachineDetail {
     self
   }
 
-  fn render_empty(&self, cx: &App) -> gpui::Div {
+  fn render_empty(cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     div()
@@ -230,7 +230,8 @@ impl MachineDetail {
     // Get colima version
     let colima_version = self
       .machine_state
-      .as_ref().map_or_else(|| "Loading...".to_string(), |s| s.colima_version.clone());
+      .as_ref()
+      .map_or_else(|| "Loading...".to_string(), |s| s.colima_version.clone());
 
     // Basic info rows
     let mut basic_info = vec![
@@ -285,9 +286,9 @@ impl MachineDetail {
       .w_full()
       .p(px(16.))
       .gap(px(12.))
-      .child(self.render_section(None, basic_info, cx))
-      .child(self.render_section(Some("Image"), image_info, cx))
-      .child(self.render_section(Some("Settings"), settings_info, cx))
+      .child(Self::render_section(None, basic_info, cx))
+      .child(Self::render_section(Some("Image"), image_info, cx))
+      .child(Self::render_section(Some("Settings"), settings_info, cx))
   }
 
   fn render_processes_tab(&self, cx: &App) -> gpui::Div {
@@ -508,12 +509,13 @@ impl MachineDetail {
       .p(px(16.))
       .gap(px(24.))
       // Memory Section
-      .child(self.render_memory_card(&memory_info, cx))
+      .child(Self::render_memory_card(memory_info.as_ref(), cx))
       // Disk Section
-      .child(self.render_disk_card(&disk_usage, cx))
+      .child(Self::render_disk_card(disk_usage.as_ref(), cx))
   }
 
-  fn render_memory_card(&self, memory_info: &Option<String>, cx: &App) -> gpui::Div {
+  #[allow(clippy::cast_possible_truncation)]
+  fn render_memory_card(memory_info: Option<&String>, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     // Parse memory info from "free -h" output
@@ -594,7 +596,8 @@ impl MachineDetail {
       )
   }
 
-  fn render_disk_card(&self, disk_usage: &Option<String>, cx: &App) -> gpui::Div {
+  #[allow(clippy::cast_possible_truncation)]
+  fn render_disk_card(disk_usage: Option<&String>, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     // Parse disk info from "df -h /" output
@@ -675,7 +678,7 @@ impl MachineDetail {
       )
   }
 
-  fn render_section(&self, header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
+  fn render_section(header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut section = v_flex().gap(px(1.));
@@ -699,13 +702,13 @@ impl MachineDetail {
         rows
           .into_iter()
           .enumerate()
-          .map(|(i, (label, value))| self.render_section_row(label, value, i == 0, cx)),
+          .map(|(i, (label, value))| Self::render_section_row(label, value, i == 0, cx)),
       );
 
     section.child(rows_container)
   }
 
-  fn render_section_row(&self, label: &str, value: String, is_first: bool, cx: &App) -> gpui::Div {
+  fn render_section_row(label: &str, value: String, is_first: bool, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let mut row = h_flex()
@@ -979,7 +982,7 @@ impl MachineDetail {
     let colors = &cx.theme().colors;
 
     let Some(machine) = &self.machine else {
-      return self.render_empty(cx).into_any_element();
+      return Self::render_empty(cx).into_any_element();
     };
 
     let is_running = machine.status.is_running();

@@ -51,7 +51,7 @@ impl DockerClient {
 
     Ok(PruneResult {
       containers_deleted: response.containers_deleted.unwrap_or_default(),
-      space_reclaimed: response.space_reclaimed.unwrap_or(0) as u64,
+      space_reclaimed: u64::try_from(response.space_reclaimed.unwrap_or(0)).unwrap_or(0),
       ..Default::default()
     })
   }
@@ -82,7 +82,7 @@ impl DockerClient {
 
     Ok(PruneResult {
       images_deleted,
-      space_reclaimed: response.space_reclaimed.unwrap_or(0) as u64,
+      space_reclaimed: u64::try_from(response.space_reclaimed.unwrap_or(0)).unwrap_or(0),
       ..Default::default()
     })
   }
@@ -96,7 +96,7 @@ impl DockerClient {
 
     Ok(PruneResult {
       volumes_deleted: response.volumes_deleted.unwrap_or_default(),
-      space_reclaimed: response.space_reclaimed.unwrap_or(0) as u64,
+      space_reclaimed: u64::try_from(response.space_reclaimed.unwrap_or(0)).unwrap_or(0),
       ..Default::default()
     })
   }

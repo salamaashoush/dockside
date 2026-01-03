@@ -22,13 +22,13 @@ pub enum VolumeDriver {
 }
 
 impl VolumeDriver {
-  pub fn label(&self) -> &'static str {
+  pub fn label(self) -> &'static str {
     match self {
       VolumeDriver::Local => "local",
     }
   }
 
-  pub fn as_docker_arg(&self) -> &'static str {
+  pub fn as_docker_arg(self) -> &'static str {
     match self {
       VolumeDriver::Local => "local",
     }

@@ -1,3 +1,6 @@
+// Allow precision loss for display formatting of resource statistics
+#![allow(clippy::cast_precision_loss)]
+
 use gpui::{Context, Hsla, Render, Styled, Timer, Window, div, prelude::*, px};
 use gpui_component::{Icon, h_flex, label::Label, scroll::ScrollableElement, theme::ActiveTheme, v_flex};
 use std::time::Duration;
@@ -31,15 +34,15 @@ impl ActivityMonitorView {
         Timer::after(Duration::from_secs(refresh_interval)).await;
 
         // Refresh stats
-        let _ = this.update(cx, |this, cx| {
-          this.refresh_stats(cx);
+        let _ = this.update(cx, |_this, cx| {
+          Self::refresh_stats(cx);
         });
       }
     })
     .detach();
 
     // Initial refresh
-    let mut view = Self {
+    let view = Self {
       stats: AggregateStats::default(),
       expanded: true,
       is_loading: true,
@@ -49,11 +52,11 @@ impl ActivityMonitorView {
       disk_history: Vec::with_capacity(60),
     };
 
-    view.refresh_stats(cx);
+    Self::refresh_stats(cx);
     view
   }
 
-  fn refresh_stats(&mut self, cx: &mut Context<'_, Self>) {
+  fn refresh_stats(cx: &mut Context<'_, Self>) {
     let tokio_handle = services::Tokio::runtime_handle();
     let client = services::docker_client();
 
@@ -104,7 +107,7 @@ impl ActivityMonitorView {
     .detach();
   }
 
-  fn render_header(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+  fn render_header(cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
 
     h_flex()
@@ -265,12 +268,12 @@ impl ActivityMonitorView {
                     self.stats
                         .container_stats
                         .iter()
-                        .map(|stats| self.render_container_row(stats, cx)),
+                        .map(|stats| Self::render_container_row(stats, cx)),
                 )
             })
   }
 
-  fn render_container_row(&self, stats: &ContainerStats, cx: &Context<'_, Self>) -> impl IntoElement {
+  fn render_container_row(stats: &ContainerStats, cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
     let name = if stats.name.is_empty() {
       stats.id.chars().take(12).collect::<String>()
@@ -345,7 +348,7 @@ impl ActivityMonitorView {
       .bg(colors.sidebar)
       .child(
         // Total CPU
-        self.render_summary_card(
+        Self::render_summary_card(
           "Total CPU:",
           format!("{:.1}%", self.stats.total_cpu_percent),
           &self.cpu_history,
@@ -355,7 +358,7 @@ impl ActivityMonitorView {
       )
       .child(
         // Memory
-        self.render_summary_card(
+        Self::render_summary_card(
           "Memory:",
           self.stats.display_total_memory(),
           &self.memory_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
@@ -365,7 +368,7 @@ impl ActivityMonitorView {
       )
       .child(
         // Network
-        self.render_summary_card(
+        Self::render_summary_card(
           "Network:",
           self.stats.display_total_network(),
           &self.network_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
@@ -375,7 +378,7 @@ impl ActivityMonitorView {
       )
       .child(
         // Disk
-        self.render_summary_card(
+        Self::render_summary_card(
           "Disk:",
           self.stats.display_total_disk(),
           &self.disk_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
@@ -386,7 +389,6 @@ impl ActivityMonitorView {
   }
 
   fn render_summary_card(
-    &self,
     label: &'static str,
     value: String,
     history: &[f64],
@@ -414,11 +416,11 @@ impl ActivityMonitorView {
       )
       .child(
         // Mini chart area
-        div().flex_1().mt(px(8.)).child(self.render_mini_chart(history, color)),
+        div().flex_1().mt(px(8.)).child(Self::render_mini_chart(history, color)),
       )
   }
 
-  fn render_mini_chart(&self, history: &[f64], color: Hsla) -> impl IntoElement {
+  fn render_mini_chart(history: &[f64], color: Hsla) -> impl IntoElement {
     // Simple bar chart visualization
     let max_value = history.iter().copied().fold(0.0f64, f64::max).max(1.0);
 
@@ -429,6 +431,7 @@ impl ActivityMonitorView {
       .gap(px(1.))
       .children(history.iter().rev().take(30).rev().map(|&value| {
         let height_percent = (value / max_value * 100.0).min(100.0);
+        #[allow(clippy::cast_possible_truncation)]
         let bar_height = (height_percent * 0.6) as f32; // Max 60px height
         div()
           .flex_1()
@@ -439,7 +442,7 @@ impl ActivityMonitorView {
       }))
   }
 
-  fn render_empty(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+  fn render_empty(cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
 
     div().flex_1().flex().items_center().justify_center().child(
@@ -498,7 +501,7 @@ impl Render for ActivityMonitorView {
                     ),
             )
             // Table header
-            .child(self.render_header(cx))
+            .child(Self::render_header(cx))
             // Content area
             .child(
                 div()
@@ -509,7 +512,7 @@ impl Render for ActivityMonitorView {
                         el.child(self.render_container_group(cx))
                     })
                     .when(!has_containers, |el| {
-                        el.child(self.render_empty(cx))
+                        el.child(Self::render_empty(cx))
                     }),
             )
             // Summary section at bottom

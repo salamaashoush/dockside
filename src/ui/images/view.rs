@@ -35,10 +35,10 @@ impl ImagesView {
       window,
       |this, _list, event: &ImageListEvent, window, cx| match event {
         ImageListEvent::Selected(image) => {
-          this.on_select_image(image, cx);
+          this.on_select_image(image.as_ref(), cx);
         }
         ImageListEvent::PullImage => {
-          this.show_pull_dialog(window, cx);
+          Self::show_pull_dialog(window, cx);
         }
       },
     )
@@ -86,7 +86,7 @@ impl ImagesView {
     }
   }
 
-  fn show_pull_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_pull_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(PullImageDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, _cx| {

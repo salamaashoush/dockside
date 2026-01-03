@@ -17,7 +17,7 @@ use crate::state::{DockerState, StateChanged, docker_state};
 
 /// Volume list events emitted to parent
 pub enum VolumeListEvent {
-  Selected(VolumeInfo),
+  Selected(Box<VolumeInfo>),
   NewVolume,
 }
 
@@ -187,10 +187,10 @@ impl VolumeList {
         let delegate = state.read(cx).delegate();
         let filtered = delegate.filtered_volumes(cx);
         if let Some(volume) = filtered.get(ix.row) {
-          cx.emit(VolumeListEvent::Selected(volume.clone()));
+          cx.emit(VolumeListEvent::Selected(Box::new(volume.clone())));
         }
       }
-      _ => {}
+      ListEvent::Cancel => {}
     })
     .detach();
 
@@ -249,7 +249,7 @@ impl VolumeList {
     cx.notify();
   }
 
-  fn render_empty(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_empty(cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     v_flex()
@@ -291,7 +291,7 @@ impl VolumeList {
       .iter()
       .filter_map(|v| v.usage_data.as_ref().map(|u| u.size))
       .sum();
-    bytesize::ByteSize(total as u64).to_string()
+    bytesize::ByteSize(u64::try_from(total).unwrap_or(0)).to_string()
   }
 
   fn render_no_results(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
@@ -435,7 +435,7 @@ impl Render for VolumeList {
     };
 
     let content: gpui::Div = if volumes_empty && !is_filtering {
-      self.render_empty(cx)
+      Self::render_empty(cx)
     } else if volumes_empty && is_filtering {
       self.render_no_results(cx)
     } else {

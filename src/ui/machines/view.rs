@@ -46,7 +46,7 @@ impl MachinesView {
           this.on_select_machine(machine, window, cx);
         }
         MachineListEvent::NewMachine => {
-          this.show_create_dialog(window, cx);
+          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -88,7 +88,7 @@ impl MachinesView {
               state.colima_vms.iter().find(|vm| vm.name == *machine_name).cloned()
             };
             if let Some(machine) = machine {
-              this.show_edit_dialog(&machine, window, cx);
+              Self::show_edit_dialog(&machine, window, cx);
             }
           }
           _ => {}
@@ -111,7 +111,7 @@ impl MachinesView {
     }
   }
 
-  fn show_create_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(CreateMachineDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, _cx| {
@@ -142,7 +142,7 @@ impl MachinesView {
     });
   }
 
-  fn show_edit_dialog(&mut self, machine: &ColimaVm, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_edit_dialog(machine: &ColimaVm, window: &mut Window, cx: &mut Context<'_, Self>) {
     let machine_clone = machine.clone();
     let dialog_entity = cx.new(|cx| EditMachineDialog::new(&machine_clone, cx));
 
@@ -270,8 +270,7 @@ impl MachinesView {
           } else {
             Some(machine_name2.as_str())
           };
-          ColimaClient::get_system_logs(name_opt, 200)
-            .unwrap_or_else(|_| "Failed to load logs".to_string())
+          ColimaClient::get_system_logs(name_opt, 200).unwrap_or_else(|_| "Failed to load logs".to_string())
         })
         .await;
 
@@ -364,8 +363,7 @@ impl MachinesView {
             } else {
               Some(machine_name.as_str())
             };
-            ColimaClient::read_file(name_opt, &file_path, 1000)
-              .unwrap_or_else(|_| "Failed to read file".to_string())
+            ColimaClient::read_file(name_opt, &file_path, 1000).unwrap_or_else(|_| "Failed to read file".to_string())
           })
           .await;
 
@@ -649,8 +647,8 @@ impl Render for MachinesView {
         this.terminal_view = None;
         cx.notify();
       }))
-      .on_edit(cx.listener(|this, machine: &ColimaVm, window, cx| {
-        this.show_edit_dialog(machine, window, cx);
+      .on_edit(cx.listener(|_this, machine: &ColimaVm, window, cx| {
+        Self::show_edit_dialog(machine, window, cx);
       }));
 
     div()

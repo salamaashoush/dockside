@@ -18,7 +18,7 @@ use crate::state::{DockerState, StateChanged, docker_state};
 
 /// Service list events emitted to parent
 pub enum ServiceListEvent {
-  Selected(ServiceInfo),
+  Selected(Box<ServiceInfo>),
   NewService,
 }
 
@@ -242,10 +242,10 @@ impl ServiceList {
         let delegate = state.read(cx).delegate();
         let filtered = delegate.filtered_services(cx);
         if let Some(service) = filtered.get(ix.row) {
-          cx.emit(ServiceListEvent::Selected(service.clone()));
+          cx.emit(ServiceListEvent::Selected(Box::new(service.clone())));
         }
       }
-      _ => {}
+      ListEvent::Cancel => {}
     })
     .detach();
 
