@@ -387,6 +387,13 @@ impl PodList {
       .find(|vm| vm.status.is_running() && !vm.kubernetes)
       .map(|vm| vm.name.clone());
 
+    // Check if there's a running VM WITH K8s enabled (but API not responding)
+    let running_vm_with_k8s = state
+      .colima_vms
+      .iter()
+      .find(|vm| vm.status.is_running() && vm.kubernetes)
+      .map(|vm| vm.name.clone());
+
     let (title, show_example) = if state.k8s_available {
       ("No Pods", true)
     } else {
@@ -465,6 +472,15 @@ impl PodList {
         )
       })
       .when(!show_example, |el| {
+        // Determine the appropriate message based on VM state
+        let message = if running_vm_without_k8s.is_some() {
+          "Kubernetes is not enabled on the current machine"
+        } else if running_vm_with_k8s.is_some() {
+          "Kubernetes API is not responding"
+        } else {
+          "Start a Colima VM with Kubernetes enabled"
+        };
+
         el.child(
           v_flex()
             .items_center()
@@ -473,13 +489,10 @@ impl PodList {
               div()
                 .text_sm()
                 .text_color(colors.muted_foreground)
-                .child(if running_vm_without_k8s.is_some() {
-                  "Kubernetes is not enabled on the current machine"
-                } else {
-                  "Start a Colima VM with Kubernetes enabled"
-                }),
+                .child(message),
             )
-            .when_some(running_vm_without_k8s, |el, vm_name| {
+            // Show "Enable Kubernetes" button for VMs without K8s
+            .when_some(running_vm_without_k8s.clone(), |el, vm_name| {
               el.child(
                 Button::new("enable-k8s")
                   .label(format!("Enable Kubernetes on '{vm_name}'"))
@@ -488,7 +501,22 @@ impl PodList {
                     services::enable_kubernetes(vm_name.clone(), cx);
                   }),
               )
-            }),
+            })
+            // Show "Restart" button for VMs with K8s that's not responding
+            .when(
+              running_vm_without_k8s.is_none() && running_vm_with_k8s.is_some(),
+              |el| {
+                let vm_name = running_vm_with_k8s.clone().unwrap();
+                el.child(
+                  Button::new("restart-k8s")
+                    .label(format!("Restart '{vm_name}'"))
+                    .primary()
+                    .on_click(move |_ev, _window, cx| {
+                      services::restart_machine(vm_name.clone(), cx);
+                    }),
+                )
+              },
+            ),
         )
       })
   }
