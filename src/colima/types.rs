@@ -242,6 +242,7 @@ impl VmFileEntry {
   }
 }
 
+#[allow(dead_code)]
 impl ColimaStartOptions {
   pub fn new() -> Self {
     Self::default()

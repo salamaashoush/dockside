@@ -86,6 +86,18 @@ impl ListDelegate for VolumeListDelegate {
 
     let size_text = volume.display_size();
 
+    // Delete button
+    let name = volume_name.clone();
+    let row = ix.row;
+
+    let delete_button = Button::new(("delete", row))
+      .icon(Icon::new(AppIcon::Trash))
+      .ghost()
+      .xsmall()
+      .on_click(move |_ev, _window, cx| {
+        services::delete_volume(name.clone(), cx);
+      });
+
     let item_content = h_flex()
       .w_full()
       .items_center()
@@ -112,6 +124,7 @@ impl ListDelegate for VolumeListDelegate {
               .w_full()
               .overflow_hidden()
               .text_ellipsis()
+              .whitespace_nowrap()
               .child(Label::new(volume.name.clone())),
           )
           .child(
@@ -119,39 +132,20 @@ impl ListDelegate for VolumeListDelegate {
               .w_full()
               .overflow_hidden()
               .text_ellipsis()
+              .whitespace_nowrap()
               .text_xs()
               .text_color(colors.muted_foreground)
               .child(size_text),
           ),
-      );
-
-    // Delete button
-    let name = volume_name.clone();
-    let row = ix.row;
+      )
+      .child(div().flex_shrink_0().child(delete_button));
 
     let item = ListItem::new(ix)
       .py(px(6.))
       .rounded(px(6.))
+      .overflow_hidden()
       .selected(is_selected)
       .child(item_content)
-      .suffix(move |_, _| {
-        let n = name.clone();
-        div()
-          .size(px(28.))
-          .flex_shrink_0()
-          .flex()
-          .items_center()
-          .justify_center()
-          .child(
-            Button::new(("delete", row))
-              .icon(Icon::new(AppIcon::Trash))
-              .ghost()
-              .xsmall()
-              .on_click(move |_ev, _window, cx| {
-                services::delete_volume(n.clone(), cx);
-              }),
-          )
-      })
       .on_click(cx.listener(move |this, _ev, _window, cx| {
         this.delegate_mut().selected_index = Some(ix);
         cx.notify();

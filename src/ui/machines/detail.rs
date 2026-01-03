@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use crate::assets::AppIcon;
 use crate::colima::{ColimaVm, VmFileEntry};
-use crate::state::MachineTabState;
+use crate::state::{MachineLogType, MachineTabState};
 use crate::terminal::TerminalView;
 
 type MachineActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
@@ -21,6 +21,8 @@ type MachineEditCallback = Rc<dyn Fn(&ColimaVm, &mut Window, &mut App) + 'static
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
 type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
+type LogTypeCallback = Rc<dyn Fn(&MachineLogType, &mut Window, &mut App) + 'static>;
+type FileSelectCallback = Rc<dyn Fn(&String, &mut Window, &mut App) + 'static>;
 
 pub struct MachineDetail {
   machine: Option<ColimaVm>,
@@ -28,6 +30,7 @@ pub struct MachineDetail {
   machine_state: Option<MachineTabState>,
   terminal_view: Option<Entity<TerminalView>>,
   logs_editor: Option<Entity<InputState>>,
+  file_content_editor: Option<Entity<InputState>>,
   on_start: Option<MachineActionCallback>,
   on_stop: Option<MachineActionCallback>,
   on_restart: Option<MachineActionCallback>,
@@ -36,6 +39,9 @@ pub struct MachineDetail {
   on_tab_change: Option<TabChangeCallback>,
   on_navigate_path: Option<FileNavigateCallback>,
   on_refresh_logs: Option<RefreshCallback>,
+  on_log_type_change: Option<LogTypeCallback>,
+  on_file_select: Option<FileSelectCallback>,
+  on_close_file_viewer: Option<RefreshCallback>,
 }
 
 impl MachineDetail {
@@ -46,6 +52,7 @@ impl MachineDetail {
       machine_state: None,
       terminal_view: None,
       logs_editor: None,
+      file_content_editor: None,
       on_start: None,
       on_stop: None,
       on_restart: None,
@@ -54,6 +61,9 @@ impl MachineDetail {
       on_tab_change: None,
       on_navigate_path: None,
       on_refresh_logs: None,
+      on_log_type_change: None,
+      on_file_select: None,
+      on_close_file_viewer: None,
     }
   }
 
@@ -79,6 +89,11 @@ impl MachineDetail {
 
   pub fn logs_editor(mut self, editor: Option<Entity<InputState>>) -> Self {
     self.logs_editor = editor;
+    self
+  }
+
+  pub fn file_content_editor(mut self, editor: Option<Entity<InputState>>) -> Self {
+    self.file_content_editor = editor;
     self
   }
 
@@ -146,6 +161,30 @@ impl MachineDetail {
     self
   }
 
+  pub fn on_log_type_change<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&MachineLogType, &mut Window, &mut App) + 'static,
+  {
+    self.on_log_type_change = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_file_select<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&String, &mut Window, &mut App) + 'static,
+  {
+    self.on_file_select = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_close_file_viewer<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&(), &mut Window, &mut App) + 'static,
+  {
+    self.on_close_file_viewer = Some(Rc::new(callback));
+    self
+  }
+
   fn render_empty(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
@@ -176,11 +215,19 @@ impl MachineDetail {
     let status_text = machine.status.to_string();
     let domain = format!("{}.local", machine.name);
 
+    // Get colima version
+    let colima_version = self
+      .machine_state
+      .as_ref()
+      .map(|s| s.colima_version.clone())
+      .unwrap_or_else(|| "Loading...".to_string());
+
     // Basic info rows
     let mut basic_info = vec![
       ("Name", machine.name.clone()),
       ("Status", status_text),
       ("Domain", domain),
+      ("Colima Version", colima_version),
     ];
 
     if let Some(addr) = &machine.address {
@@ -208,8 +255,8 @@ impl MachineDetail {
     // Settings section
     let mut settings_info = vec![
       ("CPUs", machine.cpus.to_string()),
-      ("Memory", format!("{:.0} GB", machine.memory_gb())),
-      ("Disk", format!("{:.0} GB", machine.disk_gb())),
+      ("Memory (Configured)", format!("{:.0} GB", machine.memory_gb())),
+      ("Disk (Configured)", format!("{:.0} GB", machine.disk_gb())),
       ("Driver", machine.display_driver()),
       ("Mount Type", machine.display_mount_type()),
       ("Runtime", machine.runtime.to_string()),
@@ -231,6 +278,406 @@ impl MachineDetail {
       .child(self.render_section(None, basic_info, cx))
       .child(self.render_section(Some("Image"), image_info, cx))
       .child(self.render_section(Some("Settings"), settings_info, cx))
+  }
+
+  fn render_processes_tab(&self, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+
+    let is_loading = self.machine_state.as_ref().map(|s| s.stats_loading).unwrap_or(true);
+
+    let processes = self
+      .machine_state
+      .as_ref()
+      .map(|s| s.processes.clone())
+      .filter(|s| !s.is_empty());
+
+    if is_loading {
+      return v_flex()
+        .flex_1()
+        .w_full()
+        .items_center()
+        .justify_center()
+        .child(
+          div()
+            .text_sm()
+            .text_color(colors.muted_foreground)
+            .child("Loading processes..."),
+        );
+    }
+
+    let Some(procs) = processes else {
+      return v_flex()
+        .flex_1()
+        .w_full()
+        .items_center()
+        .justify_center()
+        .child(
+          div()
+            .text_sm()
+            .text_color(colors.muted_foreground)
+            .child("No process data available"),
+        );
+    };
+
+    // Parse process lines
+    let lines: Vec<&str> = procs.lines().collect();
+    let header = lines.first().cloned().unwrap_or("");
+    let data_lines = lines.iter().skip(1);
+
+    div()
+      .size_full()
+      .flex()
+      .flex_col()
+      .overflow_hidden()
+      // Header row
+      .child(
+        h_flex()
+          .w_full()
+          .px(px(16.))
+          .py(px(8.))
+          .border_b_1()
+          .border_color(colors.border)
+          .bg(colors.sidebar)
+          .child(
+            div()
+              .w(px(80.))
+              .text_xs()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(colors.muted_foreground)
+              .child("USER"),
+          )
+          .child(
+            div()
+              .w(px(70.))
+              .text_xs()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(colors.muted_foreground)
+              .text_right()
+              .child("PID"),
+          )
+          .child(
+            div()
+              .w(px(70.))
+              .text_xs()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(colors.muted_foreground)
+              .text_right()
+              .child("CPU %"),
+          )
+          .child(
+            div()
+              .w(px(70.))
+              .text_xs()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(colors.muted_foreground)
+              .text_right()
+              .child("MEM %"),
+          )
+          .child(
+            div()
+              .flex_1()
+              .pl(px(16.))
+              .text_xs()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(colors.muted_foreground)
+              .child("COMMAND"),
+          ),
+      )
+      // Process rows
+      .child(
+        div()
+          .id("processes-scroll")
+          .flex_1()
+          .overflow_y_scrollbar()
+          .children(data_lines.filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 11 {
+              let user = parts[0];
+              let pid = parts[1];
+              let cpu = parts[2];
+              let mem = parts[3];
+              let command = parts[10..].join(" ");
+
+              // Parse CPU/MEM for coloring
+              let cpu_val: f64 = cpu.parse().unwrap_or(0.0);
+              let mem_val: f64 = mem.parse().unwrap_or(0.0);
+
+              let cpu_color = if cpu_val > 50.0 {
+                colors.danger
+              } else if cpu_val > 20.0 {
+                colors.warning
+              } else {
+                colors.secondary_foreground
+              };
+
+              let mem_color = if mem_val > 50.0 {
+                colors.danger
+              } else if mem_val > 20.0 {
+                colors.warning
+              } else {
+                colors.secondary_foreground
+              };
+
+              Some(
+                h_flex()
+                  .w_full()
+                  .px(px(16.))
+                  .py(px(6.))
+                  .hover(|s| s.bg(colors.list_hover))
+                  .child(
+                    div()
+                      .w(px(80.))
+                      .text_xs()
+                      .text_color(colors.foreground)
+                      .overflow_hidden()
+                      .text_ellipsis()
+                      .child(user.to_string()),
+                  )
+                  .child(
+                    div()
+                      .w(px(70.))
+                      .text_xs()
+                      .text_color(colors.secondary_foreground)
+                      .text_right()
+                      .child(pid.to_string()),
+                  )
+                  .child(
+                    div()
+                      .w(px(70.))
+                      .text_xs()
+                      .text_color(cpu_color)
+                      .text_right()
+                      .child(format!("{}", cpu)),
+                  )
+                  .child(
+                    div()
+                      .w(px(70.))
+                      .text_xs()
+                      .text_color(mem_color)
+                      .text_right()
+                      .child(format!("{}", mem)),
+                  )
+                  .child(
+                    div()
+                      .flex_1()
+                      .pl(px(16.))
+                      .text_xs()
+                      .text_color(colors.secondary_foreground)
+                      .overflow_hidden()
+                      .text_ellipsis()
+                      .whitespace_nowrap()
+                      .child(command),
+                  ),
+              )
+            } else {
+              None
+            }
+          })),
+      )
+  }
+
+  fn render_stats_tab(&self, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+
+    let is_loading = self.machine_state.as_ref().map(|s| s.stats_loading).unwrap_or(true);
+
+    let disk_usage = self
+      .machine_state
+      .as_ref()
+      .map(|s| s.disk_usage.clone())
+      .filter(|s| !s.is_empty());
+
+    let memory_info = self
+      .machine_state
+      .as_ref()
+      .map(|s| s.memory_info.clone())
+      .filter(|s| !s.is_empty());
+
+    if is_loading {
+      return v_flex()
+        .flex_1()
+        .w_full()
+        .items_center()
+        .justify_center()
+        .child(
+          div()
+            .text_sm()
+            .text_color(colors.muted_foreground)
+            .child("Loading stats..."),
+        );
+    }
+
+    v_flex()
+      .flex_1()
+      .w_full()
+      .p(px(16.))
+      .gap(px(24.))
+      // Memory Section
+      .child(self.render_memory_card(&memory_info, cx))
+      // Disk Section
+      .child(self.render_disk_card(&disk_usage, cx))
+  }
+
+  fn render_memory_card(&self, memory_info: &Option<String>, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+
+    // Parse memory info from "free -h" output
+    // Format: total, used, free, shared, buff/cache, available
+    let (used, total, percent) = if let Some(info) = memory_info {
+      parse_memory_info(info)
+    } else {
+      ("--".to_string(), "--".to_string(), 0.0)
+    };
+
+    let bar_color = if percent > 80.0 {
+      colors.danger
+    } else if percent > 60.0 {
+      colors.warning
+    } else {
+      colors.primary
+    };
+
+    v_flex()
+      .gap(px(12.))
+      .child(
+        h_flex()
+          .items_center()
+          .justify_between()
+          .child(
+            h_flex()
+              .items_center()
+              .gap(px(8.))
+              .child(Icon::new(IconName::ChartPie).size(px(16.)).text_color(colors.primary))
+              .child(
+                div()
+                  .text_sm()
+                  .font_weight(gpui::FontWeight::SEMIBOLD)
+                  .text_color(colors.foreground)
+                  .child("Memory"),
+              ),
+          )
+          .child(
+            div()
+              .text_sm()
+              .text_color(colors.muted_foreground)
+              .child(format!("{} / {}", used, total)),
+          ),
+      )
+      // Progress bar
+      .child(
+        div()
+          .w_full()
+          .h(px(8.))
+          .bg(colors.background)
+          .rounded(px(4.))
+          .child(
+            div()
+              .h_full()
+              .rounded(px(4.))
+              .bg(bar_color)
+              .w(gpui::relative(percent as f32 / 100.0)),
+          ),
+      )
+      // Percentage
+      .child(
+        h_flex()
+          .items_center()
+          .justify_between()
+          .child(
+            div()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("Used"),
+          )
+          .child(
+            div()
+              .text_sm()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(bar_color)
+              .child(format!("{:.1}%", percent)),
+          ),
+      )
+  }
+
+  fn render_disk_card(&self, disk_usage: &Option<String>, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+
+    // Parse disk info from "df -h /" output
+    // Format: Filesystem  Size  Used  Avail  Use%  Mounted on
+    let (used, total, percent) = if let Some(info) = disk_usage {
+      parse_disk_info(info)
+    } else {
+      ("--".to_string(), "--".to_string(), 0.0)
+    };
+
+    let bar_color = if percent > 80.0 {
+      colors.danger
+    } else if percent > 60.0 {
+      colors.warning
+    } else {
+      colors.success
+    };
+
+    v_flex()
+      .gap(px(12.))
+      .child(
+        h_flex()
+          .items_center()
+          .justify_between()
+          .child(
+            h_flex()
+              .items_center()
+              .gap(px(8.))
+              .child(Icon::new(IconName::Folder).size(px(16.)).text_color(colors.success))
+              .child(
+                div()
+                  .text_sm()
+                  .font_weight(gpui::FontWeight::SEMIBOLD)
+                  .text_color(colors.foreground)
+                  .child("Disk"),
+              ),
+          )
+          .child(
+            div()
+              .text_sm()
+              .text_color(colors.muted_foreground)
+              .child(format!("{} / {}", used, total)),
+          ),
+      )
+      // Progress bar
+      .child(
+        div()
+          .w_full()
+          .h(px(8.))
+          .bg(colors.background)
+          .rounded(px(4.))
+          .child(
+            div()
+              .h_full()
+              .rounded(px(4.))
+              .bg(bar_color)
+              .w(gpui::relative(percent as f32 / 100.0)),
+          ),
+      )
+      // Percentage
+      .child(
+        h_flex()
+          .items_center()
+          .justify_between()
+          .child(
+            div()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("Used"),
+          )
+          .child(
+            div()
+              .text_sm()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(bar_color)
+              .child(format!("{:.1}%", percent)),
+          ),
+      )
   }
 
   fn render_section(&self, header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
@@ -290,18 +737,85 @@ impl MachineDetail {
   fn render_logs_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
     let is_loading = self.machine_state.as_ref().map(|s| s.logs_loading).unwrap_or(false);
+    let current_log_type = self.machine_state.as_ref().map(|s| s.log_type).unwrap_or_default();
     let on_refresh = self.on_refresh_logs.clone();
+    let on_log_type_change = self.on_log_type_change.clone();
+
+    // Log type selector buttons
+    let log_type_selector = {
+      let on_system = on_log_type_change.clone();
+      let on_docker = on_log_type_change.clone();
+      let on_containerd = on_log_type_change.clone();
+
+      h_flex()
+        .gap(px(4.))
+        .child(
+          Button::new("log-system")
+            .label("System")
+            .compact()
+            .when(current_log_type == MachineLogType::System, |b| b.primary())
+            .when(current_log_type != MachineLogType::System, |b| b.ghost())
+            .when_some(on_system, |btn, cb| {
+              btn.on_click(move |_ev, window, cx| {
+                cb(&MachineLogType::System, window, cx);
+              })
+            }),
+        )
+        .child(
+          Button::new("log-docker")
+            .label("Docker")
+            .compact()
+            .when(current_log_type == MachineLogType::Docker, |b| b.primary())
+            .when(current_log_type != MachineLogType::Docker, |b| b.ghost())
+            .when_some(on_docker, |btn, cb| {
+              btn.on_click(move |_ev, window, cx| {
+                cb(&MachineLogType::Docker, window, cx);
+              })
+            }),
+        )
+        .child(
+          Button::new("log-containerd")
+            .label("Containerd")
+            .compact()
+            .when(current_log_type == MachineLogType::Containerd, |b| b.primary())
+            .when(current_log_type != MachineLogType::Containerd, |b| b.ghost())
+            .when_some(on_containerd, |btn, cb| {
+              btn.on_click(move |_ev, window, cx| {
+                cb(&MachineLogType::Containerd, window, cx);
+              })
+            }),
+        )
+    };
 
     if is_loading {
-      return v_flex()
-        .size_full()
-        .p(px(16.))
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
-            .child("Loading logs..."),
-        );
+      return div().size_full().flex().flex_col().child(
+        h_flex()
+          .w_full()
+          .px(px(16.))
+          .py(px(8.))
+          .items_center()
+          .justify_between()
+          .flex_shrink_0()
+          .child(log_type_selector)
+          .child(
+            Button::new("refresh-logs")
+              .icon(IconName::Redo)
+              .ghost()
+              .compact()
+              .opacity(0.5),
+          ),
+      ).child(
+        v_flex()
+          .flex_1()
+          .items_center()
+          .justify_center()
+          .child(
+            div()
+              .text_sm()
+              .text_color(colors.muted_foreground)
+              .child("Loading logs..."),
+          ),
+      );
     }
 
     if let Some(ref editor) = self.logs_editor {
@@ -313,13 +827,7 @@ impl MachineDetail {
           .items_center()
           .justify_between()
           .flex_shrink_0()
-          .child(
-            div()
-              .text_sm()
-              .font_weight(gpui::FontWeight::MEDIUM)
-              .text_color(colors.foreground)
-              .child("System Logs"),
-          )
+          .child(log_type_selector)
           .child(
             Button::new("refresh-logs")
               .icon(IconName::Redo)
@@ -335,7 +843,7 @@ impl MachineDetail {
         div()
           .flex_1()
           .min_h_0()
-          .child(Input::new(editor).size_full().appearance(false).disabled(true)),
+          .child(Input::new(editor).size_full().appearance(false)),
       );
     }
 
@@ -346,16 +854,42 @@ impl MachineDetail {
       .map(|s| s.logs.clone())
       .unwrap_or_default();
 
-    div().size_full().p(px(16.)).child(
+    div().size_full().flex().flex_col().child(
+      h_flex()
+        .w_full()
+        .px(px(16.))
+        .py(px(8.))
+        .items_center()
+        .justify_between()
+        .flex_shrink_0()
+        .child(log_type_selector)
+        .child(
+          Button::new("refresh-logs")
+            .icon(IconName::Redo)
+            .ghost()
+            .compact()
+            .when_some(on_refresh, |btn, cb| {
+              btn.on_click(move |_ev, window, cx| {
+                cb(&(), window, cx);
+              })
+            }),
+        ),
+    ).child(
       div()
-        .size_full()
-        .overflow_y_scrollbar()
-        .bg(colors.sidebar)
-        .p(px(12.))
-        .font_family("monospace")
-        .text_xs()
-        .text_color(colors.foreground)
-        .child(logs_content),
+        .flex_1()
+        .min_h_0()
+        .p(px(16.))
+        .child(
+          div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .bg(colors.sidebar)
+            .p(px(12.))
+            .font_family("monospace")
+            .text_xs()
+            .text_color(colors.foreground)
+            .child(logs_content),
+        ),
     )
   }
 
@@ -367,71 +901,38 @@ impl MachineDetail {
 
     let colors = &cx.theme().colors;
 
-    // Fallback: show message
-    let terminal_output = self
-      .machine_state
-      .as_ref()
-      .map(|s| s.terminal_output.clone())
-      .unwrap_or_default();
-
-    let history = self
-      .machine_state
-      .as_ref()
-      .map(|s| s.terminal_history.clone())
-      .unwrap_or_default();
-
+    // Fallback: show message when terminal not yet connected
     v_flex()
       .flex_1()
       .w_full()
-      .p(px(16.))
-      .gap(px(8.))
+      .items_center()
+      .justify_center()
+      .gap(px(16.))
       .child(
-        div()
-          .text_sm()
-          .font_weight(gpui::FontWeight::MEDIUM)
-          .text_color(colors.foreground)
-          .child("Terminal"),
+        Icon::new(IconName::SquareTerminal)
+          .size(px(48.))
+          .text_color(colors.muted_foreground),
       )
       .child(
         div()
-          .flex_1()
-          .w_full()
-          .bg(colors.sidebar)
-          .rounded(px(8.))
-          .p(px(12.))
-          .overflow_hidden()
-          .font_family("monospace")
           .text_sm()
-          .text_color(colors.foreground)
-          .child(
-            v_flex()
-              .gap(px(4.))
-              .children(
-                history
-                  .iter()
-                  .map(|cmd| div().text_color(colors.link).child(format!("$ {}", cmd))),
-              )
-              .when(!terminal_output.is_empty(), |el| {
-                el.child(div().text_color(colors.foreground).child(terminal_output.clone()))
-              })
-              .child(
-                h_flex()
-                  .items_center()
-                  .child(div().text_color(colors.link).child("$ "))
-                  .child(div().w(px(8.)).h(px(16.)).bg(colors.foreground).child("")),
-              ),
-          ),
-      )
-      .child(
-        div()
-          .text_xs()
           .text_color(colors.muted_foreground)
-          .child("Click on the Terminal tab to connect"),
+          .child("Connecting to terminal..."),
       )
   }
 
   fn render_files_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
+
+    // Check if viewing file content
+    let selected_file = self
+      .machine_state
+      .as_ref()
+      .and_then(|s| s.selected_file.clone());
+
+    if let Some(ref file_path) = selected_file {
+      return self.render_file_viewer(file_path, cx);
+    }
 
     let current_path = self
       .machine_state
@@ -445,6 +946,7 @@ impl MachineDetail {
 
     let on_navigate = self.on_navigate_path.clone();
     let on_navigate_up = self.on_navigate_path.clone();
+    let on_file_select = self.on_file_select.clone();
 
     // Calculate parent path
     let parent_path = if current_path == "/" {
@@ -461,18 +963,33 @@ impl MachineDetail {
     let mut file_list = v_flex().gap(px(2.));
 
     for file in files.iter() {
-      let file_path = file.path.clone();
+      let file_path_nav = file.path.clone();
+      let file_path_select = file.path.clone();
       let is_dir = file.is_dir;
-      let cb = on_navigate.clone();
+      let nav_cb = on_navigate.clone();
+      let select_cb = on_file_select.clone();
 
-      file_list = file_list.child(self.render_file_entry(file, cx).when(is_dir, |el| {
-        el.cursor_pointer().when_some(cb, move |el, cb| {
-          let path = file_path.clone();
-          el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
-            cb(&path, window, cx);
+      file_list = file_list.child(
+        self
+          .render_file_entry(file, cx)
+          .cursor_pointer()
+          .when(is_dir, |el| {
+            el.when_some(nav_cb, move |el, cb| {
+              let path = file_path_nav.clone();
+              el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
+                cb(&path, window, cx);
+              })
+            })
           })
-        })
-      }));
+          .when(!is_dir, |el| {
+            el.when_some(select_cb, move |el, cb| {
+              let path = file_path_select.clone();
+              el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
+                cb(&path, window, cx);
+              })
+            })
+          }),
+      );
     }
 
     v_flex()
@@ -533,6 +1050,113 @@ impl MachineDetail {
           })
           .when(!is_loading && !files.is_empty(), |el| el.child(file_list)),
       )
+  }
+
+  fn render_file_viewer(&self, file_path: &str, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+
+    let is_loading = self
+      .machine_state
+      .as_ref()
+      .map(|s| s.file_content_loading)
+      .unwrap_or(false);
+
+    let on_close = self.on_close_file_viewer.clone();
+
+    // Extract file name from path
+    let file_name = file_path
+      .rsplit('/')
+      .next()
+      .unwrap_or(file_path)
+      .to_string();
+
+    div()
+      .size_full()
+      .flex()
+      .flex_col()
+      .child(
+        h_flex()
+          .w_full()
+          .px(px(16.))
+          .py(px(8.))
+          .items_center()
+          .gap(px(8.))
+          .flex_shrink_0()
+          .child(
+            Button::new("back")
+              .icon(IconName::ArrowLeft)
+              .ghost()
+              .compact()
+              .when_some(on_close, |btn, cb| {
+                btn.on_click(move |_ev, window, cx| {
+                  cb(&(), window, cx);
+                })
+              }),
+          )
+          .child(Icon::new(IconName::File).text_color(colors.secondary_foreground))
+          .child(
+            div()
+              .flex_1()
+              .text_sm()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(colors.foreground)
+              .overflow_hidden()
+              .text_ellipsis()
+              .child(file_name),
+          )
+          .child(
+            div()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .overflow_hidden()
+              .text_ellipsis()
+              .child(file_path.to_string()),
+          ),
+      )
+      .when(is_loading, |el| {
+        el.child(
+          div()
+            .flex_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+              div()
+                .text_sm()
+                .text_color(colors.muted_foreground)
+                .child("Loading file..."),
+            ),
+        )
+      })
+      .when(!is_loading, |el| {
+        if let Some(ref editor) = self.file_content_editor {
+          el.child(
+            div()
+              .flex_1()
+              .min_h_0()
+              .child(Input::new(editor).size_full().appearance(false)),
+          )
+        } else {
+          // Fallback if no editor
+          let content = self
+            .machine_state
+            .as_ref()
+            .map(|s| s.file_content.clone())
+            .unwrap_or_default();
+
+          el.child(
+            div()
+              .flex_1()
+              .min_h_0()
+              .overflow_y_scrollbar()
+              .p(px(12.))
+              .font_family("monospace")
+              .text_xs()
+              .text_color(colors.foreground)
+              .child(content),
+          )
+        }
+      })
   }
 
   fn render_file_entry(&self, file: &VmFileEntry, cx: &App) -> gpui::Div {
@@ -607,7 +1231,7 @@ impl MachineDetail {
     let on_tab_change = self.on_tab_change.clone();
     let machine_for_edit = machine.clone();
 
-    let tabs = ["Info", "Logs", "Terminal", "Files"];
+    let tabs = ["Info", "Processes", "Stats", "Logs", "Terminal", "Files"];
 
     // Toolbar with tabs and actions
     let toolbar = h_flex()
@@ -712,14 +1336,16 @@ impl MachineDetail {
     // Content based on active tab
     let content = match self.active_tab {
       0 => self.render_info_tab(machine, cx),
-      1 => self.render_logs_tab(cx),
-      2 => self.render_terminal_tab(cx),
-      3 => self.render_files_tab(cx),
+      1 => self.render_processes_tab(cx),
+      2 => self.render_stats_tab(cx),
+      3 => self.render_logs_tab(cx),
+      4 => self.render_terminal_tab(cx),
+      5 => self.render_files_tab(cx),
       _ => self.render_info_tab(machine, cx),
     };
 
     // Terminal and Logs tabs need full height without scroll (they handle their own scrolling)
-    let is_full_height_tab = self.active_tab == 1 || self.active_tab == 2;
+    let is_full_height_tab = self.active_tab == 3 || self.active_tab == 4;
 
     let mut result = div().size_full().bg(colors.sidebar).flex().flex_col().overflow_hidden().child(toolbar);
 
@@ -739,4 +1365,86 @@ impl MachineDetail {
 
     result.into_any_element()
   }
+}
+
+/// Parse memory info from "free -h" output
+/// Returns (used, total, percent_used)
+fn parse_memory_info(info: &str) -> (String, String, f64) {
+  // Format:
+  //               total        used        free      shared  buff/cache   available
+  // Mem:          7.7Gi       1.2Gi       5.8Gi       0.0Ki       760Mi       6.2Gi
+  for line in info.lines() {
+    let line = line.trim();
+    if line.starts_with("Mem:") {
+      let parts: Vec<&str> = line.split_whitespace().collect();
+      if parts.len() >= 3 {
+        let total = parts[1].to_string();
+        let used = parts[2].to_string();
+
+        // Parse values to calculate percentage
+        let total_val = parse_memory_value(parts[1]);
+        let used_val = parse_memory_value(parts[2]);
+
+        let percent = if total_val > 0.0 {
+          (used_val / total_val) * 100.0
+        } else {
+          0.0
+        };
+
+        return (used, total, percent);
+      }
+    }
+  }
+
+  ("--".to_string(), "--".to_string(), 0.0)
+}
+
+/// Parse memory value like "7.7Gi", "760Mi", "1.2Gi" to bytes
+fn parse_memory_value(s: &str) -> f64 {
+  let s = s.trim();
+
+  // Find where the number ends and unit begins
+  let num_end = s
+    .chars()
+    .position(|c| !c.is_ascii_digit() && c != '.')
+    .unwrap_or(s.len());
+
+  let (num_str, unit) = s.split_at(num_end);
+  let value: f64 = num_str.parse().unwrap_or(0.0);
+
+  match unit.to_lowercase().as_str() {
+    "gi" | "g" => value * 1024.0 * 1024.0 * 1024.0,
+    "mi" | "m" => value * 1024.0 * 1024.0,
+    "ki" | "k" => value * 1024.0,
+    "b" | "" => value,
+    _ => value,
+  }
+}
+
+/// Parse disk info from "df -h /" output
+/// Returns (used, total, percent_used)
+fn parse_disk_info(info: &str) -> (String, String, f64) {
+  // Format:
+  // Filesystem      Size  Used Avail Use% Mounted on
+  // /dev/vda1        59G   10G   46G  19% /
+  for line in info.lines() {
+    let line = line.trim();
+    // Skip header
+    if line.starts_with("Filesystem") {
+      continue;
+    }
+
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() >= 5 {
+      let total = parts[1].to_string();
+      let used = parts[2].to_string();
+      let percent_str = parts[4].trim_end_matches('%');
+
+      let percent: f64 = percent_str.parse().unwrap_or(0.0);
+
+      return (used, total, percent);
+    }
+  }
+
+  ("--".to_string(), "--".to_string(), 0.0)
 }

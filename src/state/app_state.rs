@@ -47,26 +47,67 @@ pub enum SelectedItem {
 }
 
 /// State for machine-specific data (logs, files, terminal)
+/// Type of logs to display for a machine
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum MachineLogType {
+  #[default]
+  System,
+  Docker,
+  Containerd,
+}
+
+/// Sub-tab within the Info tab
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum MachineInfoSubTab {
+  #[default]
+  Overview,
+  Cpu,
+  Memory,
+  Disk,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct MachineTabState {
   /// Logs content for the selected machine
   pub logs: String,
   /// Whether logs are currently loading
   pub logs_loading: bool,
+  /// Type of logs being displayed
+  pub log_type: MachineLogType,
   /// Current directory path in file browser
   pub current_path: String,
   /// Files in current directory
   pub files: Vec<VmFileEntry>,
   /// Whether files are currently loading
   pub files_loading: bool,
+  /// Selected file path for viewing
+  pub selected_file: Option<String>,
+  /// Content of selected file
+  pub file_content: String,
+  /// Whether file content is loading
+  pub file_content_loading: bool,
   /// OS information for the machine
   pub os_info: Option<VmOsInfo>,
-  /// Terminal command history
-  pub terminal_history: Vec<String>,
-  /// Current terminal input
-  pub terminal_input: String,
-  /// Terminal output
-  pub terminal_output: String,
+  /// Real-time disk usage info
+  pub disk_usage: String,
+  /// Real-time memory info
+  pub memory_info: String,
+  /// Top processes running in VM
+  pub processes: String,
+  /// Whether stats are loading
+  pub stats_loading: bool,
+  /// Colima version
+  pub colima_version: String,
+  /// Active sub-tab within Info tab
+  pub info_sub_tab: MachineInfoSubTab,
+  /// CPU usage history for chart (last 30 samples)
+  pub cpu_history: Vec<f64>,
+  /// Memory usage history for chart (last 30 samples, in MB)
+  pub memory_history: Vec<f64>,
+  /// Disk usage percentage
+  pub disk_usage_percent: f64,
+  /// Memory usage percentage
+  pub memory_usage_percent: f64,
 }
 
 impl MachineTabState {
