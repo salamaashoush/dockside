@@ -320,7 +320,7 @@ impl VolumeDetail {
                                     .text_color(colors.foreground)
                                     .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(key.to_string()),
+                                    .child((*key).clone()),
                             )
                             .child(
                                 div()
@@ -329,7 +329,7 @@ impl VolumeDetail {
                                     .text_color(colors.secondary_foreground)
                                     .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(value.to_string()),
+                                    .child((*value).clone()),
                             );
 
                         if i > 0 {
@@ -344,11 +344,11 @@ impl VolumeDetail {
     let state = self.volume_state.as_ref();
 
     let explorer_state = FileExplorerState {
-      current_path: state.map(|s| s.current_path.clone()).unwrap_or_else(|| "/".to_string()),
-      is_loading: state.map(|s| s.files_loading).unwrap_or(false),
+      current_path: state.map_or_else(|| "/".to_string(), |s| s.current_path.clone()),
+      is_loading: state.is_some_and(|s| s.files_loading),
       selected_file: state.and_then(|s| s.selected_file.clone()),
       file_content: state.map(|s| s.file_content.clone()).unwrap_or_default(),
-      file_content_loading: state.map(|s| s.file_content_loading).unwrap_or(false),
+      file_content_loading: state.is_some_and(|s| s.file_content_loading),
     };
 
     let files = state.map(|s| s.files.clone()).unwrap_or_default();
@@ -375,7 +375,7 @@ impl VolumeDetail {
 
     if let Some(ref cb) = self.on_close_file_viewer {
       let cb = cb.clone();
-      explorer = explorer.on_close_viewer(move |_, window, cx| {
+      explorer = explorer.on_close_viewer(move |(), window, cx| {
         cb(&(), window, cx);
       });
     }
@@ -420,7 +420,7 @@ impl VolumeDetail {
           .children(tabs.iter().enumerate().map(|(i, label)| {
             let on_tab_change = on_tab_change.clone();
             Tab::new()
-              .label(label.to_string())
+              .label((*label).to_string())
               .selected(self.active_tab == i)
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tab_change {

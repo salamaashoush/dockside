@@ -74,7 +74,7 @@ impl PodsView {
               && pod.name == *pod_name
               && pod.namespace == *namespace
             {
-              this.pod_tab_state.logs = logs.clone();
+              logs.clone_into(&mut this.pod_tab_state.logs);
               this.pod_tab_state.logs_loading = false;
               cx.notify();
             }
@@ -88,7 +88,7 @@ impl PodsView {
               && pod.name == *pod_name
               && pod.namespace == *namespace
             {
-              this.pod_tab_state.describe = describe.clone();
+              describe.clone_into(&mut this.pod_tab_state.describe);
               this.pod_tab_state.describe_loading = false;
               cx.notify();
             }
@@ -102,7 +102,7 @@ impl PodsView {
               && pod.name == *pod_name
               && pod.namespace == *namespace
             {
-              this.pod_tab_state.yaml = yaml.clone();
+              yaml.clone_into(&mut this.pod_tab_state.yaml);
               this.pod_tab_state.yaml_loading = false;
               cx.notify();
             }
@@ -359,7 +359,7 @@ impl Render for PodsView {
       .on_tab_change(cx.listener(|this, tab: &usize, window, cx| {
         this.on_tab_change(*tab, window, cx);
       }))
-      .on_refresh_logs(cx.listener(|this, _: &(), _window, cx| {
+      .on_refresh_logs(cx.listener(|this, (): &(), _window, cx| {
         this.on_refresh_logs(cx);
       }))
       .on_container_select(cx.listener(|this, container: &String, window, cx| {

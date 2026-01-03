@@ -141,7 +141,7 @@ impl ThemeName {
     }
   }
 
-  /// Returns the theme name as used in the JSON file (for ThemeRegistry lookup)
+  /// Returns the theme name as used in the JSON file (for `ThemeRegistry` lookup)
   pub fn theme_name(&self) -> &str {
     self.display_name()
   }

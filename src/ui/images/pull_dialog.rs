@@ -104,7 +104,7 @@ impl PullImageDialog {
     let platform = self
       .platform_select
       .as_ref()
-      .and_then(|s| s.read(cx).selected_value().cloned())
+      .and_then(|s| s.read(cx).selected_value().copied())
       .unwrap_or_default();
 
     PullImageOptions { image, platform }

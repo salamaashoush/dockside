@@ -26,7 +26,7 @@ pub struct NetworkListDelegate {
   docker_state: Entity<DockerState>,
   selected_index: Option<IndexPath>,
   search_query: String,
-  /// Cached list: (section_index, is_system, networks)
+  /// Cached list: (`section_index`, `is_system`, networks)
   sections: Vec<(bool, Vec<NetworkInfo>)>,
 }
 
@@ -96,7 +96,7 @@ impl ListDelegate for NetworkListDelegate {
   }
 
   fn items_count(&self, section: usize, _cx: &App) -> usize {
-    self.sections.get(section).map(|(_, nets)| nets.len()).unwrap_or(0)
+    self.sections.get(section).map_or(0, |(_, nets)| nets.len())
   }
 
   fn render_section_header(
@@ -169,7 +169,7 @@ impl ListDelegate for NetworkListDelegate {
               .text_color(colors.muted_foreground)
               .child(driver)
               .when(container_count > 0, |el| {
-                el.child(format!("{} containers", container_count))
+                el.child(format!("{container_count} containers"))
               }),
           ),
       );
@@ -199,7 +199,7 @@ impl ListDelegate for NetworkListDelegate {
           .items_center()
           .justify_center()
           .child(
-            Button::new(SharedString::from(format!("delete-{}-{}", section, row)))
+            Button::new(SharedString::from(format!("delete-{section}-{row}")))
               .icon(Icon::new(AppIcon::Trash))
               .ghost()
               .xsmall()
@@ -288,7 +288,7 @@ impl NetworkList {
     if let Some(input) = &self.search_input {
       let current_text = input.read(cx).text().to_string();
       if current_text != self.search_query {
-        self.search_query = current_text.clone();
+        current_text.clone_into(&mut self.search_query);
         self.list_state.update(cx, |state, cx| {
           state.delegate_mut().set_search_query(current_text, cx);
           cx.notify();
@@ -408,9 +408,9 @@ impl Render for NetworkList {
     }
 
     let subtitle = if is_filtering {
-      format!("{} of {} networks", filtered_count, total_count)
+      format!("{filtered_count} of {total_count} networks")
     } else {
-      format!("{} networks", total_count)
+      format!("{total_count} networks")
     };
 
     // Toolbar
@@ -436,7 +436,7 @@ impl Render for NetworkList {
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))
               .when(search_visible, Button::primary)
-              .when(!search_visible, |b| b.ghost())
+              .when(!search_visible, ButtonVariants::ghost)
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {
                 this.toggle_search(window, cx);

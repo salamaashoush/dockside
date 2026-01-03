@@ -40,7 +40,7 @@ impl ServiceDetail {
             && svc.name == *service_name
             && svc.namespace == *namespace
           {
-            this.yaml_content = yaml.clone();
+            yaml.clone_into(&mut this.yaml_content);
             cx.notify();
           }
         }
@@ -160,7 +160,7 @@ impl ServiceDetail {
                       .text_xs()
                       .font_family("monospace")
                       .text_color(colors.muted_foreground)
-                      .child(format!("{}={}", k, v))
+                      .child(format!("{k}={v}"))
                   })
                   .collect::<Vec<_>>(),
               ),
@@ -194,7 +194,7 @@ impl ServiceDetail {
                       .text_xs()
                       .font_family("monospace")
                       .text_color(colors.muted_foreground)
-                      .child(format!("{}={}", k, v))
+                      .child(format!("{k}={v}"))
                   })
                   .collect::<Vec<_>>(),
               ),
@@ -314,7 +314,7 @@ impl ServiceDetail {
               .flex_1()
               .text_sm()
               .text_color(colors.foreground)
-              .child(port.node_port.map(|p| p.to_string()).unwrap_or_else(|| "-".to_string())),
+              .child(port.node_port.map_or_else(|| "-".to_string(), |p| p.to_string())),
           )
       })
       .collect::<Vec<_>>();
@@ -357,7 +357,7 @@ impl ServiceDetail {
         service
           .selector
           .iter()
-          .all(|(key, value)| pod.labels.get(key).map(|v| v == value).unwrap_or(false))
+          .all(|(key, value)| pod.labels.get(key).is_some_and(|v| v == value))
       })
       .collect();
 
@@ -378,7 +378,7 @@ impl ServiceDetail {
                                     service
                                         .selector
                                         .iter()
-                                        .map(|(k, v)| format!("{}={}", k, v))
+                                        .map(|(k, v)| format!("{k}={v}"))
                                         .collect::<Vec<_>>()
                                         .join(", ")
                                 ))),
@@ -611,15 +611,14 @@ impl Render for ServiceDetail {
     }
 
     // Sync yaml editor content
-    if let Some(ref editor) = self.yaml_editor {
-      if !self.yaml_content.is_empty() && self.last_synced_yaml != self.yaml_content {
+    if let Some(ref editor) = self.yaml_editor
+      && !self.yaml_content.is_empty() && self.last_synced_yaml != self.yaml_content {
         let yaml_clone = self.yaml_content.clone();
         editor.update(cx, |state, cx| {
           state.replace(&yaml_clone, window, cx);
         });
         self.last_synced_yaml = self.yaml_content.clone();
       }
-    }
 
     let colors = cx.theme().colors;
 

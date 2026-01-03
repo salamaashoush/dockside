@@ -35,7 +35,7 @@ impl DockerClient {
     docker
       .ping()
       .await
-      .map_err(|e| anyhow!("Failed to connect to Docker: {}. Is Colima running?", e))?;
+      .map_err(|e| anyhow!("Failed to connect to Docker: {e}. Is Colima running?"))?;
 
     self.inner = Some(docker);
     Ok(())

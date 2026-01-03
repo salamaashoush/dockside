@@ -39,11 +39,11 @@ impl ComposeProject {
     let running = self.running_count();
     let total = self.container_count();
     if running == total && total > 0 {
-      format!("{}/{} running", running, total)
+      format!("{running}/{total} running")
     } else if running == 0 {
-      format!("{}/{} stopped", running, total)
+      format!("{running}/{total} stopped")
     } else {
-      format!("{}/{} running", running, total)
+      format!("{running}/{total} running")
     }
   }
 }
@@ -58,7 +58,7 @@ pub struct ComposeService {
 }
 
 impl ComposeService {
-  /// Create from ContainerInfo with compose labels
+  /// Create from `ContainerInfo` with compose labels
   pub fn from_container(container: &ContainerInfo, service_name: &str) -> Self {
     Self {
       name: service_name.to_string(),

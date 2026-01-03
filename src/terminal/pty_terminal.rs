@@ -585,7 +585,7 @@ impl PtyTerminal {
           }
           Err(e) => {
             let mut b = buffer_clone.lock();
-            b.error = Some(format!("Read error: {}", e));
+            b.error = Some(format!("Read error: {e}"));
             b.connected = false;
             break;
           }

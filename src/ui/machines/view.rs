@@ -232,17 +232,17 @@ impl MachinesView {
       let (os_info, disk_usage, memory_info, processes, colima_version) = cx
         .background_executor()
         .spawn(async move {
-          let colima = crate::colima::ColimaClient::new();
+          use crate::colima::ColimaClient;
           let name_opt = if machine_name == "default" {
             None
           } else {
             Some(machine_name.as_str())
           };
-          let os_info = colima.get_os_info(name_opt).ok();
-          let disk_usage = colima.get_disk_usage(name_opt).unwrap_or_default();
-          let memory_info = colima.get_memory_info(name_opt).unwrap_or_default();
-          let processes = colima.get_processes(name_opt).unwrap_or_default();
-          let version = colima.version().unwrap_or_else(|_| "Unknown".to_string());
+          let os_info = ColimaClient::get_os_info(name_opt).ok();
+          let disk_usage = ColimaClient::get_disk_usage(name_opt).unwrap_or_default();
+          let memory_info = ColimaClient::get_memory_info(name_opt).unwrap_or_default();
+          let processes = ColimaClient::get_processes(name_opt).unwrap_or_default();
+          let version = ColimaClient::version().unwrap_or_else(|_| "Unknown".to_string());
           (os_info, disk_usage, memory_info, processes, version)
         })
         .await;
@@ -264,14 +264,13 @@ impl MachinesView {
       let logs = cx
         .background_executor()
         .spawn(async move {
-          let colima = crate::colima::ColimaClient::new();
+          use crate::colima::ColimaClient;
           let name_opt = if machine_name2 == "default" {
             None
           } else {
             Some(machine_name2.as_str())
           };
-          colima
-            .get_system_logs(name_opt, 200)
+          ColimaClient::get_system_logs(name_opt, 200)
             .unwrap_or_else(|_| "Failed to load logs".to_string())
         })
         .await;
@@ -289,13 +288,13 @@ impl MachinesView {
       let files = cx
         .background_executor()
         .spawn(async move {
-          let colima = crate::colima::ColimaClient::new();
+          use crate::colima::ColimaClient;
           let name_opt = if machine_name3 == "default" {
             None
           } else {
             Some(machine_name3.as_str())
           };
-          colima.list_files(name_opt, "/").unwrap_or_default()
+          ColimaClient::list_files(name_opt, "/").unwrap_or_default()
         })
         .await;
 
@@ -321,16 +320,16 @@ impl MachinesView {
         let logs = cx
           .background_executor()
           .spawn(async move {
-            let colima = crate::colima::ColimaClient::new();
+            use crate::colima::ColimaClient;
             let name_opt = if machine_name == "default" {
               None
             } else {
               Some(machine_name.as_str())
             };
             match log_type {
-              MachineLogType::System => colima.get_system_logs(name_opt, 200),
-              MachineLogType::Docker => colima.get_docker_logs(name_opt, 200),
-              MachineLogType::Containerd => colima.get_containerd_logs(name_opt, 200),
+              MachineLogType::System => ColimaClient::get_system_logs(name_opt, 200),
+              MachineLogType::Docker => ColimaClient::get_docker_logs(name_opt, 200),
+              MachineLogType::Containerd => ColimaClient::get_containerd_logs(name_opt, 200),
             }
             .unwrap_or_else(|_| "Failed to load logs".to_string())
           })
@@ -359,14 +358,13 @@ impl MachinesView {
         let content = cx
           .background_executor()
           .spawn(async move {
-            let colima = crate::colima::ColimaClient::new();
+            use crate::colima::ColimaClient;
             let name_opt = if machine_name == "default" {
               None
             } else {
               Some(machine_name.as_str())
             };
-            colima
-              .read_file(name_opt, &file_path, 1000)
+            ColimaClient::read_file(name_opt, &file_path, 1000)
               .unwrap_or_else(|_| "Failed to read file".to_string())
           })
           .await;
@@ -393,13 +391,13 @@ impl MachinesView {
         let (files, current_path) = cx
           .background_executor()
           .spawn(async move {
-            let colima = crate::colima::ColimaClient::new();
+            use crate::colima::ColimaClient;
             let name_opt = if machine_name == "default" {
               None
             } else {
               Some(machine_name.as_str())
             };
-            let files = colima.list_files(name_opt, &path).unwrap_or_default();
+            let files = ColimaClient::list_files(name_opt, &path).unwrap_or_default();
             (files, path)
           })
           .await;
@@ -471,15 +469,15 @@ impl MachinesView {
         let result = cx
           .background_executor()
           .spawn(async move {
-            let colima = crate::colima::ColimaClient::new();
+            use crate::colima::ColimaClient;
             let name_opt = if machine_name == "default" {
               None
             } else {
               Some(machine_name.as_str())
             };
             // Resolve symlink and check if it's a directory
-            if let Ok(target) = colima.resolve_symlink(name_opt, &path) {
-              let is_dir = colima.is_directory(name_opt, &target).unwrap_or(false);
+            if let Ok(target) = ColimaClient::resolve_symlink(name_opt, &path) {
+              let is_dir = ColimaClient::is_directory(name_opt, &target).unwrap_or(false);
               Some((target, is_dir))
             } else {
               None
@@ -491,26 +489,26 @@ impl MachinesView {
           if let Some((target, is_dir)) = result {
             if is_dir {
               // Navigate to directory
-              this.machine_tab_state.current_path = target.clone();
+              target.clone_into(&mut this.machine_tab_state.current_path);
               this.machine_tab_state.files_loading = true;
               cx.notify();
 
               // Load files for the new path
               if let Some(ref machine) = this.selected_machine {
                 let machine_name = machine.name.clone();
-                let path = target.clone();
+                let path = target;
 
                 cx.spawn(async move |this, cx| {
                   let files = cx
                     .background_executor()
                     .spawn(async move {
-                      let colima = crate::colima::ColimaClient::new();
+                      use crate::colima::ColimaClient;
                       let name_opt = if machine_name == "default" {
                         None
                       } else {
                         Some(machine_name.as_str())
                       };
-                      colima.list_files(name_opt, &path).unwrap_or_default()
+                      ColimaClient::list_files(name_opt, &path).unwrap_or_default()
                     })
                     .await;
 
@@ -538,14 +536,13 @@ impl MachinesView {
                   let content = cx
                     .background_executor()
                     .spawn(async move {
-                      let colima = crate::colima::ColimaClient::new();
+                      use crate::colima::ColimaClient;
                       let name_opt = if machine_name == "default" {
                         None
                       } else {
                         Some(machine_name.as_str())
                       };
-                      colima
-                        .read_file(name_opt, &file_path, 1000)
+                      ColimaClient::read_file(name_opt, &file_path, 1000)
                         .unwrap_or_else(|_| "Failed to read file".to_string())
                     })
                     .await;
@@ -619,7 +616,7 @@ impl Render for MachinesView {
       .on_navigate_path(cx.listener(|this, path: &str, _window, cx| {
         this.on_navigate_path(path, cx);
       }))
-      .on_refresh_logs(cx.listener(|this, _: &(), _window, cx| {
+      .on_refresh_logs(cx.listener(|this, (): &(), _window, cx| {
         this.on_refresh_logs(cx);
       }))
       .on_log_type_change(
@@ -630,7 +627,7 @@ impl Render for MachinesView {
       .on_file_select(cx.listener(|this, path: &str, window, cx| {
         this.on_file_select(path, window, cx);
       }))
-      .on_close_file_viewer(cx.listener(|this, _: &(), _window, cx| {
+      .on_close_file_viewer(cx.listener(|this, (): &(), _window, cx| {
         this.on_close_file_viewer(cx);
       }))
       .on_symlink_click(cx.listener(|this, path: &str, window, cx| {

@@ -11,7 +11,7 @@ impl ColimaClient {
   }
 
   /// Get colima version
-  pub fn version(&self) -> Result<String> {
+  pub fn version() -> Result<String> {
     let output = Command::new("colima")
       .arg("version")
       .stdout(Stdio::piped())
@@ -27,7 +27,7 @@ impl ColimaClient {
   }
 
   /// List all Colima VMs
-  pub fn list(&self) -> Result<Vec<ColimaVm>> {
+  pub fn list() -> Result<Vec<ColimaVm>> {
     let output = Command::new("colima")
       .args(["list", "--json"])
       .stdout(Stdio::piped())
@@ -42,10 +42,10 @@ impl ColimaClient {
         if line.trim().is_empty() {
           continue;
         }
-        if let Ok(mut vm) = self.parse_list_json(line) {
+        if let Ok(mut vm) = Self::parse_list_json(line) {
           // If VM is running, get detailed status
           if vm.status.is_running()
-            && let Ok(detailed) = self.status(Some(&vm.name))
+            && let Ok(detailed) = Self::status(Some(&vm.name))
           {
             vm = detailed;
             vm.status = VmStatus::Running;
@@ -57,7 +57,7 @@ impl ColimaClient {
 
     // If no VMs found, check if default profile exists (might be stopped)
     if vms.is_empty()
-      && let Ok(default_vm) = self.status(None)
+      && let Ok(default_vm) = Self::status(None)
     {
       vms.push(default_vm);
     }
@@ -65,7 +65,7 @@ impl ColimaClient {
     Ok(vms)
   }
 
-  fn parse_list_json(&self, json_str: &str) -> Result<ColimaVm> {
+  fn parse_list_json(json_str: &str) -> Result<ColimaVm> {
     let value: serde_json::Value = serde_json::from_str(json_str)?;
 
     let name = value["name"].as_str().unwrap_or("default").to_string();
@@ -91,7 +91,7 @@ impl ColimaClient {
     let memory = value["memory"].as_u64().unwrap_or(2 * 1024 * 1024 * 1024);
     let disk = value["disk"].as_u64().unwrap_or(60 * 1024 * 1024 * 1024);
     let kubernetes = value["kubernetes"].as_bool().unwrap_or(false);
-    let address = value["address"].as_str().map(|s| s.to_string());
+    let address = value["address"].as_str().map(ToString::to_string);
 
     Ok(ColimaVm {
       name,
@@ -107,7 +107,7 @@ impl ColimaClient {
     })
   }
 
-  fn parse_status_json(&self, json_str: &str, profile_name: Option<&str>) -> Result<ColimaVm> {
+  fn parse_status_json(json_str: &str, profile_name: Option<&str>) -> Result<ColimaVm> {
     let value: serde_json::Value = serde_json::from_str(json_str)?;
 
     // Use the profile_name we were called with, falling back to parsing display_name
@@ -123,12 +123,12 @@ impl ColimaClient {
             s.split("[profile=")
               .nth(1)
               .and_then(|p| p.strip_suffix(']'))
-              .map(|p| p.to_string())
+              .map(ToString::to_string)
           } else {
             None
           }
         })
-        .or_else(|| value["name"].as_str().map(|s| s.to_string()))
+        .or_else(|| value["name"].as_str().map(ToString::to_string))
         .unwrap_or_else(|| "default".to_string())
     };
 
@@ -161,9 +161,9 @@ impl ColimaClient {
     let disk = value["disk"].as_u64().unwrap_or(60 * 1024 * 1024 * 1024);
     let kubernetes = value["kubernetes"].as_bool().unwrap_or(false);
 
-    let docker_socket = value["docker_socket"].as_str().map(|s| s.to_string());
-    let containerd_socket = value["containerd_socket"].as_str().map(|s| s.to_string());
-    let driver = value["driver"].as_str().map(|s| s.to_string());
+    let docker_socket = value["docker_socket"].as_str().map(ToString::to_string);
+    let containerd_socket = value["containerd_socket"].as_str().map(ToString::to_string);
+    let driver = value["driver"].as_str().map(ToString::to_string);
 
     Ok(ColimaVm {
       name,
@@ -187,7 +187,7 @@ impl ColimaClient {
   }
 
   /// Get detailed status of a VM (only works when running)
-  pub fn status(&self, name: Option<&str>) -> Result<ColimaVm> {
+  pub fn status(name: Option<&str>) -> Result<ColimaVm> {
     let mut cmd = Command::new("colima");
     cmd.arg("status").arg("--json");
 
@@ -208,15 +208,15 @@ impl ColimaClient {
           ..Default::default()
         });
       }
-      return Err(anyhow!("colima status failed: {}", stderr));
+      return Err(anyhow!("colima status failed: {stderr}"));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    self.parse_status_json(&stdout, name)
+    Self::parse_status_json(&stdout, name)
   }
 
   /// Start a VM with options
-  pub fn start(&self, options: ColimaStartOptions) -> Result<()> {
+  pub fn start(options: ColimaStartOptions) -> Result<()> {
     let mut cmd = Command::new("colima");
     cmd.arg("start");
 
@@ -282,14 +282,14 @@ impl ColimaClient {
 
     if !output.status.success() {
       let stderr = String::from_utf8_lossy(&output.stderr);
-      return Err(anyhow!("colima start failed: {}", stderr));
+      return Err(anyhow!("colima start failed: {stderr}"));
     }
 
     Ok(())
   }
 
   /// Stop a VM
-  pub fn stop(&self, name: Option<&str>) -> Result<()> {
+  pub fn stop(name: Option<&str>) -> Result<()> {
     let mut cmd = Command::new("colima");
     cmd.arg("stop");
 
@@ -303,14 +303,14 @@ impl ColimaClient {
 
     if !output.status.success() {
       let stderr = String::from_utf8_lossy(&output.stderr);
-      return Err(anyhow!("colima stop failed: {}", stderr));
+      return Err(anyhow!("colima stop failed: {stderr}"));
     }
 
     Ok(())
   }
 
   /// Restart a VM
-  pub fn restart(&self, name: Option<&str>) -> Result<()> {
+  pub fn restart(name: Option<&str>) -> Result<()> {
     let mut cmd = Command::new("colima");
     cmd.arg("restart");
 
@@ -324,14 +324,14 @@ impl ColimaClient {
 
     if !output.status.success() {
       let stderr = String::from_utf8_lossy(&output.stderr);
-      return Err(anyhow!("colima restart failed: {}", stderr));
+      return Err(anyhow!("colima restart failed: {stderr}"));
     }
 
     Ok(())
   }
 
   /// Delete a VM
-  pub fn delete(&self, name: Option<&str>, force: bool) -> Result<()> {
+  pub fn delete(name: Option<&str>, force: bool) -> Result<()> {
     let mut cmd = Command::new("colima");
     cmd.arg("delete");
 
@@ -349,21 +349,21 @@ impl ColimaClient {
 
     if !output.status.success() {
       let stderr = String::from_utf8_lossy(&output.stderr);
-      return Err(anyhow!("colima delete failed: {}", stderr));
+      return Err(anyhow!("colima delete failed: {stderr}"));
     }
 
     Ok(())
   }
 
   /// Get the docker socket path for a VM
-  pub fn socket_path(&self, name: Option<&str>) -> String {
+  pub fn socket_path(name: Option<&str>) -> String {
     let home = dirs::home_dir().unwrap_or_default();
     let profile = name.unwrap_or("default");
     format!("{}/.colima/{}/docker.sock", home.display(), profile)
   }
 
   /// Run a command in the VM via SSH
-  pub fn run_command(&self, name: Option<&str>, command: &str) -> Result<String> {
+  pub fn run_command(name: Option<&str>, command: &str) -> Result<String> {
     let mut cmd = Command::new("colima");
     cmd.arg("ssh");
 
@@ -381,20 +381,20 @@ impl ColimaClient {
       Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
       let stderr = String::from_utf8_lossy(&output.stderr);
-      Err(anyhow!("Command failed: {}", stderr))
+      Err(anyhow!("Command failed: {stderr}"))
     }
   }
 
   /// Get OS information from the VM
-  pub fn get_os_info(&self, name: Option<&str>) -> Result<VmOsInfo> {
+  pub fn get_os_info(name: Option<&str>) -> Result<VmOsInfo> {
     // Get OS release info
-    let os_release = self.run_command(name, "cat /etc/os-release 2>/dev/null || echo ''")?;
+    let os_release = Self::run_command(name, "cat /etc/os-release 2>/dev/null || echo ''")?;
 
     // Get kernel info
-    let kernel = self.run_command(name, "uname -r 2>/dev/null || echo 'unknown'")?;
+    let kernel = Self::run_command(name, "uname -r 2>/dev/null || echo 'unknown'")?;
 
     // Get architecture
-    let arch = self.run_command(name, "uname -m 2>/dev/null || echo 'unknown'")?;
+    let arch = Self::run_command(name, "uname -m 2>/dev/null || echo 'unknown'")?;
 
     let mut info = VmOsInfo {
       kernel: kernel.trim().to_string(),
@@ -421,44 +421,41 @@ impl ColimaClient {
   }
 
   /// Get system logs from the VM
-  pub fn get_system_logs(&self, name: Option<&str>, lines: u32) -> Result<String> {
-    self.run_command(
+  pub fn get_system_logs(name: Option<&str>, lines: u32) -> Result<String> {
+    Self::run_command(
       name,
       &format!(
-        "sudo journalctl --no-pager -n {} 2>/dev/null || echo 'Unable to fetch logs'",
-        lines
+        "sudo journalctl --no-pager -n {lines} 2>/dev/null || echo 'Unable to fetch logs'"
       ),
     )
   }
 
   /// Get Docker service logs from the VM
-  pub fn get_docker_logs(&self, name: Option<&str>, lines: u32) -> Result<String> {
-    self.run_command(
+  pub fn get_docker_logs(name: Option<&str>, lines: u32) -> Result<String> {
+    Self::run_command(
       name,
       &format!(
-        "sudo journalctl -u docker --no-pager -n {} 2>/dev/null || echo 'Unable to fetch Docker logs'",
-        lines
+        "sudo journalctl -u docker --no-pager -n {lines} 2>/dev/null || echo 'Unable to fetch Docker logs'"
       ),
     )
   }
 
   /// Get containerd service logs from the VM
-  pub fn get_containerd_logs(&self, name: Option<&str>, lines: u32) -> Result<String> {
-    self.run_command(
+  pub fn get_containerd_logs(name: Option<&str>, lines: u32) -> Result<String> {
+    Self::run_command(
       name,
       &format!(
-        "sudo journalctl -u containerd --no-pager -n {} 2>/dev/null || echo 'Unable to fetch containerd logs'",
-        lines
+        "sudo journalctl -u containerd --no-pager -n {lines} 2>/dev/null || echo 'Unable to fetch containerd logs'"
       ),
     )
   }
 
   /// List files in a directory in the VM
-  pub fn list_files(&self, name: Option<&str>, path: &str) -> Result<Vec<VmFileEntry>> {
+  pub fn list_files(name: Option<&str>, path: &str) -> Result<Vec<VmFileEntry>> {
     // Use ls -la with specific format for parsing
-    let output = self.run_command(
+    let output = Self::run_command(
       name,
-      &format!("ls -la --time-style=long-iso {} 2>/dev/null || ls -la {}", path, path),
+      &format!("ls -la --time-style=long-iso {path} 2>/dev/null || ls -la {path}"),
     )?;
 
     let mut entries = Vec::new();
@@ -472,7 +469,7 @@ impl ColimaClient {
       let parts: Vec<&str> = line.split_whitespace().collect();
       if parts.len() >= 8 {
         let permissions = parts[0].to_string();
-        let owner = parts.get(2).unwrap_or(&"").to_string();
+        let owner = (*parts.get(2).unwrap_or(&"")).to_string();
         let size: u64 = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
 
         // Date can be in different formats
@@ -501,7 +498,7 @@ impl ColimaClient {
 
         let is_dir = permissions.starts_with('d');
         let full_path = if path == "/" {
-          format!("/{}", display_name)
+          format!("/{display_name}")
         } else {
           format!("{}/{}", path.trim_end_matches('/'), display_name)
         };
@@ -530,41 +527,40 @@ impl ColimaClient {
   }
 
   /// Read a file from the VM
-  pub fn read_file(&self, name: Option<&str>, path: &str, max_lines: u32) -> Result<String> {
-    self.run_command(
+  pub fn read_file(name: Option<&str>, path: &str, max_lines: u32) -> Result<String> {
+    Self::run_command(
       name,
       &format!(
-        "head -n {} {} 2>/dev/null || echo 'Unable to read file'",
-        max_lines, path
+        "head -n {max_lines} {path} 2>/dev/null || echo 'Unable to read file'"
       ),
     )
   }
 
   /// Resolve a symlink to its target path
-  pub fn resolve_symlink(&self, name: Option<&str>, path: &str) -> Result<String> {
-    let output = self.run_command(name, &format!("readlink -f {} 2>/dev/null", path))?;
+  pub fn resolve_symlink(name: Option<&str>, path: &str) -> Result<String> {
+    let output = Self::run_command(name, &format!("readlink -f {path} 2>/dev/null"))?;
     Ok(output.trim().to_string())
   }
 
   /// Check if a path is a directory
-  pub fn is_directory(&self, name: Option<&str>, path: &str) -> Result<bool> {
-    let output = self.run_command(name, &format!("test -d '{}' && echo dir", path))?;
+  pub fn is_directory(name: Option<&str>, path: &str) -> Result<bool> {
+    let output = Self::run_command(name, &format!("test -d '{path}' && echo dir"))?;
     Ok(output.contains("dir"))
   }
 
   /// Get disk usage info from the VM
-  pub fn get_disk_usage(&self, name: Option<&str>) -> Result<String> {
-    self.run_command(name, "df -h / 2>/dev/null || echo 'Unable to get disk usage'")
+  pub fn get_disk_usage(name: Option<&str>) -> Result<String> {
+    Self::run_command(name, "df -h / 2>/dev/null || echo 'Unable to get disk usage'")
   }
 
   /// Get memory info from the VM
-  pub fn get_memory_info(&self, name: Option<&str>) -> Result<String> {
-    self.run_command(name, "free -h 2>/dev/null || echo 'Unable to get memory info'")
+  pub fn get_memory_info(name: Option<&str>) -> Result<String> {
+    Self::run_command(name, "free -h 2>/dev/null || echo 'Unable to get memory info'")
   }
 
   /// Get running processes from the VM
-  pub fn get_processes(&self, name: Option<&str>) -> Result<String> {
-    self.run_command(
+  pub fn get_processes(name: Option<&str>) -> Result<String> {
+    Self::run_command(
       name,
       "ps aux --sort=-%mem 2>/dev/null | head -20 || echo 'Unable to get processes'",
     )

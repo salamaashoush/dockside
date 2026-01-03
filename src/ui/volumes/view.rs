@@ -55,15 +55,15 @@ impl VolumesView {
           // If selected volume was deleted, clear selection
           if let Some(ref selected) = this.selected_volume {
             let state = state.read(cx);
-            if !state.volumes.iter().any(|v| v.name == selected.name) {
-              this.selected_volume = None;
-              this.active_tab = 0;
-              this.volume_tab_state = VolumeTabState::new();
-            } else {
+            if state.volumes.iter().any(|v| v.name == selected.name) {
               // Update the selected volume info
               if let Some(updated) = state.volumes.iter().find(|v| v.name == selected.name) {
                 this.selected_volume = Some(updated.clone());
               }
+            } else {
+              this.selected_volume = None;
+              this.active_tab = 0;
+              this.volume_tab_state = VolumeTabState::new();
             }
           }
           cx.notify();
@@ -77,8 +77,8 @@ impl VolumesView {
           if let Some(ref selected) = this.selected_volume
             && &selected.name == volume_name
           {
-            this.volume_tab_state.files = files.clone();
-            this.volume_tab_state.current_path = path.clone();
+            files.clone_into(&mut this.volume_tab_state.files);
+            path.clone_into(&mut this.volume_tab_state.current_path);
             this.volume_tab_state.files_loading = false;
             cx.notify();
           }
@@ -351,7 +351,7 @@ impl Render for VolumesView {
       .on_file_select(cx.listener(|this, path: &str, window, cx| {
         this.on_file_select(path, window, cx);
       }))
-      .on_close_file_viewer(cx.listener(|this, _: &(), _window, cx| {
+      .on_close_file_viewer(cx.listener(|this, (): &(), _window, cx| {
         this.on_close_file_viewer(cx);
       }))
       .on_symlink_click(cx.listener(|this, path: &str, window, cx| {

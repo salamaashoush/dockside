@@ -101,7 +101,7 @@ impl ComposeView {
             // Project header row
             .child(
                 h_flex()
-                    .id(SharedString::from(format!("project-{}", project_name)))
+                    .id(SharedString::from(format!("project-{project_name}")))
                     .w_full()
                     .h(px(44.))
                     .px(px(16.))
@@ -194,7 +194,7 @@ impl ComposeView {
                 } else {
                     None
                 },
-                |el, services| el.children(services),
+                ParentElement::children,
             )
   }
 

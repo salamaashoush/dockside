@@ -344,13 +344,13 @@ impl CreateContainerDialog {
     let platform = self
       .platform_select
       .as_ref()
-      .and_then(|s| s.read(cx).selected_value().cloned())
+      .and_then(|s| s.read(cx).selected_value().copied())
       .unwrap_or_default();
 
     let restart_policy = self
       .restart_policy_select
       .as_ref()
-      .and_then(|s| s.read(cx).selected_value().cloned())
+      .and_then(|s| s.read(cx).selected_value().copied())
       .unwrap_or_default();
 
     let network = self
@@ -594,7 +594,7 @@ impl CreateContainerDialog {
                                     .label("TCP")
                                     .xsmall()
                                     .when(port_protocol_tcp, Button::primary)
-                                    .when(!port_protocol_tcp, |b| b.ghost())
+                                    .when(!port_protocol_tcp, ButtonVariants::ghost)
                                     .on_click(cx.listener(|this, _ev, _window, cx| {
                                         this.port_protocol_tcp = true;
                                         cx.notify();
@@ -605,7 +605,7 @@ impl CreateContainerDialog {
                                     .label("UDP")
                                     .xsmall()
                                     .when(!port_protocol_tcp, Button::primary)
-                                    .when(port_protocol_tcp, |b| b.ghost())
+                                    .when(port_protocol_tcp, ButtonVariants::ghost)
                                     .on_click(cx.listener(|this, _ev, _window, cx| {
                                         this.port_protocol_tcp = false;
                                         cx.notify();
@@ -668,7 +668,7 @@ impl CreateContainerDialog {
                             .child(format!("{}:{}/{}", port.host_port, port.container_port, protocol)),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("remove-port-{}", idx)))
+                        Button::new(SharedString::from(format!("remove-port-{idx}")))
                             .icon(IconName::Minus)
                             .xsmall()
                             .ghost()
@@ -780,7 +780,7 @@ impl CreateContainerDialog {
                             .child(format!("{}:{}{}", vol.host_path, vol.container_path, ro_label)),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("remove-vol-{}", idx)))
+                        Button::new(SharedString::from(format!("remove-vol-{idx}")))
                             .icon(IconName::Minus)
                             .xsmall()
                             .ghost()
@@ -878,7 +878,7 @@ impl CreateContainerDialog {
                             .child(env.value.clone()),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("remove-env-{}", idx)))
+                        Button::new(SharedString::from(format!("remove-env-{idx}")))
                             .icon(IconName::Minus)
                             .xsmall()
                             .ghost()
@@ -940,9 +940,9 @@ impl Render for CreateContainerDialog {
 
     let tabs = [
       "General".to_string(),
-      format!("Ports ({})", ports_count),
-      format!("Volumes ({})", volumes_count),
-      format!("Env ({})", env_count),
+      format!("Ports ({ports_count})"),
+      format!("Volumes ({volumes_count})"),
+      format!("Env ({env_count})"),
       "Network".to_string(),
     ];
 
@@ -966,7 +966,7 @@ impl Render for CreateContainerDialog {
                             .children(tabs.iter().enumerate().map(|(i, label)| {
                                 let on_tab_change = on_tab_change.clone();
                                 Tab::new()
-                                    .label(label.to_string())
+                                    .label(label.clone())
                                     .selected(active_tab == i)
                                     .on_click(move |_ev, window, cx| {
                                         on_tab_change(&i, window, cx);

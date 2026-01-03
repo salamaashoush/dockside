@@ -46,7 +46,7 @@ fn format_bytes(bytes: u64) -> String {
   } else if bytes >= KB {
     format!("{:.0} KB", bytes as f64 / KB as f64)
   } else {
-    format!("{} B", bytes)
+    format!("{bytes} B")
   }
 }
 
@@ -111,7 +111,7 @@ impl DockerClient {
         .saturating_sub(precpu_stats.and_then(|s| s.system_cpu_usage).unwrap_or(0));
 
       let cpu_percent = if system_delta > 0 && cpu_delta > 0 {
-        let num_cpus = cpu_stats.and_then(|s| s.online_cpus).unwrap_or(1) as f64;
+        let num_cpus = f64::from(cpu_stats.and_then(|s| s.online_cpus).unwrap_or(1));
         (cpu_delta as f64 / system_delta as f64) * num_cpus * 100.0
       } else {
         0.0
@@ -141,7 +141,7 @@ impl DockerClient {
         .blkio_stats
         .as_ref()
         .and_then(|s| s.io_service_bytes_recursive.as_ref())
-        .map(|entries| {
+        .map_or((0, 0), |entries| {
           entries.iter().fold((0u64, 0u64), |(read, write), entry| {
             let op = entry.op.as_deref().unwrap_or("");
             let value = entry.value.unwrap_or(0);
@@ -151,15 +151,13 @@ impl DockerClient {
               _ => (read, write),
             }
           })
-        })
-        .unwrap_or((0, 0));
+        });
 
       // Clean up the name (remove leading /)
       let name = stats
         .name
         .as_deref()
-        .map(|n| n.trim_start_matches('/'))
-        .unwrap_or("")
+        .map_or("", |n| n.trim_start_matches('/'))
         .to_string();
 
       Ok(ContainerStats {
@@ -189,24 +187,20 @@ impl DockerClient {
     for container in containers {
       // Only get stats for running containers
       if container.state == ContainerState::Running {
-        match self.get_container_stats(&container.id).await {
-          Ok(mut stats) => {
-            // Use the container name from list_containers if stats name is empty
-            if stats.name.is_empty() {
-              stats.name = container.name.clone();
-            }
-            aggregate.total_cpu_percent += stats.cpu_percent;
-            aggregate.total_memory += stats.memory_usage;
-            aggregate.total_network_rx += stats.network_rx;
-            aggregate.total_network_tx += stats.network_tx;
-            aggregate.total_block_read += stats.block_read;
-            aggregate.total_block_write += stats.block_write;
-            stats_list.push(stats);
+        if let Ok(mut stats) = self.get_container_stats(&container.id).await {
+          // Use the container name from list_containers if stats name is empty
+          if stats.name.is_empty() {
+            container.name.clone_into(&mut stats.name);
           }
-          Err(_) => {
-            // Container might have stopped, skip it
-            continue;
-          }
+          aggregate.total_cpu_percent += stats.cpu_percent;
+          aggregate.total_memory += stats.memory_usage;
+          aggregate.total_network_rx += stats.network_rx;
+          aggregate.total_network_tx += stats.network_tx;
+          aggregate.total_block_read += stats.block_read;
+          aggregate.total_block_write += stats.block_write;
+          stats_list.push(stats);
+        } else {
+          // Container might have stopped, skip it
         }
       }
     }

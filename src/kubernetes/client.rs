@@ -7,6 +7,7 @@ use kube::{
   api::{DeleteParams, ListParams, LogParams, Patch, PatchParams, PostParams},
 };
 use serde_json::json;
+use std::fmt::Write as _;
 
 use k8s_openapi::api::core::v1::Service;
 
@@ -18,7 +19,7 @@ pub struct KubeClient {
 }
 
 impl KubeClient {
-  /// Create a new KubeClient from default kubeconfig
+  /// Create a new `KubeClient` from default kubeconfig
   pub async fn new() -> Result<Self> {
     let client = Client::try_default()
       .await
@@ -48,21 +49,18 @@ impl KubeClient {
 
   /// List pods in a namespace (or all namespaces if None)
   pub async fn list_pods(&self, namespace: Option<&str>) -> Result<Vec<PodInfo>> {
-    let pods = match namespace {
-      Some(ns) => {
-        let api: Api<Pod> = Api::namespaced(self.client.clone(), ns);
-        api
-          .list(&ListParams::default())
-          .await
-          .context(format!("Failed to list pods in namespace {}", ns))?
-      }
-      None => {
-        let api: Api<Pod> = Api::all(self.client.clone());
-        api
-          .list(&ListParams::default())
-          .await
-          .context("Failed to list pods in all namespaces")?
-      }
+    let pods = if let Some(ns) = namespace {
+      let api: Api<Pod> = Api::namespaced(self.client.clone(), ns);
+      api
+        .list(&ListParams::default())
+        .await
+        .context(format!("Failed to list pods in namespace {ns}"))?
+    } else {
+      let api: Api<Pod> = Api::all(self.client.clone());
+      api
+        .list(&ListParams::default())
+        .await
+        .context("Failed to list pods in all namespaces")?
     };
 
     let pod_list = pods.items.iter().map(PodInfo::from_pod).collect();
@@ -75,7 +73,7 @@ impl KubeClient {
     api
       .delete(name, &DeleteParams::default())
       .await
-      .context(format!("Failed to delete pod {} in namespace {}", name, namespace))?;
+      .context(format!("Failed to delete pod {name} in namespace {namespace}"))?;
     Ok(())
   }
 
@@ -98,8 +96,7 @@ impl KubeClient {
     }
 
     let logs = api.logs(name, &params).await.context(format!(
-      "Failed to get logs for pod {} in namespace {}",
-      name, namespace
+      "Failed to get logs for pod {name} in namespace {namespace}"
     ))?;
 
     Ok(logs)
@@ -113,8 +110,7 @@ impl KubeClient {
       ..DeleteParams::default()
     };
     api.delete(name, &dp).await.context(format!(
-      "Failed to force delete pod {} in namespace {}",
-      name, namespace
+      "Failed to force delete pod {name} in namespace {namespace}"
     ))?;
     Ok(())
   }
@@ -123,14 +119,13 @@ impl KubeClient {
   /// Returns error for standalone pods
   pub async fn restart_pod(&self, name: &str, namespace: &str) -> Result<String> {
     let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
-    let pod = api.get(name).await.context(format!("Failed to get pod {}", name))?;
+    let pod = api.get(name).await.context(format!("Failed to get pod {name}"))?;
 
     // Check owner references
     let owner_refs = pod.metadata.owner_references.unwrap_or_default();
     if owner_refs.is_empty() {
       return Err(anyhow::anyhow!(
-        "Cannot restart standalone pod '{}'. It has no controller to recreate it.",
-        name
+        "Cannot restart standalone pod '{name}'. It has no controller to recreate it."
       ));
     }
 
@@ -159,7 +154,7 @@ impl KubeClient {
     api
       .delete(name, &DeleteParams::default())
       .await
-      .context(format!("Failed to delete pod {}", name))?;
+      .context(format!("Failed to delete pod {name}"))?;
 
     Ok(format!("Pod {} deleted, {} will recreate it", name, owner.kind))
   }
@@ -184,28 +179,30 @@ impl KubeClient {
     api
       .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
       .await
-      .context(format!("Failed to restart deployment {}", name))?;
+      .context(format!("Failed to restart deployment {name}"))?;
 
-    Ok(format!("Deployment {} rollout restart triggered", name))
+    Ok(format!("Deployment {name} rollout restart triggered"))
   }
 
   /// Get pod describe output (formatted pod details)
   pub async fn describe_pod(&self, name: &str, namespace: &str) -> Result<String> {
     let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
-    let pod = api.get(name).await.context(format!("Failed to get pod {}", name))?;
+    let pod = api.get(name).await.context(format!("Failed to get pod {name}"))?;
 
     // Format pod details similar to kubectl describe
     let mut output = String::new();
 
     // Basic info
-    output.push_str(&format!(
-      "Name:         {}\n",
+    let _ = writeln!(
+      output,
+      "Name:         {}",
       pod.metadata.name.as_deref().unwrap_or("")
-    ));
-    output.push_str(&format!(
-      "Namespace:    {}\n",
+    );
+    let _ = writeln!(
+      output,
+      "Namespace:    {}",
       pod.metadata.namespace.as_deref().unwrap_or("")
-    ));
+    );
 
     if let Some(labels) = &pod.metadata.labels {
       output.push_str("Labels:       ");
@@ -213,7 +210,7 @@ impl KubeClient {
         if i > 0 {
           output.push_str("              ");
         }
-        output.push_str(&format!("{}={}\n", k, v));
+        let _ = writeln!(output, "{k}={v}");
       }
     }
 
@@ -223,64 +220,70 @@ impl KubeClient {
         if i > 0 {
           output.push_str("              ");
         }
-        output.push_str(&format!("{}={}\n", k, v));
+        let _ = writeln!(output, "{k}={v}");
       }
     }
 
     if let Some(spec) = &pod.spec {
-      output.push_str(&format!(
-        "Node:         {}\n",
+      let _ = writeln!(
+        output,
+        "Node:         {}",
         spec.node_name.as_deref().unwrap_or("<none>")
-      ));
-      output.push_str(&format!(
-        "Service Account: {}\n",
+      );
+      let _ = writeln!(
+        output,
+        "Service Account: {}",
         spec.service_account_name.as_deref().unwrap_or("default")
-      ));
+      );
     }
 
     if let Some(status) = &pod.status {
-      output.push_str(&format!(
-        "Status:       {}\n",
+      let _ = writeln!(
+        output,
+        "Status:       {}",
         status.phase.as_deref().unwrap_or("Unknown")
-      ));
-      output.push_str(&format!(
-        "IP:           {}\n",
+      );
+      let _ = writeln!(
+        output,
+        "IP:           {}",
         status.pod_ip.as_deref().unwrap_or("<none>")
-      ));
+      );
 
       if let Some(conditions) = &status.conditions {
         output.push_str("\nConditions:\n");
         output.push_str("  Type              Status\n");
         for cond in conditions {
-          output.push_str(&format!("  {:<17} {}\n", cond.type_, cond.status));
+          let _ = writeln!(output, "  {:<17} {}", cond.type_, cond.status);
         }
       }
 
       if let Some(container_statuses) = &status.container_statuses {
         output.push_str("\nContainers:\n");
         for cs in container_statuses {
-          output.push_str(&format!("  {}:\n", cs.name));
-          output.push_str(&format!("    Ready:          {}\n", cs.ready));
-          output.push_str(&format!("    Restart Count:  {}\n", cs.restart_count));
+          let _ = writeln!(output, "  {}:", cs.name);
+          let _ = writeln!(output, "    Ready:          {}", cs.ready);
+          let _ = writeln!(output, "    Restart Count:  {}", cs.restart_count);
           if let Some(state) = &cs.state {
             if let Some(running) = &state.running {
-              output.push_str(&"    State:          Running\n".to_string());
+              output.push_str("    State:          Running\n");
               if let Some(started) = &running.started_at {
-                output.push_str(&format!("      Started:      {}\n", started.0));
+                let _ = writeln!(output, "      Started:      {}", started.0);
               }
             } else if let Some(waiting) = &state.waiting {
-              output.push_str(&"    State:          Waiting\n".to_string());
-              output.push_str(&format!(
-                "      Reason:       {}\n",
+              output.push_str("    State:          Waiting\n");
+              let _ = writeln!(
+                output,
+                "      Reason:       {}",
                 waiting.reason.as_deref().unwrap_or("")
-              ));
+              );
             } else if let Some(terminated) = &state.terminated {
-              output.push_str(&"    State:          Terminated\n".to_string());
-              output.push_str(&format!(
-                "      Reason:       {}\n",
+              output.push_str("    State:          Terminated\n");
+              let _ = writeln!(
+                output,
+                "      Reason:       {}",
                 terminated.reason.as_deref().unwrap_or("")
-              ));
-              output.push_str(&format!("      Exit Code:    {}\n", terminated.exit_code));
+              );
+              let _ = writeln!(output, "      Exit Code:    {}", terminated.exit_code);
             }
           }
         }
@@ -290,10 +293,11 @@ impl KubeClient {
     if let Some(spec) = &pod.spec
       && let Some(containers) = spec.containers.first()
     {
-      output.push_str(&format!(
-        "\nImage:        {}\n",
+      let _ = writeln!(
+        output,
+        "\nImage:        {}",
         containers.image.as_deref().unwrap_or("")
-      ));
+      );
     }
 
     Ok(output)
@@ -302,7 +306,7 @@ impl KubeClient {
   /// Get pod YAML
   pub async fn get_pod_yaml(&self, name: &str, namespace: &str) -> Result<String> {
     let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
-    let pod = api.get(name).await.context(format!("Failed to get pod {}", name))?;
+    let pod = api.get(name).await.context(format!("Failed to get pod {name}"))?;
 
     serde_yaml::to_string(&pod).context("Failed to serialize pod to YAML")
   }
@@ -313,21 +317,18 @@ impl KubeClient {
 
   /// List services in a namespace (or all namespaces if None)
   pub async fn list_services(&self, namespace: Option<&str>) -> Result<Vec<ServiceInfo>> {
-    let services = match namespace {
-      Some(ns) => {
-        let api: Api<Service> = Api::namespaced(self.client.clone(), ns);
-        api
-          .list(&ListParams::default())
-          .await
-          .context(format!("Failed to list services in namespace {}", ns))?
-      }
-      None => {
-        let api: Api<Service> = Api::all(self.client.clone());
-        api
-          .list(&ListParams::default())
-          .await
-          .context("Failed to list services in all namespaces")?
-      }
+    let services = if let Some(ns) = namespace {
+      let api: Api<Service> = Api::namespaced(self.client.clone(), ns);
+      api
+        .list(&ListParams::default())
+        .await
+        .context(format!("Failed to list services in namespace {ns}"))?
+    } else {
+      let api: Api<Service> = Api::all(self.client.clone());
+      api
+        .list(&ListParams::default())
+        .await
+        .context("Failed to list services in all namespaces")?
     };
 
     let service_list = services.items.iter().map(ServiceInfo::from_service).collect();
@@ -340,14 +341,14 @@ impl KubeClient {
     api
       .delete(name, &DeleteParams::default())
       .await
-      .context(format!("Failed to delete service {} in namespace {}", name, namespace))?;
+      .context(format!("Failed to delete service {name} in namespace {namespace}"))?;
     Ok(())
   }
 
   /// Get service YAML
   pub async fn get_service_yaml(&self, name: &str, namespace: &str) -> Result<String> {
     let api: Api<Service> = Api::namespaced(self.client.clone(), namespace);
-    let svc = api.get(name).await.context(format!("Failed to get service {}", name))?;
+    let svc = api.get(name).await.context(format!("Failed to get service {name}"))?;
 
     serde_yaml::to_string(&svc).context("Failed to serialize service to YAML")
   }
@@ -358,21 +359,18 @@ impl KubeClient {
 
   /// List deployments in a namespace (or all namespaces if None)
   pub async fn list_deployments(&self, namespace: Option<&str>) -> Result<Vec<DeploymentInfo>> {
-    let deployments = match namespace {
-      Some(ns) => {
-        let api: Api<Deployment> = Api::namespaced(self.client.clone(), ns);
-        api
-          .list(&ListParams::default())
-          .await
-          .context(format!("Failed to list deployments in namespace {}", ns))?
-      }
-      None => {
-        let api: Api<Deployment> = Api::all(self.client.clone());
-        api
-          .list(&ListParams::default())
-          .await
-          .context("Failed to list deployments in all namespaces")?
-      }
+    let deployments = if let Some(ns) = namespace {
+      let api: Api<Deployment> = Api::namespaced(self.client.clone(), ns);
+      api
+        .list(&ListParams::default())
+        .await
+        .context(format!("Failed to list deployments in namespace {ns}"))?
+    } else {
+      let api: Api<Deployment> = Api::all(self.client.clone());
+      api
+        .list(&ListParams::default())
+        .await
+        .context("Failed to list deployments in all namespaces")?
     };
 
     let deployment_list = deployments.items.iter().map(DeploymentInfo::from_deployment).collect();
@@ -383,8 +381,7 @@ impl KubeClient {
   pub async fn delete_deployment(&self, name: &str, namespace: &str) -> Result<()> {
     let api: Api<Deployment> = Api::namespaced(self.client.clone(), namespace);
     api.delete(name, &DeleteParams::default()).await.context(format!(
-      "Failed to delete deployment {} in namespace {}",
-      name, namespace
+      "Failed to delete deployment {name} in namespace {namespace}"
     ))?;
     Ok(())
   }
@@ -402,9 +399,9 @@ impl KubeClient {
     api
       .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
       .await
-      .context(format!("Failed to scale deployment {}", name))?;
+      .context(format!("Failed to scale deployment {name}"))?;
 
-    Ok(format!("Deployment {} scaled to {} replicas", name, replicas))
+    Ok(format!("Deployment {name} scaled to {replicas} replicas"))
   }
 
   /// Restart a deployment (rollout restart)
@@ -418,7 +415,7 @@ impl KubeClient {
     let dep = api
       .get(name)
       .await
-      .context(format!("Failed to get deployment {}", name))?;
+      .context(format!("Failed to get deployment {name}"))?;
 
     serde_yaml::to_string(&dep).context("Failed to serialize deployment to YAML")
   }

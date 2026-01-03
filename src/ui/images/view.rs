@@ -51,15 +51,15 @@ impl ImagesView {
           // If selected image was deleted, clear selection
           if let Some(ref selected) = this.selected_image {
             let state = state.read(cx);
-            if !state.images.iter().any(|i| i.id == selected.id) {
-              this.selected_image = None;
-              this.inspect_data = None;
-              this.active_tab = 0;
-            } else {
+            if state.images.iter().any(|i| i.id == selected.id) {
               // Update the selected image info
               if let Some(updated) = state.images.iter().find(|i| i.id == selected.id) {
                 this.selected_image = Some(updated.clone());
               }
+            } else {
+              this.selected_image = None;
+              this.inspect_data = None;
+              this.active_tab = 0;
             }
           }
           cx.notify();

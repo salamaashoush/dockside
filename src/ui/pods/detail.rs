@@ -303,7 +303,7 @@ impl PodDetail {
   fn render_logs_tab(&self, _pod: &PodInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
     let state = self.pod_state.as_ref();
-    let is_loading = state.map(|s| s.logs_loading).unwrap_or(false);
+    let is_loading = state.is_some_and(|s| s.logs_loading);
 
     if is_loading {
       return v_flex().size_full().p(px(16.)).child(
@@ -321,9 +321,7 @@ impl PodDetail {
     }
 
     // Fallback to plain text
-    let logs_content = state
-      .map(|s| s.logs.clone())
-      .unwrap_or_else(|| "No logs available".to_string());
+    let logs_content = state.map_or_else(|| "No logs available".to_string(), |s| s.logs.clone());
     div().size_full().child(
       div()
         .size_full()
@@ -392,7 +390,7 @@ impl PodDetail {
   fn render_describe_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
     let state = self.pod_state.as_ref();
-    let is_loading = state.map(|s| s.describe_loading).unwrap_or(false);
+    let is_loading = state.is_some_and(|s| s.describe_loading);
 
     if is_loading {
       return v_flex()
@@ -408,9 +406,7 @@ impl PodDetail {
     }
 
     // Fallback to plain text
-    let describe_content = state
-      .map(|s| s.describe.clone())
-      .unwrap_or_else(|| "Loading...".to_string());
+    let describe_content = state.map_or_else(|| "Loading...".to_string(), |s| s.describe.clone());
     div().size_full().child(
       div()
         .size_full()
@@ -427,7 +423,7 @@ impl PodDetail {
   fn render_yaml_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
     let state = self.pod_state.as_ref();
-    let is_loading = state.map(|s| s.yaml_loading).unwrap_or(false);
+    let is_loading = state.is_some_and(|s| s.yaml_loading);
 
     if is_loading {
       return v_flex()
@@ -443,9 +439,7 @@ impl PodDetail {
     }
 
     // Fallback to plain text
-    let yaml_content = state
-      .map(|s| s.yaml.clone())
-      .unwrap_or_else(|| "Loading...".to_string());
+    let yaml_content = state.map_or_else(|| "Loading...".to_string(), |s| s.yaml.clone());
     div().size_full().child(
       div()
         .size_full()
@@ -490,7 +484,7 @@ impl PodDetail {
           .children(tabs.iter().enumerate().map(|(i, label)| {
             let on_tab_change = on_tab_change.clone();
             Tab::new()
-              .label(label.to_string())
+              .label((*label).to_string())
               .selected(self.active_tab == i)
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tab_change {
@@ -516,7 +510,6 @@ impl PodDetail {
 
     // Content based on active tab
     let content = match self.active_tab {
-      0 => self.render_info_tab(pod, cx),
       1 => self.render_logs_tab(pod, cx),
       2 => self.render_terminal_tab(pod, cx),
       3 => self.render_describe_tab(cx),

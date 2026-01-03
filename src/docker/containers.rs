@@ -138,9 +138,7 @@ impl DockerClient {
       let id = container.id.unwrap_or_default();
       let names = container.names.unwrap_or_default();
       let name = names
-        .first()
-        .map(|n| n.trim_start_matches('/').to_string())
-        .unwrap_or_else(|| id.clone());
+        .first().map_or_else(|| id.clone(), |n| n.trim_start_matches('/').to_string());
 
       let ports = container
         .ports
@@ -149,7 +147,7 @@ impl DockerClient {
         .map(|p| PortMapping {
           private_port: p.private_port,
           public_port: p.public_port,
-          protocol: p.typ.map(|t| t.to_string()).unwrap_or_else(|| "tcp".to_string()),
+          protocol: p.typ.map_or_else(|| "tcp".to_string(), |t| t.to_string()),
           ip: p.ip,
         })
         .collect();
@@ -161,7 +159,7 @@ impl DockerClient {
         name,
         image: container.image.unwrap_or_default(),
         image_id: container.image_id.unwrap_or_default(),
-        state: ContainerState::from_str(&container.state.map(|s| format!("{:?}", s)).unwrap_or_default()),
+        state: ContainerState::from_str(&container.state.map(|s| format!("{s:?}")).unwrap_or_default()),
         status: container.status.unwrap_or_default(),
         created,
         ports,
@@ -278,8 +276,8 @@ impl DockerClient {
           container: Some(id.to_string()),
           repo: Some(repo.to_string()),
           tag: Some(tag.to_string()),
-          comment: comment.map(|s| s.to_string()),
-          author: author.map(|s| s.to_string()),
+          comment: comment.map(ToString::to_string),
+          author: author.map(ToString::to_string),
           pause: true,
           changes: None,
         },
@@ -351,7 +349,7 @@ impl DockerClient {
     if !ports.is_empty() {
       let mut port_bindings: HashMap<String, Option<Vec<bollard::models::PortBinding>>> = HashMap::new();
       for (host_port, container_port, protocol) in &ports {
-        let key = format!("{}/{}", container_port, protocol);
+        let key = format!("{container_port}/{protocol}");
         let binding = bollard::models::PortBinding {
           host_ip: Some("0.0.0.0".to_string()),
           host_port: Some(host_port.clone()),
@@ -367,9 +365,9 @@ impl DockerClient {
         .iter()
         .map(|(host, container, ro)| {
           if *ro {
-            format!("{}:{}:ro", host, container)
+            format!("{host}:{container}:ro")
           } else {
-            format!("{}:{}", host, container)
+            format!("{host}:{container}")
           }
         })
         .collect();
@@ -387,7 +385,7 @@ impl DockerClient {
     let env: Option<Vec<String>> = if env_vars.is_empty() {
       None
     } else {
-      Some(env_vars.iter().map(|(k, v)| format!("{}={}", k, v)).collect())
+      Some(env_vars.iter().map(|(k, v)| format!("{k}={v}")).collect())
     };
 
     // Exposed ports (for port mappings)
@@ -396,7 +394,7 @@ impl DockerClient {
     } else {
       let mut exposed = HashMap::new();
       for (_, container_port, protocol) in &ports {
-        let key = format!("{}/{}", container_port, protocol);
+        let key = format!("{container_port}/{protocol}");
         exposed.insert(key, HashMap::new());
       }
       Some(exposed)
@@ -431,7 +429,7 @@ impl DockerClient {
     let options = LogsOptions {
       stdout: true,
       stderr: true,
-      tail: tail.map(|t| t.to_string()).unwrap_or_else(|| "100".to_string()),
+      tail: tail.map_or_else(|| "100".to_string(), |t| t.to_string()),
       ..Default::default()
     };
 
@@ -444,7 +442,7 @@ impl DockerClient {
           logs.push_str(&output.to_string());
         }
         Err(e) => {
-          return Err(anyhow::anyhow!("Failed to get logs: {}", e));
+          return Err(anyhow::anyhow!("Failed to get logs: {e}"));
         }
       }
     }
@@ -523,7 +521,7 @@ impl DockerClient {
       }
 
       let full_path = if path == "/" {
-        format!("/{}", name)
+        format!("/{name}")
       } else {
         format!("{}/{}", path.trim_end_matches('/'), name)
       };
@@ -565,7 +563,7 @@ impl DockerClient {
   /// Check if a path is a directory
   pub async fn is_directory(&self, id: &str, path: &str) -> Result<bool> {
     let output = self
-      .exec_command(id, vec!["sh", "-c", &format!("test -d '{}' && echo dir", path)])
+      .exec_command(id, vec!["sh", "-c", &format!("test -d '{path}' && echo dir")])
       .await;
     Ok(output.map(|s| s.contains("dir")).unwrap_or(false))
   }

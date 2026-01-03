@@ -41,7 +41,7 @@ impl DeploymentDetail {
             && dep.name == *deployment_name
             && dep.namespace == *namespace
           {
-            this.yaml_content = yaml.clone();
+            yaml.clone_into(&mut this.yaml_content);
             cx.notify();
           }
         }
@@ -272,7 +272,7 @@ impl DeploymentDetail {
                       .text_xs()
                       .font_family("monospace")
                       .text_color(colors.muted_foreground)
-                      .child(format!("{}={}", k, v))
+                      .child(format!("{k}={v}"))
                   })
                   .collect::<Vec<_>>(),
               ),
@@ -305,7 +305,7 @@ impl DeploymentDetail {
         deployment
           .labels
           .iter()
-          .any(|(key, value)| pod.labels.get(key).map(|v| v == value).unwrap_or(false))
+          .any(|(key, value)| pod.labels.get(key).is_some_and(|v| v == value))
       })
       .collect();
 
@@ -578,15 +578,14 @@ impl Render for DeploymentDetail {
     }
 
     // Sync yaml editor content
-    if let Some(ref editor) = self.yaml_editor {
-      if !self.yaml_content.is_empty() && self.last_synced_yaml != self.yaml_content {
+    if let Some(ref editor) = self.yaml_editor
+      && !self.yaml_content.is_empty() && self.last_synced_yaml != self.yaml_content {
         let yaml_clone = self.yaml_content.clone();
         editor.update(cx, |state, cx| {
           state.replace(&yaml_clone, window, cx);
         });
         self.last_synced_yaml = self.yaml_content.clone();
       }
-    }
 
     let colors = cx.theme().colors;
 

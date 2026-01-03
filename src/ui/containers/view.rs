@@ -66,15 +66,15 @@ impl ContainersView {
             // If selected container was deleted, clear selection
             if let Some(ref selected) = this.selected_container {
               let state = state.read(cx);
-              if !state.containers.iter().any(|c| c.id == selected.id) {
-                this.selected_container = None;
-                this.active_tab = 0;
-                this.terminal_view = None;
-              } else {
+              if state.containers.iter().any(|c| c.id == selected.id) {
                 // Update the selected container info
                 if let Some(updated) = state.containers.iter().find(|c| c.id == selected.id) {
                   this.selected_container = Some(updated.clone());
                 }
+              } else {
+                this.selected_container = None;
+                this.active_tab = 0;
+                this.terminal_view = None;
               }
             }
             cx.notify();
@@ -251,7 +251,7 @@ impl ContainersView {
         .default_value("latest".to_string())
     });
     let comment_input = cx.new(|cx| {
-      InputState::new(window, cx).placeholder(format!("Comment (optional, from container: {})", container_name))
+      InputState::new(window, cx).placeholder(format!("Comment (optional, from container: {container_name})"))
     });
 
     window.open_dialog(cx, move |dialog, _window, cx| {
@@ -638,7 +638,7 @@ impl ContainersView {
               Some(c) => c
                 .container_logs(&id, Some(max_log_lines))
                 .await
-                .unwrap_or_else(|e| format!("Failed to get logs: {}", e)),
+                .unwrap_or_else(|e| format!("Failed to get logs: {e}")),
               None => "Docker client not connected".to_string(),
             }
           })
@@ -664,7 +664,7 @@ impl ContainersView {
               Some(c) => c
                 .inspect_container(&id_for_inspect)
                 .await
-                .unwrap_or_else(|e| format!("Failed to inspect: {}", e)),
+                .unwrap_or_else(|e| format!("Failed to inspect: {e}")),
               None => "Docker client not connected".to_string(),
             }
           })
@@ -748,7 +748,7 @@ impl Render for ContainersView {
       .on_tab_change(cx.listener(|this, tab: &usize, window, cx| {
         this.on_tab_change(*tab, window, cx);
       }))
-      .on_refresh_logs(cx.listener(|this, _: &(), window, cx| {
+      .on_refresh_logs(cx.listener(|this, (): &(), window, cx| {
         this.on_refresh_logs(window, cx);
       }))
       .on_navigate_path(cx.listener(|this, path: &str, _window, cx| {
@@ -757,7 +757,7 @@ impl Render for ContainersView {
       .on_file_select(cx.listener(|this, path: &str, window, cx| {
         this.on_file_select(path, window, cx);
       }))
-      .on_close_file_viewer(cx.listener(|this, _: &(), _window, cx| {
+      .on_close_file_viewer(cx.listener(|this, (): &(), _window, cx| {
         this.on_close_file_viewer(cx);
       }))
       .on_symlink_click(cx.listener(|this, path: &str, window, cx| {

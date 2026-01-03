@@ -118,7 +118,7 @@ impl CreateVolumeDialog {
     let driver = self
       .driver_select
       .as_ref()
-      .and_then(|s| s.read(cx).selected_value().cloned())
+      .and_then(|s| s.read(cx).selected_value().copied())
       .unwrap_or_default();
 
     CreateVolumeOptions {

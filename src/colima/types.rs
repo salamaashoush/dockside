@@ -168,17 +168,13 @@ impl ColimaVm {
   pub fn display_driver(&self) -> String {
     self.driver.clone().unwrap_or_else(|| {
       self
-        .vm_type
-        .map(|v| v.display_name().to_string())
-        .unwrap_or_else(|| "Unknown".to_string())
+        .vm_type.map_or_else(|| "Unknown".to_string(), |v| v.display_name().to_string())
     })
   }
 
   pub fn display_mount_type(&self) -> String {
     self
-      .mount_type
-      .map(|m| m.to_string())
-      .unwrap_or_else(|| "virtiofs".to_string())
+      .mount_type.map_or_else(|| "virtiofs".to_string(), |m| m.to_string())
   }
 }
 

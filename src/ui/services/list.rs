@@ -280,7 +280,7 @@ impl ServiceList {
     if let Some(input) = &self.search_input {
       let current_text = input.read(cx).text().to_string();
       if current_text != self.search_query {
-        self.search_query = current_text.clone();
+        current_text.clone_into(&mut self.search_query);
         self.list_state.update(cx, |state, cx| {
           state.delegate_mut().set_search_query(current_text);
           cx.notify();
@@ -308,10 +308,10 @@ impl ServiceList {
     let colors = &cx.theme().colors;
     let state = self.docker_state.read(cx);
 
-    let (title, subtitle) = if !state.k8s_available {
-      ("Kubernetes Unavailable", "Start a Colima VM with Kubernetes enabled")
-    } else {
+    let (title, subtitle) = if state.k8s_available {
       ("No Services", "Deploy an application to see services here")
+    } else {
+      ("Kubernetes Unavailable", "Start a Colima VM with Kubernetes enabled")
     };
 
     v_flex()
@@ -400,7 +400,7 @@ impl ServiceList {
 
         if !namespaces.is_empty() {
           menu = menu.separator();
-          for ns in namespaces.iter() {
+          for ns in &namespaces {
             let ns_clone = ns.clone();
             menu = menu.item(PopupMenuItem::new(ns.clone()).on_click({
               let ns = ns_clone.clone();
@@ -428,9 +428,9 @@ impl Render for ServiceList {
     let services_empty = filtered_count == 0;
 
     let subtitle = if is_filtering {
-      format!("{} of {}", filtered_count, total_count)
+      format!("{filtered_count} of {total_count}")
     } else {
-      format!("{} total", total_count)
+      format!("{total_count} total")
     };
 
     let colors = cx.theme().colors;
@@ -465,7 +465,7 @@ impl Render for ServiceList {
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))
               .when(search_visible, Button::primary)
-              .when(!search_visible, |b| b.ghost())
+              .when(!search_visible, ButtonVariants::ghost)
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {
                 this.toggle_search(window, cx);

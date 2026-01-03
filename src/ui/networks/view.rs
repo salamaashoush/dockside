@@ -50,14 +50,14 @@ impl NetworksView {
         // If selected network was deleted, clear selection
         if let Some(ref selected) = this.selected_network {
           let state = state.read(cx);
-          if !state.networks.iter().any(|n| n.id == selected.id) {
-            this.selected_network = None;
-            this.active_tab = 0;
-          } else {
+          if state.networks.iter().any(|n| n.id == selected.id) {
             // Update the selected network info
             if let Some(updated) = state.networks.iter().find(|n| n.id == selected.id) {
               this.selected_network = Some(updated.clone());
             }
+          } else {
+            this.selected_network = None;
+            this.active_tab = 0;
           }
         }
         cx.notify();

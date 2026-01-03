@@ -299,7 +299,7 @@ impl ContainerDetail {
   fn render_logs_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
     let state = self.container_state.as_ref();
-    let is_loading = state.map(|s| s.logs_loading).unwrap_or(false);
+    let is_loading = state.is_some_and(|s| s.logs_loading);
 
     if is_loading {
       return v_flex().size_full().p(px(16.)).child(
@@ -317,9 +317,7 @@ impl ContainerDetail {
     }
 
     // Fallback to plain text
-    let logs_content = state
-      .map(|s| s.logs.clone())
-      .unwrap_or_else(|| "No logs available".to_string());
+    let logs_content = state.map_or_else(|| "No logs available".to_string(), |s| s.logs.clone());
     div().size_full().child(
       div()
         .size_full()
@@ -365,7 +363,7 @@ impl ContainerDetail {
   fn render_inspect_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
     let state = self.container_state.as_ref();
-    let is_loading = state.map(|s| s.inspect_loading).unwrap_or(false);
+    let is_loading = state.is_some_and(|s| s.inspect_loading);
 
     if is_loading {
       return v_flex()
@@ -381,7 +379,7 @@ impl ContainerDetail {
     }
 
     // Fallback to plain text
-    let inspect_content = state.map(|s| s.inspect.clone()).unwrap_or_else(|| "{}".to_string());
+    let inspect_content = state.map_or_else(|| "{}".to_string(), |s| s.inspect.clone());
     div().size_full().child(
       div()
         .size_full()
@@ -424,11 +422,11 @@ impl ContainerDetail {
     let state = self.container_state.as_ref();
 
     let explorer_state = FileExplorerState {
-      current_path: state.map(|s| s.current_path.clone()).unwrap_or_else(|| "/".to_string()),
-      is_loading: state.map(|s| s.files_loading).unwrap_or(false),
+      current_path: state.map_or_else(|| "/".to_string(), |s| s.current_path.clone()),
+      is_loading: state.is_some_and(|s| s.files_loading),
       selected_file: state.and_then(|s| s.selected_file.clone()),
       file_content: state.map(|s| s.file_content.clone()).unwrap_or_default(),
-      file_content_loading: state.map(|s| s.file_content_loading).unwrap_or(false),
+      file_content_loading: state.is_some_and(|s| s.file_content_loading),
     };
 
     let files = state.map(|s| s.files.clone()).unwrap_or_default();
@@ -455,7 +453,7 @@ impl ContainerDetail {
 
     if let Some(ref cb) = self.on_close_file_viewer {
       let cb = cb.clone();
-      explorer = explorer.on_close_viewer(move |_, window, cx| {
+      explorer = explorer.on_close_viewer(move |(), window, cx| {
         cb(&(), window, cx);
       });
     }
@@ -507,7 +505,7 @@ impl ContainerDetail {
           .children(tabs.iter().enumerate().map(|(i, label)| {
             let on_tab_change = on_tab_change.clone();
             Tab::new()
-              .label(label.to_string())
+              .label((*label).to_string())
               .selected(self.active_tab == i)
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tab_change {
@@ -599,7 +597,6 @@ impl ContainerDetail {
       result = result.child(div().flex_1().min_h_0().w_full().overflow_hidden().child(content));
     } else {
       let content = match self.active_tab {
-        0 => self.render_info_tab(container, cx),
         4 => self.render_inspect_tab(cx),
         _ => self.render_info_tab(container, cx),
       };

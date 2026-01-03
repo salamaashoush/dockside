@@ -258,7 +258,7 @@ impl Default for DockerState {
 // Enable event emission for reactive updates
 impl EventEmitter<StateChanged> for DockerState {}
 
-/// Global wrapper for DockerState
+/// Global wrapper for `DockerState`
 pub struct GlobalDockerState(pub Entity<DockerState>);
 
 impl Global for GlobalDockerState {}

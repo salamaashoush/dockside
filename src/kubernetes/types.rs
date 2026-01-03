@@ -109,15 +109,13 @@ impl PodInfo {
     // Calculate ready string (e.g., "1/2")
     let ready_count = container_statuses.iter().filter(|c| c.ready).count();
     let total_count = container_statuses.len();
-    let ready = format!("{}/{}", ready_count, total_count);
+    let ready = format!("{ready_count}/{total_count}");
 
     // Calculate total restarts
     let restarts = container_statuses.iter().map(|c| c.restart_count).sum();
 
     // Calculate age
-    let age = creation_timestamp
-      .map(format_age)
-      .unwrap_or_else(|| "Unknown".to_string());
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
 
     Self {
       name,
@@ -231,9 +229,7 @@ impl ServiceInfo {
       .into_iter()
       .collect();
 
-    let age = creation_timestamp
-      .map(format_age)
-      .unwrap_or_else(|| "Unknown".to_string());
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
 
     Self {
       name,
@@ -305,9 +301,7 @@ impl DeploymentInfo {
       .map(|pod_spec| pod_spec.containers.iter().filter_map(|c| c.image.clone()).collect())
       .unwrap_or_default();
 
-    let age = creation_timestamp
-      .map(format_age)
-      .unwrap_or_else(|| "Unknown".to_string());
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
 
     Self {
       name,

@@ -7,7 +7,7 @@ use crate::docker::DockerClient;
 use crate::services::{Tokio, complete_task, fail_task, start_task};
 use crate::state::{CurrentView, ImageInspectData, StateChanged, docker_state, settings_state};
 
-/// Shared Docker client - initialized once in load_initial_data
+/// Shared Docker client - initialized once in `load_initial_data`
 static DOCKER_CLIENT: std::sync::OnceLock<Arc<RwLock<Option<DockerClient>>>> = std::sync::OnceLock::new();
 
 /// Get the shared Docker client handle
@@ -61,7 +61,7 @@ pub fn dispatcher(cx: &App) -> Entity<ActionDispatcher> {
 
 pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
   let machine_name = options.name.clone().unwrap_or_else(|| "default".to_string());
-  let task_id = start_task(cx, format!("Creating '{}'...", machine_name));
+  let task_id = start_task(cx, format!("Creating '{machine_name}'..."));
   let name_clone = machine_name.clone();
 
   let state = docker_state(cx);
@@ -71,9 +71,8 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
     let result = cx
       .background_executor()
       .spawn(async move {
-        let colima_client = ColimaClient::new();
-        match colima_client.start(options) {
-          Ok(_) => Ok(colima_client.list().unwrap_or_default()),
+        match ColimaClient::start(options) {
+          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
       })
@@ -88,7 +87,7 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Machine '{}' created", name_clone),
+            message: format!("Machine '{name_clone}' created"),
           });
         });
       }
@@ -96,7 +95,7 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to create '{}': {}", name_clone, e),
+            error: format!("Failed to create '{name_clone}': {e}"),
           });
         });
       }
@@ -106,7 +105,7 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
 }
 
 pub fn start_machine(name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Starting '{}'...", name));
+  let task_id = start_task(cx, format!("Starting '{name}'..."));
   let name_clone = name.clone();
 
   let state = docker_state(cx);
@@ -116,10 +115,9 @@ pub fn start_machine(name: String, cx: &mut App) {
     let result = cx
       .background_executor()
       .spawn(async move {
-        let colima_client = ColimaClient::new();
         let options = ColimaStartOptions::new().with_name(name.clone());
-        match colima_client.start(options) {
-          Ok(_) => Ok(colima_client.list().unwrap_or_default()),
+        match ColimaClient::start(options) {
+          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
       })
@@ -134,7 +132,7 @@ pub fn start_machine(name: String, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Machine '{}' started", name_clone),
+            message: format!("Machine '{name_clone}' started"),
           });
         });
       }
@@ -142,7 +140,7 @@ pub fn start_machine(name: String, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to start '{}': {}", name_clone, e),
+            error: format!("Failed to start '{name_clone}': {e}"),
           });
         });
       }
@@ -152,7 +150,7 @@ pub fn start_machine(name: String, cx: &mut App) {
 }
 
 pub fn stop_machine(name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Stopping '{}'...", name));
+  let task_id = start_task(cx, format!("Stopping '{name}'..."));
   let name_clone = name.clone();
 
   let state = docker_state(cx);
@@ -162,10 +160,9 @@ pub fn stop_machine(name: String, cx: &mut App) {
     let result = cx
       .background_executor()
       .spawn(async move {
-        let colima_client = ColimaClient::new();
         let name_opt = if name == "default" { None } else { Some(name.as_str()) };
-        match colima_client.stop(name_opt) {
-          Ok(_) => Ok(colima_client.list().unwrap_or_default()),
+        match ColimaClient::stop(name_opt) {
+          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
       })
@@ -180,7 +177,7 @@ pub fn stop_machine(name: String, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Machine '{}' stopped", name_clone),
+            message: format!("Machine '{name_clone}' stopped"),
           });
         });
       }
@@ -188,7 +185,7 @@ pub fn stop_machine(name: String, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to stop '{}': {}", name_clone, e),
+            error: format!("Failed to stop '{name_clone}': {e}"),
           });
         });
       }
@@ -199,7 +196,7 @@ pub fn stop_machine(name: String, cx: &mut App) {
 
 pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
   let name = options.name.clone().unwrap_or_else(|| "default".to_string());
-  let task_id = start_task(cx, format!("Editing '{}'...", name));
+  let task_id = start_task(cx, format!("Editing '{name}'..."));
   let name_clone = name.clone();
 
   let state = docker_state(cx);
@@ -212,17 +209,16 @@ pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
     let result = cx
       .background_executor()
       .spawn(async move {
-        let colima_client = ColimaClient::new();
         let name_opt = if name == "default" { None } else { Some(name.as_str()) };
 
         // Stop the machine first
-        if let Err(e) = colima_client.stop(name_opt) {
-          return Err(format!("Failed to stop machine: {}", e));
+        if let Err(e) = ColimaClient::stop(name_opt) {
+          return Err(format!("Failed to stop machine: {e}"));
         }
 
         // Start with new options (edit mode)
-        match colima_client.start(options) {
-          Ok(_) => Ok(colima_client.list().unwrap_or_default()),
+        match ColimaClient::start(options) {
+          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
       })
@@ -237,7 +233,7 @@ pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Machine '{}' updated and restarted", name_clone),
+            message: format!("Machine '{name_clone}' updated and restarted"),
           });
         });
       }
@@ -245,7 +241,7 @@ pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to edit '{}': {}", name_clone, e),
+            error: format!("Failed to edit '{name_clone}': {e}"),
           });
         });
       }
@@ -255,7 +251,7 @@ pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
 }
 
 pub fn restart_machine(name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Restarting '{}'...", name));
+  let task_id = start_task(cx, format!("Restarting '{name}'..."));
   let name_clone = name.clone();
 
   let state = docker_state(cx);
@@ -265,10 +261,9 @@ pub fn restart_machine(name: String, cx: &mut App) {
     let result = cx
       .background_executor()
       .spawn(async move {
-        let colima_client = ColimaClient::new();
         let name_opt = if name == "default" { None } else { Some(name.as_str()) };
-        match colima_client.restart(name_opt) {
-          Ok(_) => Ok(colima_client.list().unwrap_or_default()),
+        match ColimaClient::restart(name_opt) {
+          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
       })
@@ -283,7 +278,7 @@ pub fn restart_machine(name: String, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Machine '{}' restarted", name_clone),
+            message: format!("Machine '{name_clone}' restarted"),
           });
         });
       }
@@ -291,7 +286,7 @@ pub fn restart_machine(name: String, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to restart '{}': {}", name_clone, e),
+            error: format!("Failed to restart '{name_clone}': {e}"),
           });
         });
       }
@@ -315,7 +310,7 @@ pub fn stop_colima(profile: Option<String>, cx: &mut App) {
 /// Restart Colima with optional profile name (None = default profile)
 pub fn restart_colima(profile: Option<String>, cx: &mut App) {
   let name = profile.unwrap_or_else(|| "default".to_string());
-  let task_id = start_task(cx, format!("Restarting '{}'...", name));
+  let task_id = start_task(cx, format!("Restarting '{name}'..."));
   let name_clone = name.clone();
 
   let state = docker_state(cx);
@@ -325,10 +320,9 @@ pub fn restart_colima(profile: Option<String>, cx: &mut App) {
     let result = cx
       .background_executor()
       .spawn(async move {
-        let colima_client = ColimaClient::new();
         let name_opt = if name == "default" { None } else { Some(name.as_str()) };
-        match colima_client.restart(name_opt) {
-          Ok(_) => Ok(colima_client.list().unwrap_or_default()),
+        match ColimaClient::restart(name_opt) {
+          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
       })
@@ -343,7 +337,7 @@ pub fn restart_colima(profile: Option<String>, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Machine '{}' restarted", name_clone),
+            message: format!("Machine '{name_clone}' restarted"),
           });
         });
       }
@@ -351,7 +345,7 @@ pub fn restart_colima(profile: Option<String>, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to restart '{}': {}", name_clone, e),
+            error: format!("Failed to restart '{name_clone}': {e}"),
           });
         });
       }
@@ -361,7 +355,7 @@ pub fn restart_colima(profile: Option<String>, cx: &mut App) {
 }
 
 pub fn delete_machine(name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Deleting '{}'...", name));
+  let task_id = start_task(cx, format!("Deleting '{name}'..."));
   let name_clone = name.clone();
 
   let state = docker_state(cx);
@@ -371,10 +365,9 @@ pub fn delete_machine(name: String, cx: &mut App) {
     let result = cx
       .background_executor()
       .spawn(async move {
-        let colima_client = ColimaClient::new();
         let name_opt = if name == "default" { None } else { Some(name.as_str()) };
-        match colima_client.delete(name_opt, true) {
-          Ok(_) => Ok(colima_client.list().unwrap_or_default()),
+        match ColimaClient::delete(name_opt, true) {
+          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
           Err(e) => Err(e.to_string()),
         }
       })
@@ -389,7 +382,7 @@ pub fn delete_machine(name: String, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Machine '{}' deleted", name_clone),
+            message: format!("Machine '{name_clone}' deleted"),
           });
         });
       }
@@ -397,7 +390,7 @@ pub fn delete_machine(name: String, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to delete '{}': {}", name_clone, e),
+            error: format!("Failed to delete '{name_clone}': {e}"),
           });
         });
       }
@@ -434,7 +427,7 @@ pub fn open_machine_files(name: String, cx: &mut App) {
 
 /// Start Kubernetes on a Colima machine
 pub fn kubernetes_start(name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Starting K8s on '{}'...", name));
+  let task_id = start_task(cx, format!("Starting K8s on '{name}'..."));
   let name_clone = name.clone();
   let disp = dispatcher(cx);
 
@@ -458,11 +451,11 @@ pub fn kubernetes_start(name: String, cx: &mut App) {
       .await;
 
     cx.update(|cx| match result {
-      Ok(_) => {
+      Ok(()) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Kubernetes started on '{}'", name_clone),
+            message: format!("Kubernetes started on '{name_clone}'"),
           });
         });
         refresh_pods(cx);
@@ -471,7 +464,7 @@ pub fn kubernetes_start(name: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to start K8s on '{}': {}", name_clone, e),
+            error: format!("Failed to start K8s on '{name_clone}': {e}"),
           });
         });
       }
@@ -482,7 +475,7 @@ pub fn kubernetes_start(name: String, cx: &mut App) {
 
 /// Stop Kubernetes on a Colima machine
 pub fn kubernetes_stop(name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Stopping K8s on '{}'...", name));
+  let task_id = start_task(cx, format!("Stopping K8s on '{name}'..."));
   let name_clone = name.clone();
   let disp = dispatcher(cx);
 
@@ -506,11 +499,11 @@ pub fn kubernetes_stop(name: String, cx: &mut App) {
       .await;
 
     cx.update(|cx| match result {
-      Ok(_) => {
+      Ok(()) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Kubernetes stopped on '{}'", name_clone),
+            message: format!("Kubernetes stopped on '{name_clone}'"),
           });
         });
       }
@@ -518,7 +511,7 @@ pub fn kubernetes_stop(name: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to stop K8s on '{}': {}", name_clone, e),
+            error: format!("Failed to stop K8s on '{name_clone}': {e}"),
           });
         });
       }
@@ -529,7 +522,7 @@ pub fn kubernetes_stop(name: String, cx: &mut App) {
 
 /// Reset Kubernetes on a Colima machine (delete and recreate cluster)
 pub fn kubernetes_reset(name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Resetting K8s on '{}'...", name));
+  let task_id = start_task(cx, format!("Resetting K8s on '{name}'..."));
   let name_clone = name.clone();
   let disp = dispatcher(cx);
 
@@ -553,11 +546,11 @@ pub fn kubernetes_reset(name: String, cx: &mut App) {
       .await;
 
     cx.update(|cx| match result {
-      Ok(_) => {
+      Ok(()) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Kubernetes reset on '{}'", name_clone),
+            message: format!("Kubernetes reset on '{name_clone}'"),
           });
         });
         refresh_pods(cx);
@@ -566,7 +559,7 @@ pub fn kubernetes_reset(name: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to reset K8s on '{}': {}", name_clone, e),
+            error: format!("Failed to reset K8s on '{name_clone}': {e}"),
           });
         });
       }
@@ -593,7 +586,7 @@ pub fn start_container(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -606,7 +599,7 @@ pub fn start_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to start container: {}", e),
+            error: format!("Failed to start container: {e}"),
           });
         });
       }
@@ -614,7 +607,7 @@ pub fn start_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -639,7 +632,7 @@ pub fn stop_container(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -652,7 +645,7 @@ pub fn stop_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to stop container: {}", e),
+            error: format!("Failed to stop container: {e}"),
           });
         });
       }
@@ -660,7 +653,7 @@ pub fn stop_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -685,7 +678,7 @@ pub fn restart_container(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -698,7 +691,7 @@ pub fn restart_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to restart container: {}", e),
+            error: format!("Failed to restart container: {e}"),
           });
         });
       }
@@ -706,7 +699,7 @@ pub fn restart_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -731,7 +724,7 @@ pub fn delete_container(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -744,7 +737,7 @@ pub fn delete_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to delete container: {}", e),
+            error: format!("Failed to delete container: {e}"),
           });
         });
       }
@@ -752,7 +745,7 @@ pub fn delete_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -777,7 +770,7 @@ pub fn pause_container(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -790,7 +783,7 @@ pub fn pause_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to pause container: {}", e),
+            error: format!("Failed to pause container: {e}"),
           });
         });
       }
@@ -798,7 +791,7 @@ pub fn pause_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -823,7 +816,7 @@ pub fn unpause_container(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -836,7 +829,7 @@ pub fn unpause_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to resume container: {}", e),
+            error: format!("Failed to resume container: {e}"),
           });
         });
       }
@@ -844,7 +837,7 @@ pub fn unpause_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -869,7 +862,7 @@ pub fn kill_container(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -882,7 +875,7 @@ pub fn kill_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to kill container: {}", e),
+            error: format!("Failed to kill container: {e}"),
           });
         });
       }
@@ -890,7 +883,7 @@ pub fn kill_container(id: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -915,7 +908,7 @@ pub fn rename_container(id: String, new_name: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -928,7 +921,7 @@ pub fn rename_container(id: String, new_name: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to rename container: {}", e),
+            error: format!("Failed to rename container: {e}"),
           });
         });
       }
@@ -936,7 +929,7 @@ pub fn rename_container(id: String, new_name: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -983,7 +976,7 @@ pub fn commit_container(
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to commit container: {}", e),
+            error: format!("Failed to commit container: {e}"),
           });
         });
       }
@@ -991,7 +984,7 @@ pub fn commit_container(
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -1016,7 +1009,7 @@ pub fn export_container(id: String, output_path: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -1028,7 +1021,7 @@ pub fn export_container(id: String, output_path: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to export container: {}", e),
+            error: format!("Failed to export container: {e}"),
           });
         });
       }
@@ -1036,7 +1029,7 @@ pub fn export_container(id: String, output_path: String, cx: &mut App) {
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -1182,7 +1175,7 @@ pub fn open_container_files(id: String, cx: &mut App) {
 // Additional pod operations
 
 pub fn force_delete_pod(name: String, namespace: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Force deleting pod {}...", name));
+  let task_id = start_task(cx, format!("Force deleting pod {name}..."));
   let disp = dispatcher(cx);
   let name_clone = name.clone();
 
@@ -1192,13 +1185,13 @@ pub fn force_delete_pod(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
     cx.update(|cx| match result {
-      Ok(_) => {
+      Ok(()) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Pod {} force deleted", name_clone),
+            message: format!("Pod {name_clone} force deleted"),
           });
         });
         refresh_pods(cx);
@@ -1207,7 +1200,7 @@ pub fn force_delete_pod(name: String, namespace: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to force delete pod: {}", e),
+            error: format!("Failed to force delete pod: {e}"),
           });
         });
       }
@@ -1217,7 +1210,7 @@ pub fn force_delete_pod(name: String, namespace: String, cx: &mut App) {
 }
 
 pub fn restart_pod(name: String, namespace: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Restarting pod {}...", name));
+  let task_id = start_task(cx, format!("Restarting pod {name}..."));
   let disp = dispatcher(cx);
 
   let tokio_task = Tokio::spawn(cx, async move {
@@ -1226,7 +1219,7 @@ pub fn restart_pod(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
     cx.update(|cx| match result {
       Ok(message) => {
         complete_task(cx, task_id);
@@ -1249,7 +1242,7 @@ pub fn restart_pod(name: String, namespace: String, cx: &mut App) {
 pub fn create_container(options: crate::ui::containers::CreateContainerOptions, cx: &mut App) {
   let image_name = options.image.clone();
   let start_after = options.start_after_create;
-  let task_id = start_task(cx, format!("Creating container from {}...", image_name));
+  let task_id = start_task(cx, format!("Creating container from {image_name}..."));
 
   let disp = dispatcher(cx);
   let client = docker_client();
@@ -1306,11 +1299,11 @@ pub fn create_container(options: crate::ui::containers::CreateContainerOptions, 
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Container created from {}", image_name),
+            message: format!("Container created from {image_name}"),
           });
         });
         refresh_containers(cx);
@@ -1319,7 +1312,7 @@ pub fn create_container(options: crate::ui::containers::CreateContainerOptions, 
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to create container: {}", e),
+            error: format!("Failed to create container: {e}"),
           });
         });
       }
@@ -1327,7 +1320,7 @@ pub fn create_container(options: crate::ui::containers::CreateContainerOptions, 
         fail_task(cx, task_id, join_err.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Task failed: {}", join_err),
+            error: format!("Task failed: {join_err}"),
           });
         });
       }
@@ -1366,7 +1359,7 @@ pub fn refresh_containers(cx: &mut App) {
 // ============================================================================
 
 pub fn create_volume(name: String, driver: String, labels: Vec<(String, String)>, cx: &mut App) {
-  let task_id = start_task(cx, format!("Creating volume {}...", name));
+  let task_id = start_task(cx, format!("Creating volume {name}..."));
   let disp = dispatcher(cx);
   let client = docker_client();
 
@@ -1423,7 +1416,7 @@ pub fn delete_volume(name: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -1499,12 +1492,7 @@ pub fn list_volume_files(volume_name: String, path: String, cx: &mut App) {
             files,
           });
         }
-        Ok(Err(_)) => {
-          cx.emit(StateChanged::VolumeFilesError {
-            volume_name: volume_name_clone,
-          });
-        }
-        Err(_) => {
+        Ok(Err(_)) | Err(_) => {
           cx.emit(StateChanged::VolumeFilesError {
             volume_name: volume_name_clone,
           });
@@ -1560,7 +1548,7 @@ pub fn delete_image(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -1587,7 +1575,7 @@ pub fn delete_image(id: String, cx: &mut App) {
 }
 
 pub fn pull_image(image: String, platform: Option<String>, cx: &mut App) {
-  let task_id = start_task(cx, format!("Pulling image {}...", image));
+  let task_id = start_task(cx, format!("Pulling image {image}..."));
   let disp = dispatcher(cx);
   let client = docker_client();
 
@@ -1602,7 +1590,7 @@ pub fn pull_image(image: String, platform: Option<String>, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -1746,7 +1734,7 @@ pub fn refresh_networks(cx: &mut App) {
 }
 
 pub fn create_network(name: String, enable_ipv6: bool, subnet: Option<String>, cx: &mut App) {
-  let task_id = start_task(cx, format!("Creating network {}...", name));
+  let task_id = start_task(cx, format!("Creating network {name}..."));
   let disp = dispatcher(cx);
   let client = docker_client();
 
@@ -1803,7 +1791,7 @@ pub fn delete_network(id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -1842,7 +1830,7 @@ pub fn set_view(view: CurrentView, cx: &mut App) {
 }
 
 pub fn set_docker_context(name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Switching to '{}'...", name));
+  let task_id = start_task(cx, format!("Switching to '{name}'..."));
 
   let disp = dispatcher(cx);
 
@@ -1855,7 +1843,7 @@ pub fn set_docker_context(name: String, cx: &mut App) {
         let context_name = if name == "default" {
           "colima".to_string()
         } else {
-          format!("colima-{}", name)
+          format!("colima-{name}")
         };
 
         let output = Command::new("docker").args(["context", "use", &context_name]).output();
@@ -1873,7 +1861,7 @@ pub fn set_docker_context(name: String, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Docker context switched to '{}'", context_name),
+            message: format!("Docker context switched to '{context_name}'"),
           });
         });
       }
@@ -1881,7 +1869,7 @@ pub fn set_docker_context(name: String, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to switch context: {}", e),
+            error: format!("Failed to switch context: {e}"),
           });
         });
       }
@@ -1895,7 +1883,7 @@ pub fn set_docker_context(name: String, cx: &mut App) {
 // ============================================================================
 
 pub fn compose_up(project_name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Starting '{}'...", project_name));
+  let task_id = start_task(cx, format!("Starting '{project_name}'..."));
   let disp = dispatcher(cx);
 
   cx.spawn(async move |cx| {
@@ -1921,7 +1909,7 @@ pub fn compose_up(project_name: String, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Started '{}'", project_name),
+            message: format!("Started '{project_name}'"),
           });
         });
         refresh_containers(cx);
@@ -1930,7 +1918,7 @@ pub fn compose_up(project_name: String, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to start '{}': {}", project_name, e),
+            error: format!("Failed to start '{project_name}': {e}"),
           });
         });
       }
@@ -1940,7 +1928,7 @@ pub fn compose_up(project_name: String, cx: &mut App) {
 }
 
 pub fn compose_down(project_name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Stopping '{}'...", project_name));
+  let task_id = start_task(cx, format!("Stopping '{project_name}'..."));
   let disp = dispatcher(cx);
 
   cx.spawn(async move |cx| {
@@ -1966,7 +1954,7 @@ pub fn compose_down(project_name: String, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Stopped '{}'", project_name),
+            message: format!("Stopped '{project_name}'"),
           });
         });
         refresh_containers(cx);
@@ -1975,7 +1963,7 @@ pub fn compose_down(project_name: String, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to stop '{}': {}", project_name, e),
+            error: format!("Failed to stop '{project_name}': {e}"),
           });
         });
       }
@@ -1985,7 +1973,7 @@ pub fn compose_down(project_name: String, cx: &mut App) {
 }
 
 pub fn compose_restart(project_name: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Restarting '{}'...", project_name));
+  let task_id = start_task(cx, format!("Restarting '{project_name}'..."));
   let disp = dispatcher(cx);
 
   cx.spawn(async move |cx| {
@@ -2011,7 +1999,7 @@ pub fn compose_restart(project_name: String, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Restarted '{}'", project_name),
+            message: format!("Restarted '{project_name}'"),
           });
         });
         refresh_containers(cx);
@@ -2020,7 +2008,7 @@ pub fn compose_restart(project_name: String, cx: &mut App) {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to restart '{}': {}", project_name, e),
+            error: format!("Failed to restart '{project_name}': {e}"),
           });
         });
       }
@@ -2087,8 +2075,8 @@ pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<cr
 
     // Kubernetes pruning
     let needs_k8s = prune_k8s_pods || prune_k8s_deployments || prune_k8s_services;
-    if needs_k8s {
-      if let Ok(kube_client) = crate::kubernetes::KubeClient::new().await {
+    if needs_k8s
+      && let Ok(kube_client) = crate::kubernetes::KubeClient::new().await {
         // Helper to check if namespace is a system namespace
         let is_system_namespace = |ns: &str| {
           matches!(ns, "kube-system" | "kube-public" | "kube-node-lease")
@@ -2100,8 +2088,8 @@ pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<cr
         };
 
         // Prune deployments first (this will cascade delete their pods)
-        if prune_k8s_deployments {
-          if let Ok(deployments) = kube_client.list_deployments(None).await {
+        if prune_k8s_deployments
+          && let Ok(deployments) = kube_client.list_deployments(None).await {
             for deployment in deployments {
               // Skip system namespaces
               if is_system_namespace(&deployment.namespace) {
@@ -2118,11 +2106,10 @@ pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<cr
               }
             }
           }
-        }
 
         // Prune services
-        if prune_k8s_services {
-          if let Ok(services) = kube_client.list_services(None).await {
+        if prune_k8s_services
+          && let Ok(services) = kube_client.list_services(None).await {
             for service in services {
               // Skip system namespaces and default kubernetes service
               if is_system_resource(&service.namespace, &service.name) {
@@ -2133,11 +2120,10 @@ pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<cr
               }
             }
           }
-        }
 
         // Prune pods (only orphans if deployments were pruned, or based on status)
-        if prune_k8s_pods {
-          if let Ok(pods) = kube_client.list_pods(None).await {
+        if prune_k8s_pods
+          && let Ok(pods) = kube_client.list_pods(None).await {
             for pod in pods {
               // Skip system namespaces
               if is_system_namespace(&pod.namespace) {
@@ -2155,16 +2141,13 @@ pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<cr
                 )
               };
 
-              if should_delete {
-                if kube_client.delete_pod(&pod.name, &pod.namespace).await.is_ok() {
+              if should_delete
+                && kube_client.delete_pod(&pod.name, &pod.namespace).await.is_ok() {
                   result.pods_deleted.push(format!("{}/{}", pod.namespace, pod.name));
                 }
-              }
             }
           }
-        }
       }
-    }
 
     Ok::<_, anyhow::Error>(result)
   });
@@ -2233,7 +2216,7 @@ pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<cr
           });
           disp.update(cx, |_, cx| {
             cx.emit(DispatcherEvent::TaskFailed {
-              error: format!("Failed to prune: {}", e),
+              error: format!("Failed to prune: {e}"),
             });
           });
         }
@@ -2244,7 +2227,7 @@ pub fn prune_docker(options: crate::ui::PruneOptions, cx: &mut App) -> Entity<cr
           });
           disp.update(cx, |_, cx| {
             cx.emit(DispatcherEvent::TaskFailed {
-              error: format!("Task failed: {}", join_err),
+              error: format!("Task failed: {join_err}"),
             });
           });
         }
@@ -2269,19 +2252,18 @@ pub fn load_initial_data(cx: &mut App) {
 
   // First, get colima VMs and socket path (sync operation)
   let colima_task = cx.background_executor().spawn(async move {
-    let colima_client = ColimaClient::new();
-    let vms = colima_client.list().unwrap_or_default();
+    let vms = ColimaClient::list().unwrap_or_default();
 
     // Use custom socket if provided, otherwise use colima socket with configured profile
-    let socket_path = if !custom_socket.is_empty() {
-      custom_socket
-    } else {
+    let socket_path = if custom_socket.is_empty() {
       let profile = if colima_profile == "default" {
         None
       } else {
         Some(colima_profile.as_str())
       };
-      colima_client.socket_path(profile)
+      ColimaClient::socket_path(profile)
+    } else {
+      custom_socket
     };
     (vms, socket_path)
   });
@@ -2426,7 +2408,7 @@ pub fn set_namespace(namespace: String, cx: &mut App) {
 pub fn delete_pod(name: String, namespace: String, cx: &mut App) {
   let _state = docker_state(cx);
   let disp = dispatcher(cx);
-  let task_id = start_task(cx, format!("Deleting pod {}", name));
+  let task_id = start_task(cx, format!("Deleting pod {name}"));
 
   let name_clone = name.clone();
   let tokio_task = Tokio::spawn(cx, async move {
@@ -2435,14 +2417,14 @@ pub fn delete_pod(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| match result {
       Ok(()) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Pod {} deleted", name_clone),
+            message: format!("Pod {name_clone} deleted"),
           });
         });
         refresh_pods(cx);
@@ -2472,10 +2454,10 @@ pub fn get_pod_logs(name: String, namespace: String, container: Option<String>, 
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| {
-      let logs = result.unwrap_or_else(|e| format!("Error fetching logs: {}", e));
+      let logs = result.unwrap_or_else(|e| format!("Error fetching logs: {e}"));
       state.update(cx, |_state, cx| {
         cx.emit(StateChanged::PodLogsLoaded {
           pod_name: name_clone,
@@ -2500,10 +2482,10 @@ pub fn get_pod_describe(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
     let describe = match result {
       Ok(desc) => desc,
-      Err(e) => format!("Error: {}", e),
+      Err(e) => format!("Error: {e}"),
     };
 
     cx.update(|cx| {
@@ -2531,10 +2513,10 @@ pub fn get_pod_yaml(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
     let yaml = match result {
       Ok(y) => y,
-      Err(e) => format!("Error: {}", e),
+      Err(e) => format!("Error: {e}"),
     };
 
     cx.update(|cx| {
@@ -2564,7 +2546,7 @@ pub fn refresh_services(cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| {
       if let Ok(services) = result {
@@ -2580,7 +2562,7 @@ pub fn refresh_services(cx: &mut App) {
 
 /// Delete a service
 pub fn delete_service(name: String, namespace: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Deleting service '{}'...", name));
+  let task_id = start_task(cx, format!("Deleting service '{name}'..."));
   let name_clone = name.clone();
   let _state = docker_state(cx);
   let disp = dispatcher(cx);
@@ -2591,14 +2573,14 @@ pub fn delete_service(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| match result {
-      Ok(_) => {
+      Ok(()) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Service '{}' deleted", name_clone),
+            message: format!("Service '{name_clone}' deleted"),
           });
         });
         refresh_services(cx);
@@ -2607,7 +2589,7 @@ pub fn delete_service(name: String, namespace: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to delete service '{}': {}", name_clone, e),
+            error: format!("Failed to delete service '{name_clone}': {e}"),
           });
         });
       }
@@ -2628,10 +2610,10 @@ pub fn get_service_yaml(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
     let yaml = match result {
       Ok(y) => y,
-      Err(e) => format!("Error: {}", e),
+      Err(e) => format!("Error: {e}"),
     };
 
     cx.update(|cx| {
@@ -2672,7 +2654,7 @@ pub fn create_service(options: crate::kubernetes::CreateServiceOptions, cx: &mut
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| match result {
       Ok(msg) => {
@@ -2686,7 +2668,7 @@ pub fn create_service(options: crate::kubernetes::CreateServiceOptions, cx: &mut
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to create service '{}': {}", name, e),
+            error: format!("Failed to create service '{name}': {e}"),
           });
         });
       }
@@ -2709,7 +2691,7 @@ pub fn refresh_deployments(cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| {
       if let Ok(deployments) = result {
@@ -2725,7 +2707,7 @@ pub fn refresh_deployments(cx: &mut App) {
 
 /// Delete a deployment
 pub fn delete_deployment(name: String, namespace: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Deleting deployment '{}'...", name));
+  let task_id = start_task(cx, format!("Deleting deployment '{name}'..."));
   let name_clone = name.clone();
   let _state = docker_state(cx);
   let disp = dispatcher(cx);
@@ -2736,14 +2718,14 @@ pub fn delete_deployment(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| match result {
-      Ok(_) => {
+      Ok(()) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!("Deployment '{}' deleted", name_clone),
+            message: format!("Deployment '{name_clone}' deleted"),
           });
         });
         refresh_deployments(cx);
@@ -2752,7 +2734,7 @@ pub fn delete_deployment(name: String, namespace: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to delete deployment '{}': {}", name_clone, e),
+            error: format!("Failed to delete deployment '{name_clone}': {e}"),
           });
         });
       }
@@ -2763,7 +2745,7 @@ pub fn delete_deployment(name: String, namespace: String, cx: &mut App) {
 
 /// Scale a deployment
 pub fn scale_deployment(name: String, namespace: String, replicas: i32, cx: &mut App) {
-  let task_id = start_task(cx, format!("Scaling '{}' to {} replicas...", name, replicas));
+  let task_id = start_task(cx, format!("Scaling '{name}' to {replicas} replicas..."));
   let name_clone = name.clone();
   let disp = dispatcher(cx);
 
@@ -2773,7 +2755,7 @@ pub fn scale_deployment(name: String, namespace: String, replicas: i32, cx: &mut
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| match result {
       Ok(msg) => {
@@ -2788,7 +2770,7 @@ pub fn scale_deployment(name: String, namespace: String, replicas: i32, cx: &mut
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to scale '{}': {}", name_clone, e),
+            error: format!("Failed to scale '{name_clone}': {e}"),
           });
         });
       }
@@ -2799,7 +2781,7 @@ pub fn scale_deployment(name: String, namespace: String, replicas: i32, cx: &mut
 
 /// Restart a deployment (rollout restart)
 pub fn restart_deployment(name: String, namespace: String, cx: &mut App) {
-  let task_id = start_task(cx, format!("Restarting '{}'...", name));
+  let task_id = start_task(cx, format!("Restarting '{name}'..."));
   let name_clone = name.clone();
   let disp = dispatcher(cx);
 
@@ -2809,7 +2791,7 @@ pub fn restart_deployment(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| match result {
       Ok(msg) => {
@@ -2824,7 +2806,7 @@ pub fn restart_deployment(name: String, namespace: String, cx: &mut App) {
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to restart '{}': {}", name_clone, e),
+            error: format!("Failed to restart '{name_clone}': {e}"),
           });
         });
       }
@@ -2845,10 +2827,10 @@ pub fn get_deployment_yaml(name: String, namespace: String, cx: &mut App) {
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
     let yaml = match result {
       Ok(y) => y,
-      Err(e) => format!("Error: {}", e),
+      Err(e) => format!("Error: {e}"),
     };
 
     cx.update(|cx| {
@@ -2889,7 +2871,7 @@ pub fn create_deployment(options: crate::kubernetes::CreateDeploymentOptions, cx
   });
 
   cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
 
     cx.update(|cx| match result {
       Ok(msg) => {
@@ -2904,7 +2886,7 @@ pub fn create_deployment(options: crate::kubernetes::CreateDeploymentOptions, cx
         fail_task(cx, task_id, e.to_string());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to create deployment '{}': {}", name, e),
+            error: format!("Failed to create deployment '{name}': {e}"),
           });
         });
       }

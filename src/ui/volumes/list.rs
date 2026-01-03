@@ -225,7 +225,7 @@ impl VolumeList {
     if let Some(input) = &self.search_input {
       let current_text = input.read(cx).text().to_string();
       if current_text != self.search_query {
-        self.search_query = current_text.clone();
+        current_text.clone_into(&mut self.search_query);
         self.list_state.update(cx, |state, cx| {
           state.delegate_mut().set_search_query(current_text);
           cx.notify();
@@ -353,9 +353,9 @@ impl Render for VolumeList {
     }
 
     let subtitle = if is_filtering {
-      format!("{} of {} ({} total)", filtered_count, total_count, total_size)
+      format!("{filtered_count} of {total_count} ({total_size} total)")
     } else {
-      format!("{} total", total_size)
+      format!("{total_size} total")
     };
 
     // Toolbar
@@ -381,7 +381,7 @@ impl Render for VolumeList {
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))
               .when(search_visible, Button::primary)
-              .when(!search_visible, |b| b.ghost())
+              .when(!search_visible, ButtonVariants::ghost)
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {
                 this.toggle_search(window, cx);

@@ -181,7 +181,7 @@ impl CreateServiceDialog {
     let service_type = self
       .service_type_select
       .as_ref()
-      .and_then(|s| s.read(cx).selected_value().cloned())
+      .and_then(|s| s.read(cx).selected_value().copied())
       .unwrap_or_default();
 
     let ports: Vec<ServicePortConfig> = self
@@ -284,7 +284,7 @@ impl CreateServiceDialog {
     let service_type = self
       .service_type_select
       .as_ref()
-      .and_then(|s| s.read(cx).selected_value().cloned())
+      .and_then(|s| s.read(cx).selected_value().copied())
       .unwrap_or_default();
     let show_node_port = matches!(service_type, ServiceType::NodePort | ServiceType::LoadBalancer);
 
@@ -332,7 +332,7 @@ impl CreateServiceDialog {
                     .label("TCP")
                     .xsmall()
                     .when(port_protocol_tcp, Button::primary)
-                    .when(!port_protocol_tcp, |b| b.ghost())
+                    .when(!port_protocol_tcp, ButtonVariants::ghost)
                     .on_click(cx.listener(|this, _ev, _window, cx| {
                       this.port_protocol_tcp = true;
                       cx.notify();
@@ -343,7 +343,7 @@ impl CreateServiceDialog {
                     .label("UDP")
                     .xsmall()
                     .when(!port_protocol_tcp, Button::primary)
-                    .when(port_protocol_tcp, |b| b.ghost())
+                    .when(port_protocol_tcp, ButtonVariants::ghost)
                     .on_click(cx.listener(|this, _ev, _window, cx| {
                       this.port_protocol_tcp = false;
                       cx.notify();
@@ -433,7 +433,7 @@ impl CreateServiceDialog {
           .rounded(px(4.))
           .child(div().flex_1().text_sm().text_color(foreground_color).child(display))
           .child(
-            Button::new(SharedString::from(format!("remove-port-{}", idx)))
+            Button::new(SharedString::from(format!("remove-port-{idx}")))
               .icon(IconName::Minus)
               .xsmall()
               .ghost()
@@ -526,7 +526,7 @@ impl CreateServiceDialog {
               .child(selector.value.clone()),
           )
           .child(
-            Button::new(SharedString::from(format!("remove-selector-{}", idx)))
+            Button::new(SharedString::from(format!("remove-selector-{idx}")))
               .icon(IconName::Minus)
               .xsmall()
               .ghost()
@@ -564,8 +564,8 @@ impl Render for CreateServiceDialog {
 
     let tabs = [
       "General".to_string(),
-      format!("Ports ({})", ports_count),
-      format!("Selectors ({})", selectors_count),
+      format!("Ports ({ports_count})"),
+      format!("Selectors ({selectors_count})"),
     ];
 
     let on_tab_change: Rc<dyn Fn(&usize, &mut Window, &mut App)> =
@@ -581,7 +581,7 @@ impl Render for CreateServiceDialog {
         TabBar::new("create-service-tabs").children(tabs.iter().enumerate().map(|(i, label)| {
           let on_tab_change = on_tab_change.clone();
           Tab::new()
-            .label(label.to_string())
+            .label(label.clone())
             .selected(active_tab == i)
             .on_click(move |_ev, window, cx| {
               on_tab_change(&i, window, cx);

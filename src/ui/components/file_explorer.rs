@@ -11,7 +11,7 @@ use gpui_component::{
 use std::rc::Rc;
 
 /// Trait for file entry types that can be displayed in the file explorer.
-/// All file entry types (ContainerFileEntry, VolumeFileEntry, VmFileEntry) implement this.
+/// All file entry types (`ContainerFileEntry`, `VolumeFileEntry`, `VmFileEntry`) implement this.
 pub trait FileEntry: Clone {
   fn name(&self) -> &str;
   fn path(&self) -> &str;
@@ -165,7 +165,7 @@ impl FileExplorerConfig {
   }
 }
 
-/// Generic file explorer component that works with any FileEntry type
+/// Generic file explorer component that works with any `FileEntry` type
 pub struct FileExplorer<F: FileEntry + 'static> {
   files: Vec<F>,
   state: FileExplorerState,
@@ -272,7 +272,7 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
 
     let mut file_list = v_flex().gap(px(2.));
 
-    for file in self.files.iter() {
+    for file in &self.files {
       let file_path_nav = file.path().to_string();
       let file_path_select = file.path().to_string();
       let file_path_symlink = file.path().to_string();
@@ -537,8 +537,8 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
     );
 
     // Owner column (optional)
-    if self.config.show_owner {
-      if let Some(owner) = file.owner() {
+    if self.config.show_owner
+      && let Some(owner) = file.owner() {
         row = row.child(
           div()
             .text_xs()
@@ -549,7 +549,6 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
             .child(owner.to_string()),
         );
       }
-    }
 
     // Permissions column
     row = row.child(
@@ -561,8 +560,8 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
     );
 
     // Modified column (optional)
-    if self.config.show_modified {
-      if let Some(modified) = file.modified() {
+    if self.config.show_modified
+      && let Some(modified) = file.modified() {
         row = row.child(
           div()
             .text_xs()
@@ -573,7 +572,6 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
             .child(modified.to_string()),
         );
       }
-    }
 
     row
   }

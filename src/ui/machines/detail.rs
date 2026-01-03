@@ -230,9 +230,7 @@ impl MachineDetail {
     // Get colima version
     let colima_version = self
       .machine_state
-      .as_ref()
-      .map(|s| s.colima_version.clone())
-      .unwrap_or_else(|| "Loading...".to_string());
+      .as_ref().map_or_else(|| "Loading...".to_string(), |s| s.colima_version.clone());
 
     // Basic info rows
     let mut basic_info = vec![
@@ -295,7 +293,7 @@ impl MachineDetail {
   fn render_processes_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
-    let is_loading = self.machine_state.as_ref().map(|s| s.stats_loading).unwrap_or(true);
+    let is_loading = self.machine_state.as_ref().is_none_or(|s| s.stats_loading);
 
     let processes = self
       .machine_state
@@ -323,7 +321,7 @@ impl MachineDetail {
 
     // Parse process lines
     let lines: Vec<&str> = procs.lines().collect();
-    let _header = lines.first().cloned().unwrap_or("");
+    let _header = lines.first().copied().unwrap_or("");
     let data_lines = lines.iter().skip(1);
 
     div()
@@ -449,7 +447,7 @@ impl MachineDetail {
                       .text_xs()
                       .text_color(cpu_color)
                       .text_right()
-                      .child(format!("{}", cpu)),
+                      .child(cpu.to_string()),
                   )
                   .child(
                     div()
@@ -457,7 +455,7 @@ impl MachineDetail {
                       .text_xs()
                       .text_color(mem_color)
                       .text_right()
-                      .child(format!("{}", mem)),
+                      .child(mem.to_string()),
                   )
                   .child(
                     div()
@@ -481,7 +479,7 @@ impl MachineDetail {
   fn render_stats_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
-    let is_loading = self.machine_state.as_ref().map(|s| s.stats_loading).unwrap_or(true);
+    let is_loading = self.machine_state.as_ref().is_none_or(|s| s.stats_loading);
 
     let disk_usage = self
       .machine_state
@@ -557,7 +555,7 @@ impl MachineDetail {
             div()
               .text_sm()
               .text_color(colors.muted_foreground)
-              .child(format!("{} / {}", used, total)),
+              .child(format!("{used} / {total}")),
           ),
       )
       // Progress bar
@@ -591,7 +589,7 @@ impl MachineDetail {
               .text_sm()
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(bar_color)
-              .child(format!("{:.1}%", percent)),
+              .child(format!("{percent:.1}%")),
           ),
       )
   }
@@ -638,7 +636,7 @@ impl MachineDetail {
             div()
               .text_sm()
               .text_color(colors.muted_foreground)
-              .child(format!("{} / {}", used, total)),
+              .child(format!("{used} / {total}")),
           ),
       )
       // Progress bar
@@ -672,7 +670,7 @@ impl MachineDetail {
               .text_sm()
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(bar_color)
-              .child(format!("{:.1}%", percent)),
+              .child(format!("{percent:.1}%")),
           ),
       )
   }
@@ -733,7 +731,7 @@ impl MachineDetail {
 
   fn render_logs_tab(&self, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
-    let is_loading = self.machine_state.as_ref().map(|s| s.logs_loading).unwrap_or(false);
+    let is_loading = self.machine_state.as_ref().is_some_and(|s| s.logs_loading);
     let current_log_type = self.machine_state.as_ref().map(|s| s.log_type).unwrap_or_default();
     let on_refresh = self.on_refresh_logs.clone();
     let on_log_type_change = self.on_log_type_change.clone();
@@ -751,7 +749,7 @@ impl MachineDetail {
             .label("System")
             .compact()
             .when(current_log_type == MachineLogType::System, Button::primary)
-            .when(current_log_type != MachineLogType::System, |b| b.ghost())
+            .when(current_log_type != MachineLogType::System, ButtonVariants::ghost)
             .when_some(on_system, |btn, cb| {
               btn.on_click(move |_ev, window, cx| {
                 cb(&MachineLogType::System, window, cx);
@@ -763,7 +761,7 @@ impl MachineDetail {
             .label("Docker")
             .compact()
             .when(current_log_type == MachineLogType::Docker, Button::primary)
-            .when(current_log_type != MachineLogType::Docker, |b| b.ghost())
+            .when(current_log_type != MachineLogType::Docker, ButtonVariants::ghost)
             .when_some(on_docker, |btn, cb| {
               btn.on_click(move |_ev, window, cx| {
                 cb(&MachineLogType::Docker, window, cx);
@@ -775,7 +773,7 @@ impl MachineDetail {
             .label("Containerd")
             .compact()
             .when(current_log_type == MachineLogType::Containerd, Button::primary)
-            .when(current_log_type != MachineLogType::Containerd, |b| b.ghost())
+            .when(current_log_type != MachineLogType::Containerd, ButtonVariants::ghost)
             .when_some(on_containerd, |btn, cb| {
               btn.on_click(move |_ev, window, cx| {
                 cb(&MachineLogType::Containerd, window, cx);
@@ -925,11 +923,11 @@ impl MachineDetail {
     let state = self.machine_state.as_ref();
 
     let explorer_state = FileExplorerState {
-      current_path: state.map(|s| s.current_path.clone()).unwrap_or_else(|| "/".to_string()),
-      is_loading: state.map(|s| s.files_loading).unwrap_or(false),
+      current_path: state.map_or_else(|| "/".to_string(), |s| s.current_path.clone()),
+      is_loading: state.is_some_and(|s| s.files_loading),
       selected_file: state.and_then(|s| s.selected_file.clone()),
       file_content: state.map(|s| s.file_content.clone()).unwrap_or_default(),
-      file_content_loading: state.map(|s| s.file_content_loading).unwrap_or(false),
+      file_content_loading: state.is_some_and(|s| s.file_content_loading),
     };
 
     let files = state.map(|s| s.files.clone()).unwrap_or_default();
@@ -960,7 +958,7 @@ impl MachineDetail {
 
     if let Some(ref cb) = self.on_close_file_viewer {
       let cb = cb.clone();
-      explorer = explorer.on_close_viewer(move |_, window, cx| {
+      explorer = explorer.on_close_viewer(move |(), window, cx| {
         cb(&(), window, cx);
       });
     }
@@ -1017,7 +1015,7 @@ impl MachineDetail {
           .children(tabs.iter().enumerate().map(|(i, label)| {
             let on_tab_change = on_tab_change.clone();
             Tab::new()
-              .label(label.to_string())
+              .label((*label).to_string())
               .selected(self.active_tab == i)
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tab_change {
@@ -1121,7 +1119,6 @@ impl MachineDetail {
       result = result.child(div().flex_1().min_h_0().w_full().overflow_hidden().child(content));
     } else {
       let content = match self.active_tab {
-        0 => self.render_info_tab(machine, cx),
         1 => self.render_processes_tab(cx),
         2 => self.render_stats_tab(cx),
         _ => self.render_info_tab(machine, cx),
@@ -1142,7 +1139,7 @@ impl MachineDetail {
 }
 
 /// Parse memory info from "free -h" output
-/// Returns (used, total, percent_used)
+/// Returns (used, total, `percent_used`)
 fn parse_memory_info(info: &str) -> (String, String, f64) {
   // Format:
   //               total        used        free      shared  buff/cache   available
@@ -1190,13 +1187,12 @@ fn parse_memory_value(s: &str) -> f64 {
     "gi" | "g" => value * 1024.0 * 1024.0 * 1024.0,
     "mi" | "m" => value * 1024.0 * 1024.0,
     "ki" | "k" => value * 1024.0,
-    "b" | "" => value,
     _ => value,
   }
 }
 
 /// Parse disk info from "df -h /" output
-/// Returns (used, total, percent_used)
+/// Returns (used, total, `percent_used`)
 fn parse_disk_info(info: &str) -> (String, String, f64) {
   // Format:
   // Filesystem      Size  Used Avail Use% Mounted on

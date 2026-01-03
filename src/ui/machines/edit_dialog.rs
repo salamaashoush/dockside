@@ -94,18 +94,15 @@ impl EditMachineDialog {
     let cpus: u32 = self
       .cpus_input
       .as_ref()
-      .map(|s| s.read(cx).text().to_string().parse().unwrap_or(2))
-      .unwrap_or(2);
+      .map_or(2, |s| s.read(cx).text().to_string().parse().unwrap_or(2));
     let memory: u32 = self
       .memory_input
       .as_ref()
-      .map(|s| s.read(cx).text().to_string().parse().unwrap_or(2))
-      .unwrap_or(2);
+      .map_or(2, |s| s.read(cx).text().to_string().parse().unwrap_or(2));
     let disk: u32 = self
       .disk_input
       .as_ref()
-      .map(|s| s.read(cx).text().to_string().parse().unwrap_or(60))
-      .unwrap_or(60);
+      .map_or(60, |s| s.read(cx).text().to_string().parse().unwrap_or(60));
 
     ColimaStartOptions::new()
       .with_name(self.machine_name.clone())
@@ -228,8 +225,8 @@ impl Render for EditMachineDialog {
                         Button::new("runtime-docker")
                             .label("Docker")
                             .small()
-                            .when(runtime == VmRuntime::Docker, |btn| btn.primary())
-                            .when(runtime != VmRuntime::Docker, |btn| btn.ghost())
+                            .when(runtime == VmRuntime::Docker, ButtonVariants::primary)
+                            .when(runtime != VmRuntime::Docker, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.runtime = VmRuntime::Docker;
                                 cx.notify();
@@ -239,8 +236,8 @@ impl Render for EditMachineDialog {
                         Button::new("runtime-containerd")
                             .label("Containerd")
                             .small()
-                            .when(runtime == VmRuntime::Containerd, |btn| btn.primary())
-                            .when(runtime != VmRuntime::Containerd, |btn| btn.ghost())
+                            .when(runtime == VmRuntime::Containerd, ButtonVariants::primary)
+                            .when(runtime != VmRuntime::Containerd, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.runtime = VmRuntime::Containerd;
                                 cx.notify();
@@ -264,8 +261,8 @@ impl Render for EditMachineDialog {
                         Button::new("vm-qemu")
                             .label("QEMU")
                             .small()
-                            .when(vm_type == VmType::Qemu, |btn| btn.primary())
-                            .when(vm_type != VmType::Qemu, |btn| btn.ghost())
+                            .when(vm_type == VmType::Qemu, ButtonVariants::primary)
+                            .when(vm_type != VmType::Qemu, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.vm_type = VmType::Qemu;
                                 cx.notify();
@@ -275,8 +272,8 @@ impl Render for EditMachineDialog {
                         Button::new("vm-vz")
                             .label("Apple VZ")
                             .small()
-                            .when(vm_type == VmType::Vz, |btn| btn.primary())
-                            .when(vm_type != VmType::Vz, |btn| btn.ghost())
+                            .when(vm_type == VmType::Vz, ButtonVariants::primary)
+                            .when(vm_type != VmType::Vz, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.vm_type = VmType::Vz;
                                 cx.notify();
@@ -294,8 +291,8 @@ impl Render for EditMachineDialog {
                         Button::new("arch-aarch64")
                             .label("arm64")
                             .small()
-                            .when(arch == VmArch::Aarch64, |btn| btn.primary())
-                            .when(arch != VmArch::Aarch64, |btn| btn.ghost())
+                            .when(arch == VmArch::Aarch64, ButtonVariants::primary)
+                            .when(arch != VmArch::Aarch64, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.arch = VmArch::Aarch64;
                                 cx.notify();
@@ -305,8 +302,8 @@ impl Render for EditMachineDialog {
                         Button::new("arch-x86")
                             .label("x86_64")
                             .small()
-                            .when(arch == VmArch::X86_64, |btn| btn.primary())
-                            .when(arch != VmArch::X86_64, |btn| btn.ghost())
+                            .when(arch == VmArch::X86_64, ButtonVariants::primary)
+                            .when(arch != VmArch::X86_64, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.arch = VmArch::X86_64;
                                 cx.notify();
@@ -330,8 +327,8 @@ impl Render for EditMachineDialog {
                         Button::new("mount-sshfs")
                             .label("SSHFS")
                             .small()
-                            .when(mount_type == MountType::Sshfs, |btn| btn.primary())
-                            .when(mount_type != MountType::Sshfs, |btn| btn.ghost())
+                            .when(mount_type == MountType::Sshfs, ButtonVariants::primary)
+                            .when(mount_type != MountType::Sshfs, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.mount_type = MountType::Sshfs;
                                 cx.notify();
@@ -341,8 +338,8 @@ impl Render for EditMachineDialog {
                         Button::new("mount-9p")
                             .label("9P")
                             .small()
-                            .when(mount_type == MountType::NineP, |btn| btn.primary())
-                            .when(mount_type != MountType::NineP, |btn| btn.ghost())
+                            .when(mount_type == MountType::NineP, ButtonVariants::primary)
+                            .when(mount_type != MountType::NineP, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.mount_type = MountType::NineP;
                                 cx.notify();
@@ -352,8 +349,8 @@ impl Render for EditMachineDialog {
                         Button::new("mount-virtiofs")
                             .label("VirtioFS")
                             .small()
-                            .when(mount_type == MountType::Virtiofs, |btn| btn.primary())
-                            .when(mount_type != MountType::Virtiofs, |btn| btn.ghost())
+                            .when(mount_type == MountType::Virtiofs, ButtonVariants::primary)
+                            .when(mount_type != MountType::Virtiofs, ButtonVariants::ghost)
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.mount_type = MountType::Virtiofs;
                                 cx.notify();

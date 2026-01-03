@@ -79,7 +79,7 @@ impl TaskManager {
   }
 }
 
-/// Global wrapper for TaskManager
+/// Global wrapper for `TaskManager`
 pub struct GlobalTaskManager(pub Entity<TaskManager>);
 
 impl Global for GlobalTaskManager {}

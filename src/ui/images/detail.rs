@@ -109,7 +109,7 @@ impl ImageDetail {
 
     // Platform
     if let (Some(os), Some(arch)) = (&image.os, &image.architecture) {
-      basic_info.push(("Platform", format!("{}/{}", os, arch)));
+      basic_info.push(("Platform", format!("{os}/{arch}")));
     }
 
     let mut content = v_flex()
@@ -395,7 +395,7 @@ impl ImageDetail {
                                     .text_color(colors.foreground)
                                     .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(key.to_string()),
+                                    .child((*key).clone()),
                             )
                             .child(
                                 div()
@@ -404,7 +404,7 @@ impl ImageDetail {
                                     .text_color(colors.secondary_foreground)
                                     .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(value.to_string()),
+                                    .child((*value).clone()),
                             );
 
                         if i > 0 {
@@ -445,7 +445,7 @@ impl ImageDetail {
           .children(tabs.iter().enumerate().map(|(i, label)| {
             let on_tab_change = on_tab_change.clone();
             Tab::new()
-              .label(label.to_string())
+              .label((*label).to_string())
               .selected(self.active_tab == i)
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tab_change {
@@ -469,10 +469,7 @@ impl ImageDetail {
       }));
 
     // Content based on active tab
-    let content = match self.active_tab {
-      0 => self.render_info_tab(image, cx),
-      _ => self.render_info_tab(image, cx),
-    };
+    let content = self.render_info_tab(image, cx);
 
     div()
       .size_full()

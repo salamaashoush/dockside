@@ -102,8 +102,6 @@ impl DockerClient {
     })
   }
 
-  /// Check if an image exists locally
-
   /// Pull an image from a registry
   pub async fn pull_image(&self, image: &str, platform: Option<&str>) -> Result<()> {
     let docker = self.client()?;
@@ -138,7 +136,7 @@ impl DockerClient {
           // Progress info available in _info.status, _info.progress, etc.
         }
         Err(e) => {
-          return Err(anyhow::anyhow!("Failed to pull image: {}", e));
+          return Err(anyhow::anyhow!("Failed to pull image: {e}"));
         }
       }
     }

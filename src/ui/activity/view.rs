@@ -231,7 +231,7 @@ impl ActivityMonitorView {
                                     .text_sm()
                                     .text_color(colors.foreground)
                                     .text_right()
-                                    .child(format!("{:.1}", total_cpu)),
+                                    .child(format!("{total_cpu:.1}")),
                             )
                             .child(
                                 div()
@@ -420,7 +420,7 @@ impl ActivityMonitorView {
 
   fn render_mini_chart(&self, history: &[f64], color: Hsla) -> impl IntoElement {
     // Simple bar chart visualization
-    let max_value = history.iter().cloned().fold(0.0f64, f64::max).max(1.0);
+    let max_value = history.iter().copied().fold(0.0f64, f64::max).max(1.0);
 
     h_flex()
       .w_full()
@@ -468,7 +468,7 @@ fn format_bytes(bytes: u64) -> String {
   } else if bytes >= KB {
     format!("{:.0} KB", bytes as f64 / KB as f64)
   } else {
-    format!("{} B", bytes)
+    format!("{bytes} B")
   }
 }
 

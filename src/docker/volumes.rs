@@ -32,13 +32,11 @@ impl VolumeInfo {
   pub fn display_size(&self) -> String {
     self
       .usage_data
-      .as_ref()
-      .map(|u| bytesize::ByteSize(u.size as u64).to_string())
-      .unwrap_or_else(|| "Unknown".to_string())
+      .as_ref().map_or_else(|| "Unknown".to_string(), |u| bytesize::ByteSize(u.size as u64).to_string())
   }
 
   pub fn is_in_use(&self) -> bool {
-    self.usage_data.as_ref().map(|u| u.ref_count > 0).unwrap_or(false)
+    self.usage_data.as_ref().is_some_and(|u| u.ref_count > 0)
   }
 }
 
@@ -91,7 +89,7 @@ impl DockerClient {
         mountpoint: volume.mountpoint,
         created,
         labels: volume.labels,
-        scope: volume.scope.map(|s| format!("{:?}", s)).unwrap_or_default(),
+        scope: volume.scope.map(|s| format!("{s:?}")).unwrap_or_default(),
         status: None,
         usage_data,
       });
@@ -136,7 +134,7 @@ impl DockerClient {
       mountpoint: volume.mountpoint,
       created,
       labels: volume.labels,
-      scope: volume.scope.map(|s| format!("{:?}", s)).unwrap_or_default(),
+      scope: volume.scope.map(|s| format!("{s:?}")).unwrap_or_default(),
       status: None,
       usage_data: None,
     })
@@ -161,7 +159,7 @@ impl DockerClient {
       .duration_since(std::time::UNIX_EPOCH)
       .unwrap_or_default()
       .as_nanos();
-    let container_name = format!("docker-ui-vol-{}", timestamp);
+    let container_name = format!("docker-ui-vol-{timestamp}");
 
     let host_config = bollard::models::HostConfig {
       binds: Some(vec![format!("{}:/data:ro", volume_name)]),
@@ -254,9 +252,9 @@ impl DockerClient {
         }
 
         let file_path = if base_path == "/" {
-          format!("/{}", name)
+          format!("/{name}")
         } else {
-          format!("{}/{}", base_path, name)
+          format!("{base_path}/{name}")
         };
 
         entries.push(VolumeFileEntry {
@@ -292,7 +290,7 @@ impl DockerClient {
       .duration_since(std::time::UNIX_EPOCH)
       .unwrap_or_default()
       .as_nanos();
-    let container_name = format!("docker-ui-vol-read-{}", timestamp);
+    let container_name = format!("docker-ui-vol-read-{timestamp}");
 
     let host_config = bollard::models::HostConfig {
       binds: Some(vec![format!("{}:/data:ro", volume_name)]),
@@ -367,7 +365,7 @@ impl DockerClient {
       .duration_since(std::time::UNIX_EPOCH)
       .unwrap_or_default()
       .as_nanos();
-    let container_name = format!("docker-ui-vol-link-{}", timestamp);
+    let container_name = format!("docker-ui-vol-link-{timestamp}");
 
     let host_config = bollard::models::HostConfig {
       binds: Some(vec![format!("{}:/data:ro", volume_name)]),
@@ -442,7 +440,7 @@ impl DockerClient {
       .duration_since(std::time::UNIX_EPOCH)
       .unwrap_or_default()
       .as_nanos();
-    let container_name = format!("docker-ui-vol-dir-{}", timestamp);
+    let container_name = format!("docker-ui-vol-dir-{timestamp}");
 
     let host_config = bollard::models::HostConfig {
       binds: Some(vec![format!("{}:/data:ro", volume_name)]),

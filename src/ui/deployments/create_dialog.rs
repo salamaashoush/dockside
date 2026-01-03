@@ -243,16 +243,14 @@ impl CreateDeploymentDialog {
 
     let replicas: i32 = self
       .replicas_input
-      .as_ref()
-      .map(|s| s.read(cx).text().to_string())
-      .unwrap_or_else(|| "1".to_string())
+      .as_ref().map_or_else(|| "1".to_string(), |s| s.read(cx).text().to_string())
       .parse()
       .unwrap_or(1);
 
     let pull_policy = self
       .pull_policy_select
       .as_ref()
-      .and_then(|s| s.read(cx).selected_value().cloned())
+      .and_then(|s| s.read(cx).selected_value().copied())
       .unwrap_or_default();
 
     let cpu_limit = self
@@ -495,7 +493,7 @@ impl CreateDeploymentDialog {
                   .label("TCP")
                   .xsmall()
                   .when(port_protocol_tcp, Button::primary)
-                  .when(!port_protocol_tcp, |b| b.ghost())
+                  .when(!port_protocol_tcp, ButtonVariants::ghost)
                   .on_click(cx.listener(|this, _ev, _window, cx| {
                     this.port_protocol_tcp = true;
                     cx.notify();
@@ -506,7 +504,7 @@ impl CreateDeploymentDialog {
                   .label("UDP")
                   .xsmall()
                   .when(!port_protocol_tcp, Button::primary)
-                  .when(port_protocol_tcp, |b| b.ghost())
+                  .when(port_protocol_tcp, ButtonVariants::ghost)
                   .on_click(cx.listener(|this, _ev, _window, cx| {
                     this.port_protocol_tcp = false;
                     cx.notify();
@@ -569,7 +567,7 @@ impl CreateDeploymentDialog {
           .rounded(px(4.))
           .child(div().flex_1().text_sm().text_color(foreground_color).child(display))
           .child(
-            Button::new(SharedString::from(format!("remove-port-{}", idx)))
+            Button::new(SharedString::from(format!("remove-port-{idx}")))
               .icon(IconName::Minus)
               .xsmall()
               .ghost()
@@ -656,7 +654,7 @@ impl CreateDeploymentDialog {
               .child(env.value.clone()),
           )
           .child(
-            Button::new(SharedString::from(format!("remove-env-{}", idx)))
+            Button::new(SharedString::from(format!("remove-env-{idx}")))
               .icon(IconName::Minus)
               .xsmall()
               .ghost()
@@ -749,7 +747,7 @@ impl CreateDeploymentDialog {
               .child(label.value.clone()),
           )
           .child(
-            Button::new(SharedString::from(format!("remove-label-{}", idx)))
+            Button::new(SharedString::from(format!("remove-label-{idx}")))
               .icon(IconName::Minus)
               .xsmall()
               .ghost()
@@ -789,9 +787,9 @@ impl Render for CreateDeploymentDialog {
     let tabs = [
       "General".to_string(),
       "Resources".to_string(),
-      format!("Ports ({})", ports_count),
-      format!("Env ({})", env_count),
-      format!("Labels ({})", labels_count),
+      format!("Ports ({ports_count})"),
+      format!("Env ({env_count})"),
+      format!("Labels ({labels_count})"),
     ];
 
     let on_tab_change: Rc<dyn Fn(&usize, &mut Window, &mut App)> =
@@ -807,7 +805,7 @@ impl Render for CreateDeploymentDialog {
         TabBar::new("create-deployment-tabs").children(tabs.iter().enumerate().map(|(i, label)| {
           let on_tab_change = on_tab_change.clone();
           Tab::new()
-            .label(label.to_string())
+            .label(label.clone())
             .selected(active_tab == i)
             .on_click(move |_ev, window, cx| {
               on_tab_change(&i, window, cx);

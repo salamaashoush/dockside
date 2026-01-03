@@ -145,7 +145,7 @@ impl Render for PruneDialog {
             div()
               .text_sm()
               .text_color(colors.danger)
-              .child(format!("Error: {}", error)),
+              .child(format!("Error: {error}")),
           )
       } else if let Some(result) = &display.result {
         v_flex()
