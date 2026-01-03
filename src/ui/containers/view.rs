@@ -11,6 +11,7 @@ use crate::docker::ContainerInfo;
 use crate::services;
 use crate::state::{DockerState, StateChanged, docker_state, settings_state};
 use crate::terminal::{TerminalSessionType, TerminalView};
+use crate::ui::components::detect_language_from_path;
 
 use super::create_dialog::CreateContainerDialog;
 use super::detail::{ContainerDetail, ContainerTabState};
@@ -25,10 +26,12 @@ pub struct ContainersView {
   terminal_view: Option<Entity<TerminalView>>,
   logs_editor: Option<Entity<InputState>>,
   inspect_editor: Option<Entity<InputState>>,
+  file_content_editor: Option<Entity<InputState>>,
   container_tab_state: ContainerTabState,
   // Track what we've synced to editors to prevent infinite loops
   last_synced_logs: String,
   last_synced_inspect: String,
+  last_synced_file_content: String,
 }
 
 impl ContainersView {
@@ -131,9 +134,11 @@ impl ContainersView {
       terminal_view: None,
       logs_editor: None,
       inspect_editor: None,
+      file_content_editor: None,
       container_tab_state: ContainerTabState::new(),
       last_synced_logs: String::new(),
       last_synced_inspect: String::new(),
+      last_synced_file_content: String::new(),
     }
   }
 
@@ -462,6 +467,141 @@ impl ContainersView {
     .detach();
   }
 
+  fn on_file_select(&mut self, path: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+    // Detect language from file extension
+    let language = detect_language_from_path(path);
+
+    // Create file content editor with detected language
+    self.file_content_editor = Some(cx.new(|cx| {
+      InputState::new(window, cx)
+        .multi_line(true)
+        .code_editor(language)
+        .line_number(true)
+        .searchable(true)
+        .soft_wrap(false)
+    }));
+
+    // Clear synced tracking for new file
+    self.last_synced_file_content.clear();
+
+    // Set selected file in state
+    self.container_tab_state.selected_file = Some(path.to_string());
+    self.container_tab_state.file_content_loading = true;
+    cx.notify();
+
+    // Load file content
+    if let Some(ref container) = self.selected_container {
+      self.load_container_file_content(&container.id.clone(), path, cx);
+    }
+  }
+
+  fn on_close_file_viewer(&mut self, cx: &mut Context<'_, Self>) {
+    self.container_tab_state.selected_file = None;
+    self.container_tab_state.file_content.clear();
+    self.file_content_editor = None;
+    self.last_synced_file_content.clear();
+    cx.notify();
+  }
+
+  fn load_container_file_content(&mut self, container_id: &str, path: &str, cx: &mut Context<'_, Self>) {
+    let id = container_id.to_string();
+    let path = path.to_string();
+    let tokio_handle = services::Tokio::runtime_handle();
+    let client = services::docker_client();
+
+    cx.spawn(async move |this, cx| {
+      let content = cx
+        .background_executor()
+        .spawn(async move {
+          tokio_handle.block_on(async {
+            let guard = client.read().await;
+            match guard.as_ref() {
+              Some(c) => c.read_container_file(&id, &path).await.ok(),
+              None => None,
+            }
+          })
+        })
+        .await;
+
+      let _ = this.update(cx, |this, cx| {
+        this.container_tab_state.file_content = content.unwrap_or_else(|| "Failed to read file".to_string());
+        this.container_tab_state.file_content_loading = false;
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  fn on_symlink_follow(&mut self, path: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+    if let Some(ref container) = self.selected_container.clone() {
+      if !container.state.is_running() {
+        return;
+      }
+
+      let id = container.id.clone();
+      let path = path.to_string();
+      let tokio_handle = services::Tokio::runtime_handle();
+      let client = services::docker_client();
+
+      // Create file content editor in case symlink points to a file
+      let language = detect_language_from_path(&path);
+      let file_editor = cx.new(|cx| {
+        InputState::new(window, cx)
+          .multi_line(true)
+          .code_editor(language)
+          .line_number(true)
+          .searchable(true)
+          .soft_wrap(false)
+      });
+
+      cx.spawn(async move |this, cx| {
+        let result = cx
+          .background_executor()
+          .spawn(async move {
+            tokio_handle.block_on(async {
+              let guard = client.read().await;
+              match guard.as_ref() {
+                Some(c) => {
+                  // Resolve symlink and check if it's a directory
+                  if let Ok(target) = c.resolve_symlink(&id, &path).await {
+                    let is_dir = c.is_directory(&id, &target).await.unwrap_or(false);
+                    Some((target, is_dir))
+                  } else {
+                    None
+                  }
+                }
+                None => None,
+              }
+            })
+          })
+          .await;
+
+        let _ = this.update(cx, |this, cx| {
+          if let Some((target, is_dir)) = result {
+            if is_dir {
+              // Navigate to directory
+              this.container_tab_state.current_path = target;
+              if let Some(ref container) = this.selected_container {
+                this.load_container_files(&container.id.clone(), &this.container_tab_state.current_path.clone(), cx);
+              }
+            } else {
+              // View file - set up the editor
+              this.file_content_editor = Some(file_editor.clone());
+              this.last_synced_file_content.clear();
+              this.container_tab_state.selected_file = Some(target.clone());
+              this.container_tab_state.file_content_loading = true;
+              if let Some(ref container) = this.selected_container {
+                this.load_container_file_content(&container.id.clone(), &target, cx);
+              }
+            }
+          }
+          cx.notify();
+        });
+      })
+      .detach();
+    }
+  }
+
   fn load_container_data(
     &mut self,
     container_id: &str,
@@ -569,6 +709,21 @@ impl Render for ContainersView {
       }
     }
 
+    // Sync file content editor
+    if let Some(ref editor) = self.file_content_editor {
+      let content = &self.container_tab_state.file_content;
+      if !content.is_empty()
+        && !self.container_tab_state.file_content_loading
+        && self.last_synced_file_content != *content
+      {
+        let content_clone = content.clone();
+        editor.update(cx, |state, cx| {
+          state.replace(&content_clone, window, cx);
+        });
+        self.last_synced_file_content = content.clone();
+      }
+    }
+
     let colors = cx.theme().colors;
     let selected_container = self.selected_container.clone();
     let active_tab = self.active_tab;
@@ -576,6 +731,7 @@ impl Render for ContainersView {
     let terminal_view = self.terminal_view.clone();
     let logs_editor = self.logs_editor.clone();
     let inspect_editor = self.inspect_editor.clone();
+    let file_content_editor = self.file_content_editor.clone();
 
     // Build detail panel
     let detail = ContainerDetail::new()
@@ -585,6 +741,7 @@ impl Render for ContainersView {
       .terminal_view(terminal_view)
       .logs_editor(logs_editor)
       .inspect_editor(inspect_editor)
+      .file_content_editor(file_content_editor)
       .on_tab_change(cx.listener(|this, tab: &usize, window, cx| {
         this.on_tab_change(*tab, window, cx);
       }))
@@ -593,6 +750,15 @@ impl Render for ContainersView {
       }))
       .on_navigate_path(cx.listener(|this, path: &str, _window, cx| {
         this.on_navigate_path(path, cx);
+      }))
+      .on_file_select(cx.listener(|this, path: &str, window, cx| {
+        this.on_file_select(path, window, cx);
+      }))
+      .on_close_file_viewer(cx.listener(|this, _: &(), _window, cx| {
+        this.on_close_file_viewer(cx);
+      }))
+      .on_symlink_click(cx.listener(|this, path: &str, window, cx| {
+        this.on_symlink_follow(path, window, cx);
       }))
       .on_start(cx.listener(|_this, id: &str, _window, cx| {
         services::start_container(id.to_string(), cx);

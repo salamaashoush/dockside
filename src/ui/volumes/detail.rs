@@ -1,8 +1,9 @@
-use gpui::{App, Styled, Window, div, prelude::*, px};
+use gpui::{App, Entity, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, IconName, Selectable, Sizable,
+  Icon, Selectable, Sizable,
   button::{Button, ButtonVariants},
   h_flex,
+  input::InputState,
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -12,10 +13,14 @@ use std::rc::Rc;
 
 use crate::assets::AppIcon;
 use crate::docker::{VolumeFileEntry, VolumeInfo};
+use crate::ui::components::{FileExplorer, FileExplorerConfig, FileExplorerState};
 
 type VolumeActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
 type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
+type FileSelectCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
+type CloseViewerCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
+type SymlinkClickCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 
 /// State for volume detail tabs
 #[derive(Debug, Clone, Default)]
@@ -23,6 +28,12 @@ pub struct VolumeTabState {
   pub current_path: String,
   pub files: Vec<VolumeFileEntry>,
   pub files_loading: bool,
+  /// Selected file path for viewing
+  pub selected_file: Option<String>,
+  /// Content of selected file
+  pub file_content: String,
+  /// Whether file content is loading
+  pub file_content_loading: bool,
 }
 
 impl VolumeTabState {
@@ -38,9 +49,13 @@ pub struct VolumeDetail {
   volume: Option<VolumeInfo>,
   active_tab: usize,
   volume_state: Option<VolumeTabState>,
+  file_content_editor: Option<Entity<InputState>>,
   on_delete: Option<VolumeActionCallback>,
   on_tab_change: Option<TabChangeCallback>,
   on_navigate_path: Option<FileNavigateCallback>,
+  on_file_select: Option<FileSelectCallback>,
+  on_close_file_viewer: Option<CloseViewerCallback>,
+  on_symlink_click: Option<SymlinkClickCallback>,
 }
 
 impl VolumeDetail {
@@ -49,9 +64,13 @@ impl VolumeDetail {
       volume: None,
       active_tab: 0,
       volume_state: None,
+      file_content_editor: None,
       on_delete: None,
       on_tab_change: None,
       on_navigate_path: None,
+      on_file_select: None,
+      on_close_file_viewer: None,
+      on_symlink_click: None,
     }
   }
 
@@ -67,6 +86,11 @@ impl VolumeDetail {
 
   pub fn volume_state(mut self, state: VolumeTabState) -> Self {
     self.volume_state = Some(state);
+    self
+  }
+
+  pub fn file_content_editor(mut self, editor: Option<Entity<InputState>>) -> Self {
+    self.file_content_editor = editor;
     self
   }
 
@@ -91,6 +115,30 @@ impl VolumeDetail {
     F: Fn(&str, &mut Window, &mut App) + 'static,
   {
     self.on_navigate_path = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_file_select<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_file_select = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_close_file_viewer<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&(), &mut Window, &mut App) + 'static,
+  {
+    self.on_close_file_viewer = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_symlink_click<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_symlink_click = Some(Rc::new(callback));
     self
   }
 
@@ -292,161 +340,57 @@ impl VolumeDetail {
       )
   }
 
-  fn render_files_tab(&self, cx: &App) -> gpui::Div {
-    let colors = &cx.theme().colors;
+  fn render_files_tab(&self, window: &mut Window, cx: &App) -> gpui::AnyElement {
+    let state = self.volume_state.as_ref();
 
-    let current_path = self
-      .volume_state
-      .as_ref()
-      .map(|s| s.current_path.clone())
-      .unwrap_or_else(|| "/".to_string());
-
-    let files = self.volume_state.as_ref().map(|s| s.files.clone()).unwrap_or_default();
-
-    let is_loading = self.volume_state.as_ref().map(|s| s.files_loading).unwrap_or(false);
-
-    let on_navigate = self.on_navigate_path.clone();
-    let on_navigate_up = self.on_navigate_path.clone();
-
-    // Calculate parent path
-    let parent_path = if current_path == "/" {
-      "/".to_string()
-    } else {
-      let parts: Vec<&str> = current_path.trim_end_matches('/').split('/').collect();
-      if parts.len() <= 2 {
-        "/".to_string()
-      } else {
-        parts[..parts.len() - 1].join("/")
-      }
+    let explorer_state = FileExplorerState {
+      current_path: state.map(|s| s.current_path.clone()).unwrap_or_else(|| "/".to_string()),
+      is_loading: state.map(|s| s.files_loading).unwrap_or(false),
+      selected_file: state.and_then(|s| s.selected_file.clone()),
+      file_content: state.map(|s| s.file_content.clone()).unwrap_or_default(),
+      file_content_loading: state.map(|s| s.file_content_loading).unwrap_or(false),
     };
 
-    let mut file_list = v_flex().gap(px(2.));
+    let files = state.map(|s| s.files.clone()).unwrap_or_default();
 
-    for file in files.iter() {
-      let file_path = file.path.clone();
-      let is_dir = file.is_dir;
-      let cb = on_navigate.clone();
+    let mut explorer = FileExplorer::new()
+      .files(files)
+      .state(explorer_state)
+      .config(FileExplorerConfig::default().empty_message("Volume is empty"))
+      .file_content_editor(self.file_content_editor.clone());
 
-      file_list = file_list.child(self.render_file_entry(file, cx).when(is_dir, |el| {
-        el.cursor_pointer().when_some(cb, move |el, cb| {
-          let path = file_path.clone();
-          el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
-            cb(&path, window, cx);
-          })
-        })
-      }));
+    if let Some(ref cb) = self.on_navigate_path {
+      let cb = cb.clone();
+      explorer = explorer.on_navigate(move |path, window, cx| {
+        cb(path, window, cx);
+      });
     }
 
-    v_flex()
-      .flex_1()
-      .w_full()
-      .p(px(16.))
-      .gap(px(8.))
-      .child(
-        h_flex()
-          .items_center()
-          .gap(px(8.))
-          .child(Button::new("up").icon(IconName::ArrowUp).ghost().compact().when_some(
-            on_navigate_up,
-            move |btn, cb| {
-              let path = parent_path.clone();
-              btn.on_click(move |_ev, window, cx| {
-                cb(&path, window, cx);
-              })
-            },
-          ))
-          .child(
-            div()
-              .flex_1()
-              .px(px(12.))
-              .py(px(8.))
-              .bg(colors.background)
-              .rounded(px(6.))
-              .text_sm()
-              .text_color(colors.secondary_foreground)
-              .child(current_path),
-          ),
-      )
-      .child(
-        div()
-          .flex_1()
-          .w_full()
-          .bg(colors.background)
-          .rounded(px(8.))
-          .p(px(8.))
-          .overflow_y_scrollbar()
-          .when(is_loading, |el| {
-            el.child(
-              div()
-                .p(px(16.))
-                .text_sm()
-                .text_color(colors.muted_foreground)
-                .child("Loading..."),
-            )
-          })
-          .when(!is_loading && files.is_empty(), |el| {
-            el.child(
-              div()
-                .p(px(16.))
-                .text_sm()
-                .text_color(colors.muted_foreground)
-                .child("Volume is empty"),
-            )
-          })
-          .when(!is_loading && !files.is_empty(), |el| el.child(file_list)),
-      )
+    if let Some(ref cb) = self.on_file_select {
+      let cb = cb.clone();
+      explorer = explorer.on_file_select(move |path, window, cx| {
+        cb(path, window, cx);
+      });
+    }
+
+    if let Some(ref cb) = self.on_close_file_viewer {
+      let cb = cb.clone();
+      explorer = explorer.on_close_viewer(move |_, window, cx| {
+        cb(&(), window, cx);
+      });
+    }
+
+    if let Some(ref cb) = self.on_symlink_click {
+      let cb = cb.clone();
+      explorer = explorer.on_symlink_click(move |path, window, cx| {
+        cb(path, window, cx);
+      });
+    }
+
+    explorer.render(window, cx)
   }
 
-  fn render_file_entry(&self, file: &VolumeFileEntry, cx: &App) -> gpui::Div {
-    let colors = &cx.theme().colors;
-    let icon = if file.is_dir {
-      IconName::Folder
-    } else if file.is_symlink {
-      IconName::ExternalLink
-    } else {
-      IconName::File
-    };
-
-    let icon_color = if file.is_dir {
-      colors.warning
-    } else if file.is_symlink {
-      colors.info
-    } else {
-      colors.secondary_foreground
-    };
-
-    h_flex()
-      .w_full()
-      .px(px(12.))
-      .py(px(8.))
-      .rounded(px(4.))
-      .items_center()
-      .gap(px(10.))
-      .hover(|s| s.bg(colors.sidebar))
-      .child(Icon::new(icon).text_color(icon_color))
-      .child(
-        div()
-          .flex_1()
-          .text_sm()
-          .text_color(colors.foreground)
-          .child(file.name.clone()),
-      )
-      .child(
-        div()
-          .text_xs()
-          .text_color(colors.muted_foreground)
-          .child(file.display_size()),
-      )
-      .child(
-        div()
-          .text_xs()
-          .text_color(colors.muted_foreground)
-          .w(px(80.))
-          .child(file.permissions.clone()),
-      )
-  }
-
-  pub fn render(self, _window: &mut Window, cx: &App) -> gpui::AnyElement {
+  pub fn render(self, window: &mut Window, cx: &App) -> gpui::AnyElement {
     let colors = &cx.theme().colors;
 
     let Some(volume) = &self.volume else {
@@ -500,26 +444,33 @@ impl VolumeDetail {
       }));
 
     // Content based on active tab
-    let content = match self.active_tab {
-      0 => self.render_info_tab(volume, cx),
-      1 => self.render_files_tab(cx),
-      _ => self.render_info_tab(volume, cx),
-    };
+    let is_files_tab = self.active_tab == 1;
 
-    div()
-      .size_full()
-      .bg(colors.sidebar)
-      .flex()
-      .flex_col()
-      .child(toolbar)
-      .child(
+    let mut result = div().size_full().bg(colors.sidebar).flex().flex_col().child(toolbar);
+
+    if is_files_tab {
+      // Files tab handles its own scrolling (for file viewer)
+      result = result.child(
+        div()
+          .flex_1()
+          .min_h_0()
+          .w_full()
+          .overflow_hidden()
+          .child(self.render_files_tab(window, cx)),
+      );
+    } else {
+      // Info tab with scroll container
+      let content = self.render_info_tab(volume, cx);
+      result = result.child(
         div()
           .id("volume-detail-scroll")
           .flex_1()
           .overflow_y_scrollbar()
           .child(content)
           .child(div().h(px(100.))),
-      )
-      .into_any_element()
+      );
+    }
+
+    result.into_any_element()
   }
 }

@@ -540,15 +540,22 @@ impl DockerClient {
 
       let permissions = parts[0].to_string();
       let size: u64 = parts[4].parse().unwrap_or(0);
-      let name = parts[8..].join(" ");
+      let raw_name = parts[8..].join(" ");
+
+      let is_dir = permissions.starts_with('d');
+      let is_symlink = permissions.starts_with('l');
+
+      // For symlinks, extract just the name part (before ->)
+      let name = if is_symlink {
+        raw_name.split(" -> ").next().unwrap_or(&raw_name).to_string()
+      } else {
+        raw_name
+      };
 
       // Skip . and ..
       if name == "." || name == ".." {
         continue;
       }
-
-      let is_dir = permissions.starts_with('d');
-      let is_symlink = permissions.starts_with('l');
 
       let full_path = if path == "/" {
         format!("/{}", name)
@@ -556,15 +563,8 @@ impl DockerClient {
         format!("{}/{}", path.trim_end_matches('/'), name)
       };
 
-      // For symlinks, extract just the name part (before ->)
-      let display_name = if is_symlink {
-        name.split(" -> ").next().unwrap_or(&name).to_string()
-      } else {
-        name
-      };
-
       entries.push(ContainerFileEntry {
-        name: display_name,
+        name: name.clone(),
         path: full_path,
         is_dir,
         is_symlink,
@@ -581,5 +581,27 @@ impl DockerClient {
     });
 
     Ok(entries)
+  }
+
+  /// Read file content from a container
+  pub async fn read_container_file(&self, id: &str, path: &str) -> Result<String> {
+    // Use cat to read file content
+    let output = self.exec_command(id, vec!["cat", path]).await?;
+    Ok(output)
+  }
+
+  /// Resolve a symlink to get its target path
+  pub async fn resolve_symlink(&self, id: &str, path: &str) -> Result<String> {
+    // Use readlink -f to get the absolute target path
+    let output = self.exec_command(id, vec!["readlink", "-f", path]).await?;
+    Ok(output.trim().to_string())
+  }
+
+  /// Check if a path is a directory
+  pub async fn is_directory(&self, id: &str, path: &str) -> Result<bool> {
+    let output = self
+      .exec_command(id, vec!["sh", "-c", &format!("test -d '{}' && echo dir", path)])
+      .await;
+    Ok(output.map(|s| s.contains("dir")).unwrap_or(false))
   }
 }

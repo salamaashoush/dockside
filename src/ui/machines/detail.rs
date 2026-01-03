@@ -12,9 +12,10 @@ use gpui_component::{
 use std::rc::Rc;
 
 use crate::assets::AppIcon;
-use crate::colima::{ColimaVm, VmFileEntry};
+use crate::colima::ColimaVm;
 use crate::state::{MachineLogType, MachineTabState};
 use crate::terminal::TerminalView;
+use crate::ui::components::{FileExplorer, FileExplorerConfig, FileExplorerState};
 
 type MachineActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type MachineEditCallback = Rc<dyn Fn(&ColimaVm, &mut Window, &mut App) + 'static>;
@@ -22,7 +23,8 @@ type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
 type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
 type LogTypeCallback = Rc<dyn Fn(&MachineLogType, &mut Window, &mut App) + 'static>;
-type FileSelectCallback = Rc<dyn Fn(&String, &mut Window, &mut App) + 'static>;
+type FileSelectCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
+type SymlinkClickCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 
 pub struct MachineDetail {
   machine: Option<ColimaVm>,
@@ -42,6 +44,7 @@ pub struct MachineDetail {
   on_log_type_change: Option<LogTypeCallback>,
   on_file_select: Option<FileSelectCallback>,
   on_close_file_viewer: Option<RefreshCallback>,
+  on_symlink_click: Option<SymlinkClickCallback>,
 }
 
 impl MachineDetail {
@@ -64,6 +67,7 @@ impl MachineDetail {
       on_log_type_change: None,
       on_file_select: None,
       on_close_file_viewer: None,
+      on_symlink_click: None,
     }
   }
 
@@ -171,7 +175,7 @@ impl MachineDetail {
 
   pub fn on_file_select<F>(mut self, callback: F) -> Self
   where
-    F: Fn(&String, &mut Window, &mut App) + 'static,
+    F: Fn(&str, &mut Window, &mut App) + 'static,
   {
     self.on_file_select = Some(Rc::new(callback));
     self
@@ -182,6 +186,14 @@ impl MachineDetail {
     F: Fn(&(), &mut Window, &mut App) + 'static,
   {
     self.on_close_file_viewer = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_symlink_click<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_symlink_click = Some(Rc::new(callback));
     self
   }
 
@@ -321,7 +333,7 @@ impl MachineDetail {
 
     // Parse process lines
     let lines: Vec<&str> = procs.lines().collect();
-    let header = lines.first().cloned().unwrap_or("");
+    let _header = lines.first().cloned().unwrap_or("");
     let data_lines = lines.iter().skip(1);
 
     div()
@@ -921,296 +933,63 @@ impl MachineDetail {
       )
   }
 
-  fn render_files_tab(&self, cx: &App) -> gpui::Div {
-    let colors = &cx.theme().colors;
+  fn render_files_tab(&self, window: &mut Window, cx: &App) -> gpui::AnyElement {
+    let state = self.machine_state.as_ref();
 
-    // Check if viewing file content
-    let selected_file = self
-      .machine_state
-      .as_ref()
-      .and_then(|s| s.selected_file.clone());
+    let explorer_state = FileExplorerState {
+      current_path: state.map(|s| s.current_path.clone()).unwrap_or_else(|| "/".to_string()),
+      is_loading: state.map(|s| s.files_loading).unwrap_or(false),
+      selected_file: state.and_then(|s| s.selected_file.clone()),
+      file_content: state.map(|s| s.file_content.clone()).unwrap_or_default(),
+      file_content_loading: state.map(|s| s.file_content_loading).unwrap_or(false),
+    };
 
-    if let Some(ref file_path) = selected_file {
-      return self.render_file_viewer(file_path, cx);
+    let files = state.map(|s| s.files.clone()).unwrap_or_default();
+
+    let mut explorer = FileExplorer::new()
+      .files(files)
+      .state(explorer_state)
+      .config(
+        FileExplorerConfig::default()
+          .empty_message("Directory is empty")
+          .show_owner(true),
+      )
+      .file_content_editor(self.file_content_editor.clone());
+
+    if let Some(ref cb) = self.on_navigate_path {
+      let cb = cb.clone();
+      explorer = explorer.on_navigate(move |path, window, cx| {
+        cb(path, window, cx);
+      });
     }
 
-    let current_path = self
-      .machine_state
-      .as_ref()
-      .map(|s| s.current_path.clone())
-      .unwrap_or_else(|| "/".to_string());
-
-    let files = self.machine_state.as_ref().map(|s| s.files.clone()).unwrap_or_default();
-
-    let is_loading = self.machine_state.as_ref().map(|s| s.files_loading).unwrap_or(false);
-
-    let on_navigate = self.on_navigate_path.clone();
-    let on_navigate_up = self.on_navigate_path.clone();
-    let on_file_select = self.on_file_select.clone();
-
-    // Calculate parent path
-    let parent_path = if current_path == "/" {
-      "/".to_string()
-    } else {
-      let parts: Vec<&str> = current_path.trim_end_matches('/').split('/').collect();
-      if parts.len() <= 2 {
-        "/".to_string()
-      } else {
-        parts[..parts.len() - 1].join("/")
-      }
-    };
-
-    let mut file_list = v_flex().gap(px(2.));
-
-    for file in files.iter() {
-      let file_path_nav = file.path.clone();
-      let file_path_select = file.path.clone();
-      let is_dir = file.is_dir;
-      let nav_cb = on_navigate.clone();
-      let select_cb = on_file_select.clone();
-
-      file_list = file_list.child(
-        self
-          .render_file_entry(file, cx)
-          .cursor_pointer()
-          .when(is_dir, |el| {
-            el.when_some(nav_cb, move |el, cb| {
-              let path = file_path_nav.clone();
-              el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
-                cb(&path, window, cx);
-              })
-            })
-          })
-          .when(!is_dir, |el| {
-            el.when_some(select_cb, move |el, cb| {
-              let path = file_path_select.clone();
-              el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
-                cb(&path, window, cx);
-              })
-            })
-          }),
-      );
+    if let Some(ref cb) = self.on_file_select {
+      let cb = cb.clone();
+      explorer = explorer.on_file_select(move |path, window, cx| {
+        cb(path, window, cx);
+      });
     }
 
-    v_flex()
-      .flex_1()
-      .w_full()
-      .p(px(16.))
-      .gap(px(8.))
-      .child(
-        h_flex()
-          .items_center()
-          .gap(px(8.))
-          .child(Button::new("up").icon(IconName::ArrowUp).ghost().compact().when_some(
-            on_navigate_up,
-            move |btn, cb| {
-              let path = parent_path.clone();
-              btn.on_click(move |_ev, window, cx| {
-                cb(&path, window, cx);
-              })
-            },
-          ))
-          .child(
-            div()
-              .flex_1()
-              .px(px(12.))
-              .py(px(8.))
-              .bg(colors.background)
-              .rounded(px(6.))
-              .text_sm()
-              .text_color(colors.secondary_foreground)
-              .child(current_path),
-          ),
-      )
-      .child(
-        div()
-          .flex_1()
-          .w_full()
-          .bg(colors.background)
-          .rounded(px(8.))
-          .p(px(8.))
-          .overflow_y_scrollbar()
-          .when(is_loading, |el| {
-            el.child(
-              div()
-                .p(px(16.))
-                .text_sm()
-                .text_color(colors.muted_foreground)
-                .child("Loading..."),
-            )
-          })
-          .when(!is_loading && files.is_empty(), |el| {
-            el.child(
-              div()
-                .p(px(16.))
-                .text_sm()
-                .text_color(colors.muted_foreground)
-                .child("Directory is empty"),
-            )
-          })
-          .when(!is_loading && !files.is_empty(), |el| el.child(file_list)),
-      )
-  }
+    if let Some(ref cb) = self.on_close_file_viewer {
+      let cb = cb.clone();
+      explorer = explorer.on_close_viewer(move |_, window, cx| {
+        cb(&(), window, cx);
+      });
+    }
 
-  fn render_file_viewer(&self, file_path: &str, cx: &App) -> gpui::Div {
-    let colors = &cx.theme().colors;
+    if let Some(ref cb) = self.on_symlink_click {
+      let cb = cb.clone();
+      explorer = explorer.on_symlink_click(move |path, window, cx| {
+        cb(path, window, cx);
+      });
+    }
 
-    let is_loading = self
-      .machine_state
-      .as_ref()
-      .map(|s| s.file_content_loading)
-      .unwrap_or(false);
-
-    let on_close = self.on_close_file_viewer.clone();
-
-    // Extract file name from path
-    let file_name = file_path
-      .rsplit('/')
-      .next()
-      .unwrap_or(file_path)
-      .to_string();
-
-    div()
-      .size_full()
-      .flex()
-      .flex_col()
-      .child(
-        h_flex()
-          .w_full()
-          .px(px(16.))
-          .py(px(8.))
-          .items_center()
-          .gap(px(8.))
-          .flex_shrink_0()
-          .child(
-            Button::new("back")
-              .icon(IconName::ArrowLeft)
-              .ghost()
-              .compact()
-              .when_some(on_close, |btn, cb| {
-                btn.on_click(move |_ev, window, cx| {
-                  cb(&(), window, cx);
-                })
-              }),
-          )
-          .child(Icon::new(IconName::File).text_color(colors.secondary_foreground))
-          .child(
-            div()
-              .flex_1()
-              .text_sm()
-              .font_weight(gpui::FontWeight::MEDIUM)
-              .text_color(colors.foreground)
-              .overflow_hidden()
-              .text_ellipsis()
-              .child(file_name),
-          )
-          .child(
-            div()
-              .text_xs()
-              .text_color(colors.muted_foreground)
-              .overflow_hidden()
-              .text_ellipsis()
-              .child(file_path.to_string()),
-          ),
-      )
-      .when(is_loading, |el| {
-        el.child(
-          div()
-            .flex_1()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-              div()
-                .text_sm()
-                .text_color(colors.muted_foreground)
-                .child("Loading file..."),
-            ),
-        )
-      })
-      .when(!is_loading, |el| {
-        if let Some(ref editor) = self.file_content_editor {
-          el.child(
-            div()
-              .flex_1()
-              .min_h_0()
-              .child(Input::new(editor).size_full().appearance(false)),
-          )
-        } else {
-          // Fallback if no editor
-          let content = self
-            .machine_state
-            .as_ref()
-            .map(|s| s.file_content.clone())
-            .unwrap_or_default();
-
-          el.child(
-            div()
-              .flex_1()
-              .min_h_0()
-              .overflow_y_scrollbar()
-              .p(px(12.))
-              .font_family("monospace")
-              .text_xs()
-              .text_color(colors.foreground)
-              .child(content),
-          )
-        }
-      })
-  }
-
-  fn render_file_entry(&self, file: &VmFileEntry, cx: &App) -> gpui::Div {
-    let colors = &cx.theme().colors;
-    let icon = if file.is_dir {
-      IconName::Folder
-    } else if file.is_symlink {
-      IconName::ExternalLink
-    } else {
-      IconName::File
-    };
-
-    let icon_color = if file.is_dir {
-      colors.warning
-    } else if file.is_symlink {
-      colors.info
-    } else {
-      colors.secondary_foreground
-    };
-
-    h_flex()
-      .w_full()
-      .px(px(12.))
-      .py(px(8.))
-      .rounded(px(4.))
-      .items_center()
-      .gap(px(10.))
-      .hover(|s| s.bg(colors.sidebar))
-      .child(Icon::new(icon).text_color(icon_color))
-      .child(
-        div()
-          .flex_1()
-          .text_sm()
-          .text_color(colors.foreground)
-          .child(file.name.clone()),
-      )
-      .child(
-        div()
-          .text_xs()
-          .text_color(colors.muted_foreground)
-          .child(file.display_size()),
-      )
-      .child(
-        div()
-          .text_xs()
-          .text_color(colors.muted_foreground)
-          .w(px(80.))
-          .child(file.permissions.clone()),
-      )
+    explorer.render(window, cx)
   }
 }
 
 impl MachineDetail {
-  pub fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+  pub fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let colors = &cx.theme().colors;
 
     let Some(machine) = &self.machine else {
@@ -1333,25 +1112,26 @@ impl MachineDetail {
           }),
       );
 
-    // Content based on active tab
-    let content = match self.active_tab {
-      0 => self.render_info_tab(machine, cx),
-      1 => self.render_processes_tab(cx),
-      2 => self.render_stats_tab(cx),
-      3 => self.render_logs_tab(cx),
-      4 => self.render_terminal_tab(cx),
-      5 => self.render_files_tab(cx),
-      _ => self.render_info_tab(machine, cx),
-    };
-
-    // Terminal and Logs tabs need full height without scroll (they handle their own scrolling)
-    let is_full_height_tab = self.active_tab == 3 || self.active_tab == 4;
+    // Terminal, Logs, and Files tabs need full height without scroll (they handle their own scrolling)
+    let is_full_height_tab = self.active_tab == 3 || self.active_tab == 4 || self.active_tab == 5;
 
     let mut result = div().size_full().bg(colors.sidebar).flex().flex_col().overflow_hidden().child(toolbar);
 
     if is_full_height_tab {
+      let content = match self.active_tab {
+        3 => self.render_logs_tab(cx).into_any_element(),
+        4 => self.render_terminal_tab(cx).into_any_element(),
+        5 => self.render_files_tab(window, cx),
+        _ => self.render_info_tab(machine, cx).into_any_element(),
+      };
       result = result.child(div().flex_1().min_h_0().w_full().overflow_hidden().child(content));
     } else {
+      let content = match self.active_tab {
+        0 => self.render_info_tab(machine, cx),
+        1 => self.render_processes_tab(cx),
+        2 => self.render_stats_tab(cx),
+        _ => self.render_info_tab(machine, cx),
+      };
       result = result.child(
         div()
           .id("machine-detail-scroll")

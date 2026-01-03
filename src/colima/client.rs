@@ -587,6 +587,18 @@ impl ColimaClient {
     )
   }
 
+  /// Resolve a symlink to its target path
+  pub fn resolve_symlink(&self, name: Option<&str>, path: &str) -> Result<String> {
+    let output = self.run_command(name, &format!("readlink -f {} 2>/dev/null", path))?;
+    Ok(output.trim().to_string())
+  }
+
+  /// Check if a path is a directory
+  pub fn is_directory(&self, name: Option<&str>, path: &str) -> Result<bool> {
+    let output = self.run_command(name, &format!("test -d '{}' && echo dir", path))?;
+    Ok(output.contains("dir"))
+  }
+
   /// Get disk usage info from the VM
   pub fn get_disk_usage(&self, name: Option<&str>) -> Result<String> {
     self.run_command(name, "df -h / 2>/dev/null || echo 'Unable to get disk usage'")

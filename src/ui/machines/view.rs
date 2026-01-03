@@ -438,6 +438,122 @@ impl MachinesView {
     self.last_synced_file_content.clear();
     cx.notify();
   }
+
+  fn on_symlink_follow(&mut self, path: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+    if let Some(ref machine) = self.selected_machine.clone() {
+      let machine_name = machine.name.clone();
+      let path = path.to_string();
+
+      // Create file content editor in case symlink points to a file
+      let language = detect_language_from_path(&path);
+      let file_editor = cx.new(|cx| {
+        InputState::new(window, cx)
+          .multi_line(true)
+          .code_editor(language)
+          .line_number(true)
+          .searchable(true)
+          .soft_wrap(false)
+      });
+
+      cx.spawn(async move |this, cx| {
+        let result = cx
+          .background_executor()
+          .spawn(async move {
+            let colima = crate::colima::ColimaClient::new();
+            let name_opt = if machine_name == "default" {
+              None
+            } else {
+              Some(machine_name.as_str())
+            };
+            // Resolve symlink and check if it's a directory
+            if let Ok(target) = colima.resolve_symlink(name_opt, &path) {
+              let is_dir = colima.is_directory(name_opt, &target).unwrap_or(false);
+              Some((target, is_dir))
+            } else {
+              None
+            }
+          })
+          .await;
+
+        let _ = this.update(cx, |this, cx| {
+          if let Some((target, is_dir)) = result {
+            if is_dir {
+              // Navigate to directory
+              this.machine_tab_state.current_path = target.clone();
+              this.machine_tab_state.files_loading = true;
+              cx.notify();
+
+              // Load files for the new path
+              if let Some(ref machine) = this.selected_machine {
+                let machine_name = machine.name.clone();
+                let path = target.clone();
+
+                cx.spawn(async move |this, cx| {
+                  let files = cx
+                    .background_executor()
+                    .spawn(async move {
+                      let colima = crate::colima::ColimaClient::new();
+                      let name_opt = if machine_name == "default" {
+                        None
+                      } else {
+                        Some(machine_name.as_str())
+                      };
+                      colima.list_files(name_opt, &path).unwrap_or_default()
+                    })
+                    .await;
+
+                  let _ = this.update(cx, |this, cx| {
+                    this.machine_tab_state.files = files;
+                    this.machine_tab_state.files_loading = false;
+                    cx.notify();
+                  });
+                })
+                .detach();
+              }
+            } else {
+              // View file - set up the editor
+              this.file_content_editor = Some(file_editor.clone());
+              this.last_synced_file_content.clear();
+              this.machine_tab_state.selected_file = Some(target.clone());
+              this.machine_tab_state.file_content_loading = true;
+
+              // Load file content
+              if let Some(ref machine) = this.selected_machine {
+                let machine_name = machine.name.clone();
+                let file_path = target.clone();
+
+                cx.spawn(async move |this, cx| {
+                  let content = cx
+                    .background_executor()
+                    .spawn(async move {
+                      let colima = crate::colima::ColimaClient::new();
+                      let name_opt = if machine_name == "default" {
+                        None
+                      } else {
+                        Some(machine_name.as_str())
+                      };
+                      colima
+                        .read_file(name_opt, &file_path, 1000)
+                        .unwrap_or_else(|_| "Failed to read file".to_string())
+                    })
+                    .await;
+
+                  let _ = this.update(cx, |this, cx| {
+                    this.machine_tab_state.file_content = content;
+                    this.machine_tab_state.file_content_loading = false;
+                    cx.notify();
+                  });
+                })
+                .detach();
+              }
+            }
+          }
+          cx.notify();
+        });
+      })
+      .detach();
+    }
+  }
 }
 
 impl Render for MachinesView {
@@ -497,11 +613,14 @@ impl Render for MachinesView {
       .on_log_type_change(cx.listener(|this, log_type: &crate::state::MachineLogType, _window, cx| {
         this.on_log_type_change(*log_type, cx);
       }))
-      .on_file_select(cx.listener(|this, path: &String, window, cx| {
+      .on_file_select(cx.listener(|this, path: &str, window, cx| {
         this.on_file_select(path, window, cx);
       }))
       .on_close_file_viewer(cx.listener(|this, _: &(), _window, cx| {
         this.on_close_file_viewer(cx);
+      }))
+      .on_symlink_click(cx.listener(|this, path: &str, window, cx| {
+        this.on_symlink_follow(path, window, cx);
       }))
       .on_start(cx.listener(|_this, name: &str, _window, cx| {
         services::start_machine(name.to_string(), cx);

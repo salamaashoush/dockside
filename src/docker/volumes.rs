@@ -237,14 +237,21 @@ impl DockerClient {
       if parts.len() >= 9 {
         let permissions = parts[0].to_string();
         let size: u64 = parts[4].parse().unwrap_or(0);
-        let name = parts[8..].join(" ");
+        let raw_name = parts[8..].join(" ");
+
+        let is_dir = permissions.starts_with('d');
+        let is_symlink = permissions.starts_with('l');
+
+        // For symlinks, extract just the name part (before ->)
+        let name = if is_symlink {
+          raw_name.split(" -> ").next().unwrap_or(&raw_name).to_string()
+        } else {
+          raw_name
+        };
 
         if name == "." || name == ".." {
           continue;
         }
-
-        let is_dir = permissions.starts_with('d');
-        let is_symlink = permissions.starts_with('l');
 
         let file_path = if base_path == "/" {
           format!("/{}", name)
@@ -253,7 +260,7 @@ impl DockerClient {
         };
 
         entries.push(VolumeFileEntry {
-          name,
+          name: name.clone(),
           path: file_path,
           is_dir,
           is_symlink,
@@ -271,5 +278,232 @@ impl DockerClient {
     });
 
     Ok(entries)
+  }
+
+  /// Read file content from a volume using a temporary container
+  pub async fn read_volume_file(&self, volume_name: &str, path: &str) -> Result<String> {
+    let docker = self.client()?;
+
+    // Normalize path - volume is mounted at /data
+    let normalized_path = format!("/data{}", path.trim_start_matches('/'));
+
+    // Create a temporary container that runs cat command and exits
+    let timestamp = std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .unwrap_or_default()
+      .as_nanos();
+    let container_name = format!("docker-ui-vol-read-{}", timestamp);
+
+    let host_config = bollard::models::HostConfig {
+      binds: Some(vec![format!("{}:/data:ro", volume_name)]),
+      ..Default::default()
+    };
+
+    let config = ContainerCreateBody {
+      image: Some("alpine:latest".to_string()),
+      cmd: Some(vec!["cat".to_string(), normalized_path]),
+      host_config: Some(host_config),
+      tty: Some(false),
+      attach_stdout: Some(true),
+      attach_stderr: Some(true),
+      ..Default::default()
+    };
+
+    let options = CreateContainerOptions {
+      name: Some(container_name.clone()),
+      ..Default::default()
+    };
+
+    // Create and start container
+    docker.create_container(Some(options), config).await?;
+    docker
+      .start_container(
+        &container_name,
+        None::<bollard::query_parameters::StartContainerOptions>,
+      )
+      .await?;
+
+    // Wait for container to finish
+    let mut wait_stream =
+      docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
+    while let Some(_) = wait_stream.next().await {}
+
+    // Get the logs (output of cat command)
+    let log_options = LogsOptions {
+      stdout: true,
+      stderr: true,
+      ..Default::default()
+    };
+
+    let mut logs_stream = docker.logs(&container_name, Some(log_options));
+    let mut output = String::new();
+    while let Some(chunk) = logs_stream.next().await {
+      if let Ok(log) = chunk {
+        output.push_str(&log.to_string());
+      }
+    }
+
+    // Remove the container
+    let _ = docker
+      .remove_container(
+        &container_name,
+        Some(RemoveContainerOptions {
+          force: true,
+          ..Default::default()
+        }),
+      )
+      .await;
+
+    Ok(output)
+  }
+
+  /// Resolve a symlink in a volume using a temporary container
+  pub async fn resolve_volume_symlink(&self, volume_name: &str, path: &str) -> Result<String> {
+    let docker = self.client()?;
+
+    let normalized_path = format!("/data{}", path.trim_start_matches('/'));
+
+    let timestamp = std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .unwrap_or_default()
+      .as_nanos();
+    let container_name = format!("docker-ui-vol-link-{}", timestamp);
+
+    let host_config = bollard::models::HostConfig {
+      binds: Some(vec![format!("{}:/data:ro", volume_name)]),
+      ..Default::default()
+    };
+
+    let config = ContainerCreateBody {
+      image: Some("alpine:latest".to_string()),
+      cmd: Some(vec!["readlink".to_string(), "-f".to_string(), normalized_path]),
+      host_config: Some(host_config),
+      tty: Some(false),
+      attach_stdout: Some(true),
+      attach_stderr: Some(true),
+      ..Default::default()
+    };
+
+    let options = CreateContainerOptions {
+      name: Some(container_name.clone()),
+      ..Default::default()
+    };
+
+    docker.create_container(Some(options), config).await?;
+    docker
+      .start_container(
+        &container_name,
+        None::<bollard::query_parameters::StartContainerOptions>,
+      )
+      .await?;
+
+    let mut wait_stream =
+      docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
+    while let Some(_) = wait_stream.next().await {}
+
+    let log_options = LogsOptions {
+      stdout: true,
+      stderr: true,
+      ..Default::default()
+    };
+
+    let mut logs_stream = docker.logs(&container_name, Some(log_options));
+    let mut output = String::new();
+    while let Some(chunk) = logs_stream.next().await {
+      if let Ok(log) = chunk {
+        output.push_str(&log.to_string());
+      }
+    }
+
+    let _ = docker
+      .remove_container(
+        &container_name,
+        Some(RemoveContainerOptions {
+          force: true,
+          ..Default::default()
+        }),
+      )
+      .await;
+
+    // Convert /data path back to volume-relative path
+    let result = output.trim().replace("/data", "");
+    let result = if result.is_empty() { "/".to_string() } else { result };
+
+    Ok(result)
+  }
+
+  /// Check if a path in a volume is a directory using a temporary container
+  pub async fn is_volume_directory(&self, volume_name: &str, path: &str) -> Result<bool> {
+    let docker = self.client()?;
+
+    let normalized_path = format!("/data{}", path.trim_start_matches('/'));
+
+    let timestamp = std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .unwrap_or_default()
+      .as_nanos();
+    let container_name = format!("docker-ui-vol-dir-{}", timestamp);
+
+    let host_config = bollard::models::HostConfig {
+      binds: Some(vec![format!("{}:/data:ro", volume_name)]),
+      ..Default::default()
+    };
+
+    let config = ContainerCreateBody {
+      image: Some("alpine:latest".to_string()),
+      cmd: Some(vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        format!("test -d '{}' && echo dir", normalized_path),
+      ]),
+      host_config: Some(host_config),
+      tty: Some(false),
+      attach_stdout: Some(true),
+      attach_stderr: Some(true),
+      ..Default::default()
+    };
+
+    let options = CreateContainerOptions {
+      name: Some(container_name.clone()),
+      ..Default::default()
+    };
+
+    docker.create_container(Some(options), config).await?;
+    docker
+      .start_container(
+        &container_name,
+        None::<bollard::query_parameters::StartContainerOptions>,
+      )
+      .await?;
+
+    let mut wait_stream =
+      docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
+    while let Some(_) = wait_stream.next().await {}
+
+    let log_options = LogsOptions {
+      stdout: true,
+      stderr: true,
+      ..Default::default()
+    };
+
+    let mut logs_stream = docker.logs(&container_name, Some(log_options));
+    let mut output = String::new();
+    while let Some(chunk) = logs_stream.next().await {
+      if let Ok(log) = chunk {
+        output.push_str(&log.to_string());
+      }
+    }
+
+    let _ = docker
+      .remove_container(
+        &container_name,
+        Some(RemoveContainerOptions {
+          force: true,
+          ..Default::default()
+        }),
+      )
+      .await;
+
+    Ok(output.contains("dir"))
   }
 }
