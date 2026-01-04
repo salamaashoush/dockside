@@ -14,7 +14,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui::{App, AppContext, Bounds, SharedString, Timer, TitlebarOptions, WindowBounds, WindowOptions, px, size};
+use gpui::{
+  App, AppContext, Bounds, SharedString, Timer, TitlebarOptions, WindowBounds, WindowHandle, WindowOptions, px, size,
+};
 use gpui_component::{
   Root,
   theme::{Theme, ThemeConfig, ThemeRegistry, ThemeSet},
@@ -25,6 +27,28 @@ use state::{AppSettings, CurrentView};
 use tray::{AppTray, menu_ids};
 
 pub use assets::Assets;
+
+/// Open the main application window
+fn open_main_window(cx: &mut App) -> WindowHandle<Root> {
+  let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
+
+  cx.open_window(
+    WindowOptions {
+      window_bounds: Some(WindowBounds::Windowed(bounds)),
+      titlebar: Some(TitlebarOptions {
+        title: Some("Dockside".into()),
+        appears_transparent: true,
+        traffic_light_position: Some(gpui::point(px(9.), px(9.))),
+      }),
+      ..Default::default()
+    },
+    |window, cx| {
+      let view = cx.new(|cx| app::DocksideApp::new(window, cx));
+      cx.new(|cx| Root::new(view, window, cx))
+    },
+  )
+  .expect("Failed to open window")
+}
 
 /// Get the themes directory path, checking multiple locations:
 /// 1. Bundle Resources/themes (for .app bundle)
@@ -90,7 +114,18 @@ fn main() {
     .with(tracing_subscriber::fmt::layer())
     .init();
 
-  gpui::Application::new().with_assets(Assets).run(|cx: &mut App| {
+  let app = gpui::Application::new().with_assets(Assets);
+
+  // Handle dock icon click when no windows are open
+  app.on_reopen(|cx| {
+    if cx.windows().is_empty() {
+      open_main_window(cx);
+    } else {
+      cx.activate(true);
+    }
+  });
+
+  app.run(|cx: &mut App| {
     // Initialize gpui-component
     gpui_component::init(cx);
 
@@ -125,24 +160,8 @@ fn main() {
     // Load initial data
     services::load_initial_data(cx);
 
-    let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
-
-    cx.open_window(
-      WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions {
-          title: Some("Dockside".into()),
-          appears_transparent: true,
-          traffic_light_position: Some(gpui::point(px(9.), px(9.))),
-        }),
-        ..Default::default()
-      },
-      |window, cx| {
-        let view = cx.new(|cx| app::DocksideApp::new(window, cx));
-        cx.new(|cx| Root::new(view, window, cx))
-      },
-    )
-    .expect("Failed to open window");
+    // Open the main window
+    open_main_window(cx);
 
     // Create tray icon after window is opened (deferred to ensure main thread is ready)
     cx.spawn(async move |cx| {
@@ -175,39 +194,46 @@ fn main() {
   });
 }
 
+/// Ensure window exists and activate it
+fn ensure_window_and_activate(cx: &mut App) {
+  if cx.windows().is_empty() {
+    open_main_window(cx);
+  }
+  cx.activate(true);
+}
+
 /// Handle tray menu events
 fn handle_tray_menu_event(id: &str, cx: &mut App) {
   match id {
     menu_ids::SHOW_APP => {
-      // Activate the app and bring window to front
-      cx.activate(true);
+      ensure_window_and_activate(cx);
     }
     menu_ids::CONTAINERS => {
-      cx.activate(true);
+      ensure_window_and_activate(cx);
       services::set_view(CurrentView::Containers, cx);
     }
     menu_ids::COMPOSE => {
-      cx.activate(true);
+      ensure_window_and_activate(cx);
       services::set_view(CurrentView::Compose, cx);
     }
     menu_ids::VOLUMES => {
-      cx.activate(true);
+      ensure_window_and_activate(cx);
       services::set_view(CurrentView::Volumes, cx);
     }
     menu_ids::IMAGES => {
-      cx.activate(true);
+      ensure_window_and_activate(cx);
       services::set_view(CurrentView::Images, cx);
     }
     menu_ids::NETWORKS => {
-      cx.activate(true);
+      ensure_window_and_activate(cx);
       services::set_view(CurrentView::Networks, cx);
     }
     menu_ids::ACTIVITY => {
-      cx.activate(true);
+      ensure_window_and_activate(cx);
       services::set_view(CurrentView::ActivityMonitor, cx);
     }
     menu_ids::MACHINES => {
-      cx.activate(true);
+      ensure_window_and_activate(cx);
       services::set_view(CurrentView::Machines, cx);
     }
     menu_ids::START_COLIMA => {
