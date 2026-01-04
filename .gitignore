@@ -17,7 +17,6 @@
 
 # App bundle artifacts
 *.iconset/
-assets/icon.png
 
 # Environment
 .env

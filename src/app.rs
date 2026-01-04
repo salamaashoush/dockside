@@ -116,12 +116,12 @@ impl DocksideApp {
         .await;
 
       // Check if setup is needed
-      // K8s issues: context mismatch OR K8s enabled but API not reachable
+      // K8s issues: only check context mismatch at startup (API check is slow and done in dialog)
       let has_k8s_issues = colima_installed
         && docker_installed
         && colima_running
         && k8s_diag.expected_context.is_some()
-        && (k8s_diag.context_mismatch || !k8s_diag.api_reachable);
+        && k8s_diag.context_mismatch;
 
       let needs_setup = !colima_installed || !docker_installed || !colima_running || has_k8s_issues;
 
