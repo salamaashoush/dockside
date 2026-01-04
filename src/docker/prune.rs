@@ -61,15 +61,16 @@ impl DockerClient {
     use std::collections::HashMap;
     let docker = self.client()?;
 
-    let options = PruneImagesOptions {
-      filters: if dangling_only {
-        let mut filters = HashMap::new();
-        filters.insert("dangling".to_string(), vec!["true".to_string()]);
-        Some(filters)
-      } else {
-        None
-      },
-    };
+    // Docker API: dangling=true removes only untagged images
+    //             dangling=false removes ALL unused images (like docker image prune -a)
+    //             No filter defaults to dangling=true
+    let mut filters = HashMap::new();
+    filters.insert(
+      "dangling".to_string(),
+      vec![if dangling_only { "true" } else { "false" }.to_string()],
+    );
+
+    let options = PruneImagesOptions { filters: Some(filters) };
 
     let response = docker.prune_images(Some(options)).await?;
 

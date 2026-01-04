@@ -78,6 +78,7 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
 
   let task_id = start_staged_task(cx, format!("Creating '{machine_name}'"), stages);
   let name_clone = machine_name.clone();
+  let name_for_context = machine_name.clone();
 
   let state = docker_state(cx);
   let disp = dispatcher(cx);
@@ -87,7 +88,24 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
       .background_executor()
       .spawn(async move {
         match ColimaClient::start(&options) {
-          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
+          Ok(()) => {
+            let vms = ColimaClient::list().unwrap_or_default();
+
+            // If kubernetes is enabled, switch kubectl context
+            if has_kubernetes {
+              let kubectl_context = if machine_name == "default" {
+                "colima".to_string()
+              } else {
+                format!("colima-{machine_name}")
+              };
+              // Try to switch kubectl context (don't fail if it doesn't work)
+              let _ = std::process::Command::new("kubectl")
+                .args(["config", "use-context", &kubectl_context])
+                .output();
+            }
+
+            Ok(vms)
+          }
           Err(e) => Err(e.to_string()),
         }
       })
@@ -105,12 +123,19 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
             message: format!("Machine '{name_clone}' created"),
           });
         });
+        // Refresh K8s data if kubernetes was enabled
+        if has_kubernetes {
+          refresh_pods(cx);
+          refresh_namespaces(cx);
+          refresh_services(cx);
+          refresh_deployments(cx);
+        }
       }
       Err(e) => {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to create '{name_clone}': {e}"),
+            error: format!("Failed to create '{name_for_context}': {e}"),
           });
         });
       }
@@ -122,6 +147,7 @@ pub fn create_machine(options: ColimaStartOptions, cx: &mut App) {
 pub fn start_machine(name: String, cx: &mut App) {
   let task_id = start_task(cx, format!("Starting '{name}'..."));
   let name_clone = name.clone();
+  let name_for_context = name.clone();
 
   let state = docker_state(cx);
   let disp = dispatcher(cx);
@@ -132,14 +158,33 @@ pub fn start_machine(name: String, cx: &mut App) {
       .spawn(async move {
         let options = ColimaStartOptions::new().with_name(name.clone());
         match ColimaClient::start(&options) {
-          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
+          Ok(()) => {
+            let vms = ColimaClient::list().unwrap_or_default();
+            // Check if the started machine has kubernetes enabled
+            let has_k8s = vms.iter().any(|vm| vm.name == name && vm.kubernetes);
+
+            // If kubernetes is enabled, switch kubectl context
+            if has_k8s {
+              let kubectl_context = if name == "default" {
+                "colima".to_string()
+              } else {
+                format!("colima-{name}")
+              };
+              // Try to switch kubectl context (don't fail if it doesn't work)
+              let _ = std::process::Command::new("kubectl")
+                .args(["config", "use-context", &kubectl_context])
+                .output();
+            }
+
+            Ok((vms, has_k8s))
+          }
           Err(e) => Err(e.to_string()),
         }
       })
       .await;
 
     cx.update(|cx| match result {
-      Ok(vms) => {
+      Ok((vms, has_k8s)) => {
         state.update(cx, |state, cx| {
           state.set_machines(vms);
           cx.emit(StateChanged::MachinesUpdated);
@@ -150,12 +195,19 @@ pub fn start_machine(name: String, cx: &mut App) {
             message: format!("Machine '{name_clone}' started"),
           });
         });
+        // Refresh K8s data if kubernetes is enabled
+        if has_k8s {
+          refresh_pods(cx);
+          refresh_namespaces(cx);
+          refresh_services(cx);
+          refresh_deployments(cx);
+        }
       }
       Err(e) => {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to start '{name_clone}': {e}"),
+            error: format!("Failed to start '{name_for_context}': {e}"),
           });
         });
       }
@@ -290,9 +342,28 @@ pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
     // Stage 3: Verify and refresh list
     cx.update(|cx| advance_stage(cx, task_id)).ok();
 
+    let has_kubernetes = options.kubernetes;
+    let name_for_context = name.clone();
     let vms = cx
       .background_executor()
-      .spawn(async move { ColimaClient::list().unwrap_or_default() })
+      .spawn(async move {
+        let vms = ColimaClient::list().unwrap_or_default();
+
+        // If kubernetes was enabled, switch kubectl context
+        if has_kubernetes {
+          let kubectl_context = if name_for_context == "default" {
+            "colima".to_string()
+          } else {
+            format!("colima-{name_for_context}")
+          };
+          // Try to switch kubectl context (don't fail if it doesn't work)
+          let _ = std::process::Command::new("kubectl")
+            .args(["config", "use-context", &kubectl_context])
+            .output();
+        }
+
+        vms
+      })
       .await;
 
     cx.update(|cx| {
@@ -306,6 +377,13 @@ pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
           message: format!("Machine '{name_clone}' updated successfully"),
         });
       });
+      // Refresh K8s data if kubernetes was enabled
+      if has_kubernetes {
+        refresh_pods(cx);
+        refresh_namespaces(cx);
+        refresh_services(cx);
+        refresh_deployments(cx);
+      }
     })
     .ok();
   })
@@ -315,6 +393,7 @@ pub fn edit_machine(options: ColimaStartOptions, cx: &mut App) {
 pub fn restart_machine(name: String, cx: &mut App) {
   let task_id = start_task(cx, format!("Restarting '{name}'..."));
   let name_clone = name.clone();
+  let name_for_context = name.clone();
 
   let state = docker_state(cx);
   let disp = dispatcher(cx);
@@ -325,14 +404,33 @@ pub fn restart_machine(name: String, cx: &mut App) {
       .spawn(async move {
         let name_opt = if name == "default" { None } else { Some(name.as_str()) };
         match ColimaClient::restart(name_opt) {
-          Ok(()) => Ok(ColimaClient::list().unwrap_or_default()),
+          Ok(()) => {
+            let vms = ColimaClient::list().unwrap_or_default();
+            // Check if the restarted machine has kubernetes enabled
+            let has_k8s = vms.iter().any(|vm| vm.name == name && vm.kubernetes);
+
+            // If kubernetes is enabled, switch kubectl context
+            if has_k8s {
+              let kubectl_context = if name == "default" {
+                "colima".to_string()
+              } else {
+                format!("colima-{name}")
+              };
+              // Try to switch kubectl context (don't fail if it doesn't work)
+              let _ = std::process::Command::new("kubectl")
+                .args(["config", "use-context", &kubectl_context])
+                .output();
+            }
+
+            Ok((vms, has_k8s))
+          }
           Err(e) => Err(e.to_string()),
         }
       })
       .await;
 
     cx.update(|cx| match result {
-      Ok(vms) => {
+      Ok((vms, has_k8s)) => {
         state.update(cx, |state, cx| {
           state.set_machines(vms);
           cx.emit(StateChanged::MachinesUpdated);
@@ -343,12 +441,19 @@ pub fn restart_machine(name: String, cx: &mut App) {
             message: format!("Machine '{name_clone}' restarted"),
           });
         });
+        // Refresh K8s data if kubernetes is enabled
+        if has_k8s {
+          refresh_pods(cx);
+          refresh_namespaces(cx);
+          refresh_services(cx);
+          refresh_deployments(cx);
+        }
       }
       Err(e) => {
         fail_task(cx, task_id, e.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
-            error: format!("Failed to restart '{name_clone}': {e}"),
+            error: format!("Failed to restart '{name_for_context}': {e}"),
           });
         });
       }
@@ -486,6 +591,101 @@ pub fn open_machine_files(name: String, cx: &mut App) {
 }
 
 // ==================== Kubernetes Actions ====================
+
+/// Switch kubectl context (async, non-blocking)
+pub fn switch_kubectl_context(context: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Switching to '{context}'..."));
+  let disp = dispatcher(cx);
+  let ctx = context.clone();
+
+  cx.spawn(async move |cx| {
+    let result = cx
+      .background_executor()
+      .spawn(async move {
+        let output = std::process::Command::new("kubectl")
+          .args(["config", "use-context", &context])
+          .output();
+        match output {
+          Ok(o) if o.status.success() => Ok(()),
+          Ok(o) => Err(String::from_utf8_lossy(&o.stderr).to_string()),
+          Err(e) => Err(e.to_string()),
+        }
+      })
+      .await;
+
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Switched to context '{ctx}'"),
+          });
+        });
+        // Refresh K8s data with new context
+        refresh_pods(cx);
+        refresh_namespaces(cx);
+        refresh_services(cx);
+        refresh_deployments(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.clone());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to switch context: {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+/// Reset Kubernetes on Colima (async, non-blocking)
+pub fn reset_colima_kubernetes(cx: &mut App) {
+  let task_id = start_task(cx, "Resetting Kubernetes...".to_string());
+  let disp = dispatcher(cx);
+
+  cx.spawn(async move |cx| {
+    let result = cx
+      .background_executor()
+      .spawn(async move {
+        let output = std::process::Command::new("colima")
+          .args(["kubernetes", "reset"])
+          .output();
+        match output {
+          Ok(o) if o.status.success() => Ok(()),
+          Ok(o) => Err(String::from_utf8_lossy(&o.stderr).to_string()),
+          Err(e) => Err(e.to_string()),
+        }
+      })
+      .await;
+
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: "Kubernetes reset completed".to_string(),
+          });
+        });
+        // Refresh K8s data
+        refresh_pods(cx);
+        refresh_namespaces(cx);
+        refresh_services(cx);
+        refresh_deployments(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.clone());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to reset Kubernetes: {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
 
 /// Start Kubernetes on a Colima machine
 pub fn kubernetes_start(name: String, cx: &mut App) {
@@ -708,10 +908,27 @@ pub fn enable_kubernetes(name: String, cx: &mut App) {
     // Stage 2: Verify and refresh
     cx.update(|cx| advance_stage(cx, task_id)).ok();
 
-    // Refresh machine list and pods
+    // Refresh machine list
+    let name_for_context = name.clone();
     let vms = cx
       .background_executor()
-      .spawn(async move { ColimaClient::list().unwrap_or_default() })
+      .spawn(async move {
+        let vms = ColimaClient::list().unwrap_or_default();
+
+        // Switch kubectl context to the colima context for this machine
+        let kubectl_context = if name_for_context == "default" {
+          "colima".to_string()
+        } else {
+          format!("colima-{name_for_context}")
+        };
+
+        // Try to switch kubectl context (don't fail if it doesn't work)
+        let _ = std::process::Command::new("kubectl")
+          .args(["config", "use-context", &kubectl_context])
+          .output();
+
+        vms
+      })
       .await;
 
     cx.update(|cx| {

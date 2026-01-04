@@ -11,12 +11,13 @@ mod tray;
 mod ui;
 
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{App, AppContext, Bounds, SharedString, Timer, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 use gpui_component::{
   Root,
-  theme::{Theme, ThemeRegistry},
+  theme::{Theme, ThemeConfig, ThemeRegistry, ThemeSet},
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -54,6 +55,36 @@ fn get_themes_dir() -> Option<PathBuf> {
   None
 }
 
+/// Load a specific theme from JSON files synchronously
+fn load_theme_sync(themes_dir: &PathBuf, theme_name: &str) -> Option<Rc<ThemeConfig>> {
+  if !themes_dir.exists() {
+    return None;
+  }
+
+  // Read all JSON files in themes directory
+  let entries = std::fs::read_dir(themes_dir).ok()?;
+
+  for entry in entries.flatten() {
+    let path = entry.path();
+    if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("json") {
+      continue;
+    }
+    let Ok(content) = std::fs::read_to_string(&path) else {
+      continue;
+    };
+    let Ok(theme_set) = serde_json::from_str::<ThemeSet>(&content) else {
+      continue;
+    };
+    for theme in theme_set.themes {
+      if theme.name == theme_name {
+        return Some(Rc::new(theme));
+      }
+    }
+  }
+
+  None
+}
+
 fn main() {
   tracing_subscriber::registry()
     .with(tracing_subscriber::fmt::layer())
@@ -65,13 +96,21 @@ fn main() {
 
     // Load saved settings to get the user's preferred theme
     let settings = AppSettings::load();
-    let saved_theme_name = SharedString::from(settings.theme.theme_name().to_string());
+    let saved_theme_name = settings.theme.theme_name().to_string();
 
-    // Watch themes directory and apply the saved theme
+    // Load and apply theme SYNCHRONOUSLY before window opens (prevents flicker)
     if let Some(themes_dir) = get_themes_dir() {
+      // Load saved theme immediately
+      if let Some(theme_config) = load_theme_sync(&themes_dir, &saved_theme_name) {
+        Theme::global_mut(cx).apply_config(&theme_config);
+      }
+
+      // Also set up file watcher for hot reload (callback updates if theme files change)
+      let theme_name_for_watch = SharedString::from(saved_theme_name.clone());
       if let Err(err) = ThemeRegistry::watch_dir(themes_dir, cx, move |cx| {
-        if let Some(theme) = ThemeRegistry::global(cx).themes().get(&saved_theme_name).cloned() {
+        if let Some(theme) = ThemeRegistry::global(cx).themes().get(&theme_name_for_watch).cloned() {
           Theme::global_mut(cx).apply_config(&theme);
+          cx.refresh_windows();
         }
       }) {
         tracing::warn!("Failed to watch themes directory: {}", err);
@@ -99,7 +138,7 @@ fn main() {
         ..Default::default()
       },
       |window, cx| {
-        let view = cx.new(|cx| app::DockerApp::new(window, cx));
+        let view = cx.new(|cx| app::DocksideApp::new(window, cx));
         cx.new(|cx| Root::new(view, window, cx))
       },
     )

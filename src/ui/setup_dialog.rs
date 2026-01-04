@@ -45,8 +45,9 @@ pub struct K8sDiagnostic {
   pub error_message: Option<String>,
 }
 
-/// Run K8s diagnostics
-pub fn diagnose_k8s() -> K8sDiagnostic {
+/// Run K8s diagnostics (quick version - NO network calls)
+/// Use this for startup checks to avoid blocking the UI
+pub fn diagnose_k8s_quick() -> K8sDiagnostic {
   let mut diag = K8sDiagnostic::default();
 
   // Check if kubectl is installed
@@ -60,14 +61,14 @@ pub fn diagnose_k8s() -> K8sDiagnostic {
 
   let kubectl = kubectl_path.unwrap();
 
-  // Get current context
+  // Get current context (fast local operation - reads ~/.kube/config)
   if let Ok(output) = Command::new(&kubectl).args(["config", "current-context"]).output()
     && output.status.success()
   {
     diag.current_context = Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
   }
 
-  // Check if colima is running and has K8s
+  // Check if colima is running and has K8s (fast local operation)
   if let Some(colima_path) = find_command("colima")
     && let Ok(output) = Command::new(&colima_path).args(["status", "--json"]).output()
     && output.status.success()
@@ -78,6 +79,10 @@ pub fn diagnose_k8s() -> K8sDiagnostic {
       if has_k8s {
         // Expected context is "colima" for default profile
         diag.expected_context = Some("colima".to_string());
+        // If K8s is enabled on Colima but we can't verify API, assume issue until checked
+        // This ensures dialog shows when K8s is enabled
+        diag.api_reachable = false;
+        diag.error_message = Some("Checking K8s API...".to_string());
       }
     }
   }
@@ -87,54 +92,31 @@ pub fn diagnose_k8s() -> K8sDiagnostic {
     diag.context_mismatch = current != expected && !current.starts_with("colima");
   }
 
-  // Try to reach K8s API
-  if let Ok(output) = Command::new(&kubectl)
-    .args(["cluster-info", "--request-timeout=3s"])
-    .output()
-  {
-    diag.api_reachable = output.status.success();
-    if !output.status.success() {
-      let stderr = String::from_utf8_lossy(&output.stderr);
-      if stderr.contains("refused") {
-        diag.error_message = Some("K8s API connection refused".to_string());
-      } else if stderr.contains("unreachable") {
-        diag.error_message = Some("K8s API network unreachable".to_string());
-      } else {
-        diag.error_message = Some("K8s API not responding".to_string());
-      }
-    }
-  }
+  // NO API check here - it's done async when dialog refreshes
 
   diag
 }
 
-/// Switch kubectl context
-pub fn switch_kubectl_context(context: &str) -> Result<(), String> {
-  let kubectl = find_command("kubectl").ok_or("kubectl not found")?;
-  let output = Command::new(&kubectl)
-    .args(["config", "use-context", context])
-    .output()
-    .map_err(|e| e.to_string())?;
+/// Run full K8s API check (may be slow - use in background only)
+pub fn check_k8s_api() -> (bool, Option<String>) {
+  if let Some(kubectl) = find_command("kubectl") {
+    let api_check = Command::new(&kubectl)
+      .args(["version", "--client=false", "--request-timeout=3s"])
+      .output();
 
-  if output.status.success() {
-    Ok(())
+    match api_check {
+      Ok(output) if output.status.success() => (true, None),
+      Ok(output) => {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        (
+          false,
+          Some(stderr.lines().next().unwrap_or("API connection failed").to_string()),
+        )
+      }
+      Err(e) => (false, Some(format!("Failed to check API: {e}"))),
+    }
   } else {
-    Err(String::from_utf8_lossy(&output.stderr).to_string())
-  }
-}
-
-/// Reset K8s on colima
-pub fn reset_colima_k8s() -> Result<(), String> {
-  let colima = find_command("colima").ok_or("colima not found")?;
-  let output = Command::new(&colima)
-    .args(["kubernetes", "reset"])
-    .output()
-    .map_err(|e| e.to_string())?;
-
-  if output.status.success() {
-    Ok(())
-  } else {
-    Err(String::from_utf8_lossy(&output.stderr).to_string())
+    (false, Some("kubectl not found".to_string()))
   }
 }
 
@@ -180,10 +162,39 @@ pub fn is_homebrew_installed() -> bool {
   false
 }
 
+/// Check if any Colima VM is running
+pub fn is_colima_running() -> bool {
+  let Some(colima_path) = find_command("colima") else {
+    return false;
+  };
+  let Ok(output) = Command::new(&colima_path).args(["list", "--json"]).output() else {
+    return false;
+  };
+  if !output.status.success() {
+    return false;
+  }
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  for line in stdout.lines() {
+    let line = line.trim();
+    if line.is_empty() {
+      continue;
+    }
+    if serde_json::from_str::<serde_json::Value>(line)
+      .ok()
+      .and_then(|vm| vm["status"].as_str().map(|s| s.eq_ignore_ascii_case("running")))
+      .unwrap_or(false)
+    {
+      return true;
+    }
+  }
+  false
+}
+
 /// Setup dialog shown when Docker/Colima are not detected
 pub struct SetupDialog {
   focus_handle: FocusHandle,
   colima_installed: bool,
+  colima_running: bool,
   docker_installed: bool,
   homebrew_installed: bool,
   k8s_diagnostic: K8sDiagnostic,
@@ -194,136 +205,231 @@ impl SetupDialog {
   pub fn new(cx: &mut Context<'_, Self>) -> Self {
     let focus_handle = cx.focus_handle();
 
-    Self {
+    let mut dialog = Self {
       focus_handle,
       colima_installed: is_colima_installed(),
+      colima_running: is_colima_running(),
       docker_installed: is_docker_installed(),
       homebrew_installed: is_homebrew_installed(),
-      k8s_diagnostic: diagnose_k8s(),
+      k8s_diagnostic: diagnose_k8s_quick(),
       action_message: None,
-    }
-  }
+    };
 
-  pub fn refresh_status(&mut self, _cx: &mut Context<'_, Self>) {
-    self.colima_installed = is_colima_installed();
-    self.docker_installed = is_docker_installed();
-    self.homebrew_installed = is_homebrew_installed();
-    self.k8s_diagnostic = diagnose_k8s();
-    self.action_message = None;
-  }
+    // If K8s is expected, run async API check
+    if dialog.k8s_diagnostic.expected_context.is_some() && !dialog.k8s_diagnostic.context_mismatch {
+      dialog.action_message = Some("Checking K8s API...".to_string());
+      cx.spawn(async move |this, cx| {
+        let (api_ok, error) = cx.background_executor().spawn(async move { check_k8s_api() }).await;
 
-  fn render_status_item(name: &'static str, installed: bool, cx: &Context<'_, Self>) -> impl IntoElement {
-    let colors = &cx.theme().colors;
-
-    h_flex()
-      .w_full()
-      .py(px(8.))
-      .px(px(12.))
-      .gap(px(12.))
-      .items_center()
-      .rounded(px(6.))
-      .bg(if installed {
-        colors.success.opacity(0.1)
-      } else {
-        colors.danger.opacity(0.1)
+        let _ = this.update(cx, |this, cx| {
+          this.k8s_diagnostic.api_reachable = api_ok;
+          this.k8s_diagnostic.error_message = error;
+          this.action_message = None;
+          cx.notify();
+        });
       })
-      .child(
-        Icon::new(if installed { IconName::Check } else { IconName::Close }).text_color(if installed {
-          colors.success
-        } else {
-          colors.danger
-        }),
-      )
-      .child(
-        Label::new(name)
-          .text_color(colors.foreground)
-          .font_weight(gpui::FontWeight::MEDIUM),
-      )
-      .child(
-        div()
-          .flex_1()
-          .text_right()
-          .text_sm()
-          .text_color(if installed {
-            colors.success
-          } else {
-            colors.muted_foreground
-          })
-          .child(if installed { "Installed" } else { "Not Found" }),
-      )
+      .detach();
+    }
+
+    dialog
   }
 
-  fn render_install_step(
-    step: usize,
-    title: &'static str,
-    command: &'static str,
-    description: &'static str,
+  pub fn refresh_status(&mut self, cx: &mut Context<'_, Self>) {
+    self.action_message = Some("Checking...".to_string());
+    cx.notify();
+
+    // Run all checks in background (including API check)
+    cx.spawn(async move |this, cx| {
+      let result = cx
+        .background_executor()
+        .spawn(async move {
+          let diag = diagnose_k8s_quick();
+          let (api_ok, api_error) = if diag.expected_context.is_some() && !diag.context_mismatch {
+            check_k8s_api()
+          } else {
+            (false, None)
+          };
+          (
+            is_colima_installed(),
+            is_colima_running(),
+            is_docker_installed(),
+            is_homebrew_installed(),
+            diag,
+            api_ok,
+            api_error,
+          )
+        })
+        .await;
+
+      let _ = this.update(cx, |this, cx| {
+        this.colima_installed = result.0;
+        this.colima_running = result.1;
+        this.docker_installed = result.2;
+        this.homebrew_installed = result.3;
+        this.k8s_diagnostic = result.4;
+        this.k8s_diagnostic.api_reachable = result.5;
+        if result.6.is_some() {
+          this.k8s_diagnostic.error_message = result.6;
+        }
+        this.action_message = None;
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  /// Render a requirement row with status
+  #[allow(clippy::unused_self)]
+  fn render_requirement_row(
+    &self,
+    name: &'static str,
+    installed: bool,
+    running: Option<bool>,
     cx: &Context<'_, Self>,
   ) -> impl IntoElement {
     let colors = &cx.theme().colors;
-    let cmd = command.to_string();
+
+    // Determine status
+    let (status_icon, status_color, status_text) = if installed {
+      if let Some(is_running) = running {
+        if is_running {
+          (IconName::Check, colors.success, "Running")
+        } else {
+          (IconName::Minus, colors.warning, "Stopped")
+        }
+      } else {
+        (IconName::Check, colors.success, "Installed")
+      }
+    } else {
+      (IconName::Close, colors.danger, "Missing")
+    };
+
+    h_flex()
+      .w_full()
+      .py(px(6.))
+      .px(px(8.))
+      .gap(px(8.))
+      .items_center()
+      .child(Icon::new(status_icon).text_color(status_color))
+      .child(Label::new(name).text_color(colors.foreground).text_sm().flex_1())
+      .child(div().text_xs().text_color(status_color).child(status_text))
+  }
+
+  fn render_action_section(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+    let colors = &cx.theme().colors;
+
+    // Determine what action is needed
+    let needs_homebrew = !self.homebrew_installed;
+    let needs_docker = !self.docker_installed;
+    let needs_colima = !self.colima_installed;
+    let needs_start = self.colima_installed && !self.colima_running;
+
+    if !needs_homebrew && !needs_docker && !needs_colima && !needs_start {
+      // Everything is good
+      return div().into_any_element();
+    }
 
     v_flex()
       .w_full()
+      .gap(px(12.))
+      .p(px(12.))
+      .rounded(px(8.))
+      .bg(colors.sidebar)
+      // Missing dependencies - show install commands
+      .when(needs_homebrew || needs_docker || needs_colima, |el| {
+        el.child(
+          v_flex()
+            .w_full()
+            .gap(px(8.))
+            .child(
+              Label::new("Install missing dependencies")
+                .text_color(colors.foreground)
+                .text_sm()
+                .font_weight(gpui::FontWeight::MEDIUM),
+            )
+            .when(needs_homebrew, |el| {
+              let cmd = "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"";
+              el.child(Self::render_command_row("copy-brew", cmd, cx))
+            })
+            .when(needs_docker, |el| {
+              el.child(Self::render_command_row("copy-docker", "brew install docker docker-compose", cx))
+            })
+            .when(needs_colima, |el| {
+              el.child(Self::render_command_row("copy-colima", "brew install colima", cx))
+            }),
+        )
+      })
+      // Colima installed but not running - show start buttons
+      .when(needs_start, |el| {
+        el.child(
+          v_flex()
+            .w_full()
+            .gap(px(8.))
+            .child(
+              Label::new("Start Colima")
+                .text_color(colors.foreground)
+                .text_sm()
+                .font_weight(gpui::FontWeight::MEDIUM),
+            )
+            .child(
+              h_flex()
+                .gap(px(8.))
+                .child(
+                  Button::new("start-colima")
+                    .label("Start")
+                    .primary()
+                    .small()
+                    .on_click(|_ev, _window, cx| {
+                      crate::services::start_machine("default".to_string(), cx);
+                    }),
+                )
+                .child(
+                  Button::new("start-colima-k8s")
+                    .label("Start with Kubernetes")
+                    .ghost()
+                    .small()
+                    .on_click(|_ev, _window, cx| {
+                      let options = crate::colima::ColimaStartOptions::new()
+                        .with_name("default".to_string())
+                        .with_kubernetes(true);
+                      crate::services::create_machine(options, cx);
+                    }),
+                ),
+            ),
+        )
+      })
+      .into_any_element()
+  }
+
+  fn render_command_row(id: &'static str, command: &'static str, cx: &Context<'_, Self>) -> impl IntoElement {
+    let colors = &cx.theme().colors;
+    let cmd = command.to_string();
+
+    h_flex()
+      .w_full()
       .gap(px(8.))
-      .child(
-        h_flex()
-          .gap(px(8.))
-          .items_center()
-          .child(
-            div()
-              .w(px(24.))
-              .h(px(24.))
-              .rounded_full()
-              .bg(colors.primary)
-              .flex()
-              .items_center()
-              .justify_center()
-              .text_xs()
-              .font_weight(gpui::FontWeight::BOLD)
-              .text_color(colors.background)
-              .child(step.to_string()),
-          )
-          .child(
-            Label::new(title)
-              .text_color(colors.foreground)
-              .font_weight(gpui::FontWeight::SEMIBOLD),
-          ),
-      )
+      .items_center()
       .child(
         div()
-          .ml(px(32.))
-          .text_sm()
-          .text_color(colors.muted_foreground)
-          .child(description),
+          .flex_1()
+          .px(px(10.))
+          .py(px(6.))
+          .bg(colors.background)
+          .rounded(px(4.))
+          .font_family("monospace")
+          .text_xs()
+          .text_color(colors.foreground)
+          .overflow_hidden()
+          .child(command),
       )
       .child(
-        h_flex()
-          .ml(px(32.))
-          .mt(px(4.))
-          .w_full()
-          .gap(px(8.))
-          .child(
-            div()
-              .flex_1()
-              .px(px(12.))
-              .py(px(8.))
-              .bg(colors.sidebar)
-              .rounded(px(6.))
-              .font_family("monospace")
-              .text_sm()
-              .text_color(colors.foreground)
-              .child(command),
-          )
-          .child(
-            Button::new(("copy", step))
-              .icon(IconName::Copy)
-              .ghost()
-              .small()
-              .on_click(move |_ev, _window, cx| {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(cmd.clone()));
-              }),
-          ),
+        Button::new(id)
+          .icon(IconName::Copy)
+          .ghost()
+          .xsmall()
+          .on_click(move |_ev, _window, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(cmd.clone()));
+          }),
       )
   }
 
@@ -341,17 +447,19 @@ impl SetupDialog {
 
     v_flex()
       .w_full()
-      .gap(px(12.))
-      .pt(px(8.))
-      .border_t_1()
-      .border_color(colors.border)
+      .gap(px(8.))
+      .p(px(12.))
+      .rounded(px(8.))
+      .border_1()
+      .border_color(colors.warning.opacity(0.5))
+      .bg(colors.warning.opacity(0.05))
       .child(
         h_flex()
-          .gap(px(8.))
+          .gap(px(6.))
           .items_center()
-          .child(Icon::new(IconName::Info).text_color(colors.warning))
+          .child(Icon::new(IconName::Info).text_color(colors.warning).size(px(14.)))
           .child(
-            Label::new("Kubernetes Issues Detected")
+            Label::new("Kubernetes Issue")
               .text_color(colors.warning)
               .text_xs()
               .font_weight(gpui::FontWeight::SEMIBOLD),
@@ -361,12 +469,8 @@ impl SetupDialog {
       .when_some(self.action_message.clone(), |el, msg| {
         el.child(
           div()
-            .w_full()
-            .p(px(8.))
-            .rounded(px(6.))
-            .bg(colors.success.opacity(0.1))
-            .text_sm()
-            .text_color(colors.success)
+            .text_xs()
+            .text_color(colors.link)
             .child(msg),
         )
       })
@@ -378,89 +482,60 @@ impl SetupDialog {
         el.child(
           v_flex()
             .w_full()
-            .gap(px(8.))
-            .p(px(12.))
-            .rounded(px(8.))
-            .bg(colors.warning.opacity(0.1))
-            .child(
-              h_flex()
-                .gap(px(8.))
-                .child(
-                  Label::new("Wrong kubectl context")
-                    .text_color(colors.foreground)
-                    .font_weight(gpui::FontWeight::MEDIUM),
-                ),
-            )
+            .gap(px(6.))
             .child(
               div()
-                .text_sm()
+                .text_xs()
                 .text_color(colors.muted_foreground)
-                .child(format!("Current: '{current}' | Expected: '{expected}'")),
+                .child(format!("Context: {current} (expected: {expected})")),
             )
             .child(
               Button::new("fix-context")
-                .label(format!("Switch to '{expected}'"))
+                .label(format!("Switch to {expected}"))
                 .primary()
-                .small()
+                .xsmall()
                 .on_click({
                   let ctx = expected.clone();
-                  move |_ev, _window, _cx| {
-                    let _ = switch_kubectl_context(&ctx);
+                  move |_ev, _window, cx| {
+                    crate::services::switch_kubectl_context(ctx.clone(), cx);
                   }
-                }),
-            )
-            .child(
-              Button::new("refresh-context")
-                .label("Refresh")
-                .ghost()
-                .small()
-                .on_click(move |_ev, _window, _cx| {
-                  // Will be handled by parent
                 }),
             ),
         )
       })
       // K8s API not reachable
       .when(diag.expected_context.is_some() && !diag.api_reachable && !diag.context_mismatch, |el| {
-        let error = diag.error_message.clone().unwrap_or_else(|| "Unknown error".to_string());
+        let error = diag.error_message.clone().unwrap_or_else(|| "API not responding".to_string());
 
         el.child(
           v_flex()
             .w_full()
-            .gap(px(8.))
-            .p(px(12.))
-            .rounded(px(8.))
-            .bg(colors.danger.opacity(0.1))
+            .gap(px(6.))
             .child(
-              h_flex()
-                .gap(px(8.))
-                .child(
-                  Label::new("Kubernetes API not responding")
-                    .text_color(colors.foreground)
-                    .font_weight(gpui::FontWeight::MEDIUM),
-                ),
+              div()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child(error),
             )
-            .child(div().text_sm().text_color(colors.muted_foreground).child(error))
             .child(
               h_flex()
                 .gap(px(8.))
                 .child(
                   Button::new("reset-k8s")
-                    .label("Reset Kubernetes")
+                    .label("Reset K8s")
                     .primary()
                     .small()
-                    .on_click(move |_ev, _window, _cx| {
-                      // This will block - in production you'd want to do this async
-                      let _ = reset_colima_k8s();
+                    .on_click(move |_ev, _window, cx| {
+                      crate::services::reset_colima_kubernetes(cx);
                     }),
                 )
                 .child(
-                  Button::new("refresh-status")
-                    .label("Refresh")
+                  Button::new("restart-colima")
+                    .label("Restart Colima")
                     .ghost()
                     .small()
-                    .on_click(move |_ev, _window, _cx| {
-                      // Will be handled by parent
+                    .on_click(move |_ev, _window, cx| {
+                      crate::services::restart_machine("default".to_string(), cx);
                     }),
                 ),
             ),
@@ -478,114 +553,28 @@ impl Focusable for SetupDialog {
 
 impl Render for SetupDialog {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-    let colors = cx.theme().colors;
-
     v_flex()
-            .w_full()
-            .max_h(px(500.))
-            .overflow_y_scrollbar()
-            .gap(px(16.))
-            // Status section
-            .child(
-                v_flex()
-                    .w_full()
-                    .gap(px(8.))
-                    .child(
-                        Label::new("Status")
-                            .text_color(colors.muted_foreground)
-                            .text_xs()
-                            .font_weight(gpui::FontWeight::SEMIBOLD),
-                    )
-                    .child(Self::render_status_item("Homebrew", self.homebrew_installed, cx))
-                    .child(Self::render_status_item("Docker CLI", self.docker_installed, cx))
-                    .child(Self::render_status_item("Colima", self.colima_installed, cx)),
-            )
-            // Installation instructions
-            .child(
-                v_flex()
-                    .w_full()
-                    .gap(px(16.))
-                    .pt(px(8.))
-                    .border_t_1()
-                    .border_color(colors.border)
-                    .child(
-                        Label::new("Installation Steps")
-                            .text_color(colors.muted_foreground)
-                            .text_xs()
-                            .font_weight(gpui::FontWeight::SEMIBOLD),
-                    )
-                    .when(!self.homebrew_installed, |el| {
-                        el.child(Self::render_install_step(
-                            1,
-                            "Install Homebrew",
-                            "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"",
-                            "Homebrew is required to install Docker and Colima on macOS.",
-                            cx,
-                        ))
-                    })
-                    .when(!self.docker_installed, |el| {
-                        el.child(Self::render_install_step(
-                            if self.homebrew_installed { 1 } else { 2 },
-                            "Install Docker CLI",
-                            "brew install docker docker-compose",
-                            "Install the Docker command-line tools (no Docker Desktop required).",
-                            cx,
-                        ))
-                    })
-                    .when(!self.colima_installed, |el| {
-                        el.child(Self::render_install_step(
-                            if self.homebrew_installed && self.docker_installed { 1 }
-                            else if self.homebrew_installed || self.docker_installed { 2 }
-                            else { 3 },
-                            "Install Colima",
-                            "brew install colima",
-                            "Colima provides the container runtime for Docker on macOS.",
-                            cx,
-                        ))
-                    })
-                    .child(Self::render_install_step(
-                        if self.homebrew_installed && self.docker_installed && self.colima_installed { 1 }
-                        else if !self.homebrew_installed && !self.docker_installed && !self.colima_installed { 4 }
-                        else if !self.homebrew_installed && (!self.docker_installed || !self.colima_installed)
-                          || !self.docker_installed && !self.colima_installed { 3 }
-                        else { 2 },
-                        "Start Colima",
-                        "colima start",
-                        "Start the Colima VM to run containers. Use 'colima start --kubernetes' for Kubernetes support.",
-                        cx,
-                    )),
-            )
-            // K8s diagnostics section
-            .child(self.render_k8s_diagnostic(cx))
-            // Help text
-            .child(
-                div()
-                    .w_full()
-                    .mt(px(8.))
-                    .p(px(12.))
-                    .bg(colors.sidebar)
-                    .rounded(px(8.))
-                    .child(
-                        v_flex()
-                            .gap(px(4.))
-                            .child(
-                                h_flex()
-                                    .gap(px(8.))
-                                    .items_center()
-                                    .child(Icon::new(IconName::Info).text_color(colors.primary))
-                                    .child(
-                                        Label::new("Need help?")
-                                            .text_color(colors.foreground)
-                                            .font_weight(gpui::FontWeight::MEDIUM),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(colors.muted_foreground)
-                                    .child("Visit github.com/abiosoft/colima for documentation and troubleshooting."),
-                            ),
-                    ),
-            )
+      .w_full()
+      .max_h(px(400.))
+      .overflow_y_scrollbar()
+      .gap(px(8.))
+      // Requirements section
+      .child(
+        v_flex()
+          .w_full()
+          .gap(px(2.))
+          .child(self.render_requirement_row("Homebrew", self.homebrew_installed, None, cx))
+          .child(self.render_requirement_row("Docker CLI", self.docker_installed, None, cx))
+          .child(self.render_requirement_row(
+            "Colima",
+            self.colima_installed,
+            if self.colima_installed { Some(self.colima_running) } else { None },
+            cx,
+          )),
+      )
+      // Action section (only shows if something needs to be done)
+      .child(self.render_action_section(cx))
+      // K8s diagnostics section
+      .child(self.render_k8s_diagnostic(cx))
   }
 }

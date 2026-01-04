@@ -5,7 +5,7 @@ use gpui_component::{
   h_flex,
   notification::NotificationType,
   sidebar::{Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem},
-  theme::{ActiveTheme, Theme, ThemeMode},
+  theme::{ActiveTheme, Theme},
   v_flex,
 };
 
@@ -23,11 +23,13 @@ use crate::ui::pods::PodsView;
 use crate::ui::prune_dialog::PruneDialog;
 use crate::ui::services::ServicesView;
 use crate::ui::settings::SettingsView;
-use crate::ui::setup_dialog::{SetupDialog, is_colima_installed, is_docker_installed};
+use crate::ui::setup_dialog::{
+  SetupDialog, diagnose_k8s_quick, is_colima_installed, is_colima_running, is_docker_installed,
+};
 use crate::ui::volumes::VolumesView;
 
 /// Main application - only handles layout and view switching
-pub struct DockerApp {
+pub struct DocksideApp {
   docker_state: Entity<DockerState>,
   machines_view: Entity<MachinesView>,
   containers_view: Entity<ContainersView>,
@@ -42,11 +44,13 @@ pub struct DockerApp {
   settings_view: Entity<SettingsView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
   pending_notifications: Vec<(NotificationType, String)>,
+  // Pending setup check result - triggers dialog when set
+  pending_setup_check: Option<(bool, bool, bool)>, // (colima_installed, docker_installed, colima_running)
 }
 
-impl DockerApp {
+impl DocksideApp {
   pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
-    Theme::change(ThemeMode::Dark, Some(window), cx);
+    // Theme is already applied in main.rs from saved settings - no need to force dark mode here
 
     let docker_state = docker_state(cx);
 
@@ -96,16 +100,42 @@ impl DockerApp {
     let activity_view = cx.new(|cx| ActivityMonitorView::new(window, cx));
     let settings_view = cx.new(SettingsView::new);
 
-    // Check if Docker/Colima are installed and show setup dialog if not
-    let colima_installed = is_colima_installed();
-    let docker_installed = is_docker_installed();
+    // Run setup checks async - only show dialog if there are issues
+    cx.spawn(async move |this, cx| {
+      // Run checks in background (non-blocking)
+      let (colima_installed, docker_installed, colima_running, k8s_diag) = cx
+        .background_executor()
+        .spawn(async move {
+          (
+            is_colima_installed(),
+            is_docker_installed(),
+            is_colima_running(),
+            diagnose_k8s_quick(),
+          )
+        })
+        .await;
 
-    if !colima_installed || !docker_installed {
-      // Defer showing the dialog until after the window is ready
-      cx.defer_in(window, |_this, window, cx| {
-        Self::show_setup_dialog(window, cx);
-      });
-    }
+      // Check if setup is needed
+      // K8s issues: context mismatch OR K8s enabled but API not reachable
+      let has_k8s_issues = colima_installed
+        && docker_installed
+        && colima_running
+        && k8s_diag.expected_context.is_some()
+        && (k8s_diag.context_mismatch || !k8s_diag.api_reachable);
+
+      let needs_setup = !colima_installed || !docker_installed || !colima_running || has_k8s_issues;
+
+      if needs_setup {
+        // Show dialog on main thread
+        this
+          .update(cx, |this, cx| {
+            this.pending_setup_check = Some((colima_installed, docker_installed, colima_running));
+            cx.notify();
+          })
+          .ok();
+      }
+    })
+    .detach();
 
     Self {
       docker_state,
@@ -121,10 +151,11 @@ impl DockerApp {
       activity_view,
       settings_view,
       pending_notifications: Vec::new(),
+      pending_setup_check: None,
     }
   }
 
-  fn show_setup_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn show_setup_dialog_with_title(window: &mut Window, cx: &mut Context<'_, Self>, title: &'static str) {
     let dialog_entity = cx.new(SetupDialog::new);
 
     window.open_dialog(cx, move |dialog, _window, cx| {
@@ -132,7 +163,7 @@ impl DockerApp {
       let _colors = cx.theme().colors;
 
       dialog
-        .title("Setup Required")
+        .title(title)
         .min_w(px(550.))
         .child(dialog_entity.clone())
         .footer(move |_dialog_state, _, _window, _cx| {
@@ -364,6 +395,7 @@ impl DockerApp {
           let has_stages = !task.stages.is_empty();
 
           h_flex()
+            .flex_1()
             .gap(px(10.))
             .items_center()
             // Activity indicator
@@ -394,7 +426,7 @@ impl DockerApp {
             .when(has_stages, |el| {
               el.child(
                 div()
-                  .w(px(80.))
+                  .flex_1()
                   .h(px(4.))
                   .rounded(px(2.))
                   .bg(colors.border)
@@ -425,8 +457,21 @@ impl DockerApp {
   }
 }
 
-impl Render for DockerApp {
+impl Render for DocksideApp {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+    // Check if we need to show setup dialog (from async check)
+    if let Some((colima_installed, docker_installed, colima_running)) = self.pending_setup_check.take() {
+      // Determine title based on the issue
+      let title = if !colima_installed || !docker_installed {
+        "Setup Required"
+      } else if !colima_running {
+        "Start Colima"
+      } else {
+        "Kubernetes Issue Detected"
+      };
+      Self::show_setup_dialog_with_title(window, cx, title);
+    }
+
     // Push any pending notifications (centralized handling)
     for (notification_type, message) in self.pending_notifications.drain(..) {
       window.push_notification((notification_type, SharedString::from(message)), cx);
