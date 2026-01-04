@@ -157,12 +157,20 @@ ask_kubernetes() {
         return 0
     fi
 
+    # Check if we have a TTY for interactive input
+    if [[ ! -t 0 ]] && [[ ! -e /dev/tty ]]; then
+        info "Non-interactive mode, skipping Kubernetes prompt"
+        info "Use --with-kubernetes flag to enable Kubernetes"
+        return 0
+    fi
+
     echo ""
     echo -e "${BLUE}Do you want to enable Kubernetes?${NC}"
     echo "  This allows you to run and manage Kubernetes workloads locally."
     echo "  You can always enable it later from the Dockside app."
     echo ""
-    read -p "Enable Kubernetes? [y/N] " -n 1 -r
+    # Read from /dev/tty to support curl | bash
+    read -p "Enable Kubernetes? [y/N] " -n 1 -r < /dev/tty
     echo ""
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
