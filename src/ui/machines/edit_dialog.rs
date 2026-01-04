@@ -380,12 +380,24 @@ impl Render for EditMachineDialog {
             ))
             .child(render_form_row(
                 "Network Address",
-                Switch::new("network-address")
-                    .checked(network_address)
-                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                        this.network_address = *checked;
-                        cx.notify();
-                    }))
+                v_flex()
+                    .gap(px(4.))
+                    .items_end()
+                    .child(
+                        Switch::new("network-address")
+                            .checked(network_address)
+                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                this.network_address = *checked;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.muted_foreground)
+                            .max_w(px(200.))
+                            .child("Assigns IP to VM. May conflict with VPN."),
+                    )
                     .into_any_element(),
                 colors.border,
                 colors.foreground,
