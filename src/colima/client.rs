@@ -1,7 +1,35 @@
 use anyhow::{Result, anyhow};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use super::{ColimaStartOptions, ColimaVm, MountType, VmArch, VmFileEntry, VmOsInfo, VmRuntime, VmStatus, VmType};
+
+/// Common Homebrew paths to search for binaries
+const BREW_PATHS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+
+/// Find colima binary in PATH or common locations
+fn find_colima() -> Option<PathBuf> {
+  // First check if it's in PATH
+  if let Ok(path) = which::which("colima") {
+    return Some(path);
+  }
+
+  // Check common Homebrew locations
+  for base in BREW_PATHS {
+    let path = std::path::Path::new(base).join("colima");
+    if path.exists() {
+      return Some(path);
+    }
+  }
+
+  None
+}
+
+/// Get the colima command, falling back to "colima" if not found
+fn colima_cmd() -> Command {
+  let path = find_colima().unwrap_or_else(|| PathBuf::from("colima"));
+  Command::new(path)
+}
 
 pub struct ColimaClient;
 
@@ -12,7 +40,7 @@ impl ColimaClient {
 
   /// Get colima version
   pub fn version() -> Result<String> {
-    let output = Command::new("colima")
+    let output = colima_cmd()
       .arg("version")
       .stdout(Stdio::piped())
       .stderr(Stdio::piped())
@@ -28,7 +56,7 @@ impl ColimaClient {
 
   /// List all Colima VMs
   pub fn list() -> Result<Vec<ColimaVm>> {
-    let output = Command::new("colima")
+    let output = colima_cmd()
       .args(["list", "--json"])
       .stdout(Stdio::piped())
       .stderr(Stdio::piped())
@@ -191,7 +219,7 @@ impl ColimaClient {
 
   /// Get detailed status of a VM (only works when running)
   pub fn status(name: Option<&str>) -> Result<ColimaVm> {
-    let mut cmd = Command::new("colima");
+    let mut cmd = colima_cmd();
     cmd.arg("status").arg("--json");
 
     if let Some(n) = name
@@ -220,7 +248,7 @@ impl ColimaClient {
 
   /// Start a VM with options
   pub fn start(options: &ColimaStartOptions) -> Result<()> {
-    let mut cmd = Command::new("colima");
+    let mut cmd = colima_cmd();
     cmd.arg("start");
 
     if let Some(name) = &options.name
@@ -293,7 +321,7 @@ impl ColimaClient {
 
   /// Stop a VM
   pub fn stop(name: Option<&str>) -> Result<()> {
-    let mut cmd = Command::new("colima");
+    let mut cmd = colima_cmd();
     cmd.arg("stop");
 
     if let Some(n) = name
@@ -314,7 +342,7 @@ impl ColimaClient {
 
   /// Restart a VM
   pub fn restart(name: Option<&str>) -> Result<()> {
-    let mut cmd = Command::new("colima");
+    let mut cmd = colima_cmd();
     cmd.arg("restart");
 
     if let Some(n) = name
@@ -335,7 +363,7 @@ impl ColimaClient {
 
   /// Delete a VM
   pub fn delete(name: Option<&str>, force: bool) -> Result<()> {
-    let mut cmd = Command::new("colima");
+    let mut cmd = colima_cmd();
     cmd.arg("delete");
 
     if let Some(n) = name
@@ -367,7 +395,7 @@ impl ColimaClient {
 
   /// Run a command in the VM via SSH
   pub fn run_command(name: Option<&str>, command: &str) -> Result<String> {
-    let mut cmd = Command::new("colima");
+    let mut cmd = colima_cmd();
     cmd.arg("ssh");
 
     if let Some(n) = name
