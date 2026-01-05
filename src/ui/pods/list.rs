@@ -14,7 +14,8 @@ use gpui_component::{
 use crate::assets::AppIcon;
 use crate::kubernetes::{PodInfo, PodPhase};
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state};
+use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
+use crate::ui::components::{render_error, render_loading};
 
 /// Pod list events emitted to parent
 pub enum PodListEvent {
@@ -24,7 +25,6 @@ pub enum PodListEvent {
 /// Delegate for the pod list
 pub struct PodListDelegate {
   docker_state: Entity<DockerState>,
-  selected_index: Option<IndexPath>,
   search_query: String,
 }
 
@@ -63,7 +63,6 @@ impl PodListDelegate {
 
   pub fn set_search_query(&mut self, query: String) {
     self.search_query = query;
-    self.selected_index = None;
   }
 }
 
@@ -84,7 +83,9 @@ impl ListDelegate for PodListDelegate {
     let pod = pods.get(ix.row)?;
     let colors = &cx.theme().colors;
 
-    let is_selected = self.selected_index == Some(ix);
+    // Use global selection as single source of truth
+    let global_selection = &self.docker_state.read(cx).selection;
+    let is_selected = matches!(global_selection, Selection::Pod { name, namespace } if *name == pod.name && *namespace == pod.namespace);
     let is_running = matches!(pod.phase, PodPhase::Running);
     let pod_name = pod.name.clone();
     let pod_namespace = pod.namespace.clone();
@@ -254,17 +255,18 @@ impl ListDelegate for PodListDelegate {
       .rounded(px(6.))
       .overflow_hidden()
       .selected(is_selected)
-      .child(item_content)
-      .on_click(cx.listener(move |this, _ev, _window, cx| {
-        this.delegate_mut().selected_index = Some(ix);
-        cx.notify();
-      }));
+      .child(item_content);
 
     Some(item)
   }
 
-  fn set_selected_index(&mut self, ix: Option<IndexPath>, _window: &mut Window, cx: &mut Context<'_, ListState<Self>>) {
-    self.selected_index = ix;
+  fn set_selected_index(
+    &mut self,
+    _ix: Option<IndexPath>,
+    _window: &mut Window,
+    cx: &mut Context<'_, ListState<Self>>,
+  ) {
+    // Selection is managed globally via DockerState.selection
     cx.notify();
   }
 }
@@ -284,7 +286,6 @@ impl PodList {
 
     let delegate = PodListDelegate {
       docker_state: docker_state.clone(),
-      selected_index: None,
       search_query: String::new(),
     };
 
@@ -307,7 +308,10 @@ impl PodList {
     cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
       if matches!(
         event,
-        StateChanged::PodsUpdated | StateChanged::NamespacesUpdated | StateChanged::MachinesUpdated
+        StateChanged::PodsUpdated
+          | StateChanged::NamespacesUpdated
+          | StateChanged::MachinesUpdated
+          | StateChanged::SelectionChanged
       ) {
         this.list_state.update(cx, |_state, cx| {
           cx.notify();
@@ -359,20 +363,6 @@ impl PodList {
         cx.notify();
       });
     }
-    cx.notify();
-  }
-
-  /// Select a pod by name and namespace
-  pub fn select_pod(&mut self, name: &str, namespace: &str, cx: &mut Context<'_, Self>) {
-    self.list_state.update(cx, |state, cx| {
-      let delegate = state.delegate();
-      let pods = delegate.filtered_pods(cx);
-      if let Some(idx) = pods.iter().position(|p| p.name == name && p.namespace == namespace) {
-        let ix = IndexPath::new(idx);
-        state.delegate_mut().selected_index = Some(ix);
-        cx.notify();
-      }
-    });
     cx.notify();
   }
 
@@ -603,6 +593,7 @@ impl Render for PodList {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let state = self.docker_state.read(cx);
     let total_count = state.pods.len();
+    let pods_state = state.pods_state.clone();
     let running_count = state
       .pods
       .iter()
@@ -614,12 +605,18 @@ impl Render for PodList {
     let is_filtering = !self.search_query.is_empty();
     let pods_empty = filtered_count == 0;
 
-    let subtitle = if is_filtering {
-      format!("{filtered_count} of {total_count} ({running_count} running)")
-    } else if running_count > 0 {
-      format!("{running_count} running")
-    } else {
-      "None running".to_string()
+    let subtitle = match &pods_state {
+      LoadState::NotLoaded | LoadState::Loading => "Loading...".to_string(),
+      LoadState::Error(_) => "Error loading".to_string(),
+      LoadState::Loaded => {
+        if is_filtering {
+          format!("{filtered_count} of {total_count} ({running_count} running)")
+        } else if running_count > 0 {
+          format!("{running_count} running")
+        } else {
+          "None running".to_string()
+        }
+      }
     };
 
     let colors = cx.theme().colors;
@@ -708,12 +705,28 @@ impl Render for PodList {
       None
     };
 
-    let content: gpui::Div = if pods_empty && !is_filtering {
-      self.render_empty(cx)
-    } else if pods_empty && is_filtering {
-      self.render_no_results(cx)
-    } else {
-      div().size_full().p(px(8.)).child(List::new(&self.list_state))
+    let content: gpui::Div = match &pods_state {
+      LoadState::NotLoaded | LoadState::Loading => render_loading("pods", cx),
+      LoadState::Error(e) => {
+        let error_msg = e.clone();
+        render_error(
+          "pods",
+          &error_msg,
+          |_ev, _window, cx| {
+            services::refresh_pods(cx);
+          },
+          cx,
+        )
+      }
+      LoadState::Loaded => {
+        if pods_empty && !is_filtering {
+          self.render_empty(cx)
+        } else if pods_empty && is_filtering {
+          self.render_no_results(cx)
+        } else {
+          div().size_full().p(px(8.)).child(List::new(&self.list_state))
+        }
+      }
     };
 
     div()

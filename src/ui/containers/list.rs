@@ -14,7 +14,8 @@ use gpui_component::{
 use crate::assets::AppIcon;
 use crate::docker::ContainerInfo;
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state};
+use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
+use crate::ui::components::{render_error, render_loading};
 
 /// Container list events emitted to parent
 pub enum ContainerListEvent {
@@ -25,7 +26,6 @@ pub enum ContainerListEvent {
 /// Delegate for the container list
 pub struct ContainerListDelegate {
   docker_state: Entity<DockerState>,
-  selected_index: Option<IndexPath>,
   search_query: String,
 }
 
@@ -55,7 +55,6 @@ impl ContainerListDelegate {
 
   pub fn set_search_query(&mut self, query: String) {
     self.search_query = query;
-    self.selected_index = None;
   }
 }
 
@@ -76,7 +75,9 @@ impl ListDelegate for ContainerListDelegate {
     let container = containers.get(ix.row)?;
     let colors = &cx.theme().colors;
 
-    let is_selected = self.selected_index == Some(ix);
+    // Use global selection as single source of truth
+    let global_selection = &self.docker_state.read(cx).selection;
+    let is_selected = matches!(global_selection, Selection::Container(c) if c.id == container.id);
     let is_running = container.state.is_running();
     let container_id = container.id.clone();
 
@@ -320,17 +321,18 @@ impl ListDelegate for ContainerListDelegate {
       .rounded(px(6.))
       .overflow_hidden()
       .selected(is_selected)
-      .on_click(cx.listener(move |this, _ev, _window, cx| {
-        this.delegate_mut().selected_index = Some(ix);
-        cx.notify();
-      }))
       .child(item_content);
 
     Some(item)
   }
 
-  fn set_selected_index(&mut self, ix: Option<IndexPath>, _window: &mut Window, cx: &mut Context<'_, ListState<Self>>) {
-    self.selected_index = ix;
+  fn set_selected_index(
+    &mut self,
+    _ix: Option<IndexPath>,
+    _window: &mut Window,
+    cx: &mut Context<'_, ListState<Self>>,
+  ) {
+    // Selection is managed globally via DockerState.selection
     cx.notify();
   }
 }
@@ -350,7 +352,6 @@ impl ContainerList {
 
     let delegate = ContainerListDelegate {
       docker_state: docker_state.clone(),
-      selected_index: None,
       search_query: String::new(),
     };
 
@@ -371,7 +372,7 @@ impl ContainerList {
 
     // Subscribe to docker state changes to refresh list
     cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
-      if matches!(event, StateChanged::ContainersUpdated) {
+      if matches!(event, StateChanged::ContainersUpdated | StateChanged::SelectionChanged) {
         this.list_state.update(cx, |_state, cx| {
           cx.notify();
         });
@@ -540,18 +541,25 @@ impl Render for ContainerList {
     let state = self.docker_state.read(cx);
     let total_count = state.containers.len();
     let running_count = state.containers.iter().filter(|c| c.state.is_running()).count();
+    let containers_state = state.containers_state.clone();
 
     // Get filtered count
     let filtered_count = self.list_state.read(cx).delegate().filtered_containers(cx).len();
     let is_filtering = !self.search_query.is_empty();
     let containers_empty = filtered_count == 0;
 
-    let subtitle = if is_filtering {
-      format!("{filtered_count} of {total_count} ({running_count}  running)")
-    } else if running_count > 0 {
-      format!("{running_count} running")
-    } else {
-      "None running".to_string()
+    let subtitle = match &containers_state {
+      LoadState::NotLoaded | LoadState::Loading => "Loading...".to_string(),
+      LoadState::Error(_) => "Error loading".to_string(),
+      LoadState::Loaded => {
+        if is_filtering {
+          format!("{filtered_count} of {total_count} ({running_count} running)")
+        } else if running_count > 0 {
+          format!("{running_count} running")
+        } else {
+          "None running".to_string()
+        }
+      }
     };
 
     let colors = cx.theme().colors;
@@ -639,12 +647,28 @@ impl Render for ContainerList {
       None
     };
 
-    let content: gpui::Div = if containers_empty && !is_filtering {
-      Self::render_empty(cx)
-    } else if containers_empty && is_filtering {
-      self.render_no_results(cx)
-    } else {
-      div().size_full().p(px(8.)).child(List::new(&self.list_state))
+    let content: gpui::Div = match &containers_state {
+      LoadState::NotLoaded | LoadState::Loading => render_loading("containers", cx),
+      LoadState::Error(e) => {
+        let error_msg = e.clone();
+        render_error(
+          "containers",
+          &error_msg,
+          |_ev, _window, cx| {
+            services::refresh_containers(cx);
+          },
+          cx,
+        )
+      }
+      LoadState::Loaded => {
+        if containers_empty && !is_filtering {
+          Self::render_empty(cx)
+        } else if containers_empty && is_filtering {
+          self.render_no_results(cx)
+        } else {
+          div().size_full().p(px(8.)).child(List::new(&self.list_state))
+        }
+      }
     };
 
     div()

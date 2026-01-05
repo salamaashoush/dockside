@@ -13,7 +13,8 @@ use gpui_component::{
 use crate::assets::AppIcon;
 use crate::docker::NetworkInfo;
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state};
+use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
+use crate::ui::components::{render_error, render_loading};
 
 /// Network list events emitted to parent
 pub enum NetworkListEvent {
@@ -24,7 +25,6 @@ pub enum NetworkListEvent {
 /// Delegate for the network list
 pub struct NetworkListDelegate {
   docker_state: Entity<DockerState>,
-  selected_index: Option<IndexPath>,
   search_query: String,
   /// Cached list: (`section_index`, `is_system`, networks)
   sections: Vec<(bool, Vec<NetworkInfo>)>,
@@ -79,7 +79,6 @@ impl NetworkListDelegate {
 
   pub fn set_search_query(&mut self, query: String, cx: &App) {
     self.search_query = query;
-    self.selected_index = None;
     self.rebuild_sections(cx);
   }
 
@@ -131,7 +130,9 @@ impl ListDelegate for NetworkListDelegate {
     let network = self.get_network(ix)?.clone();
     let colors = &cx.theme().colors;
 
-    let is_selected = self.selected_index == Some(ix);
+    // Use global selection as single source of truth
+    let global_selection = &self.docker_state.read(cx).selection;
+    let is_selected = matches!(global_selection, Selection::Network(id) if *id == network.id);
     let network_id = network.id.clone();
     let is_system = network.is_system_network();
 
@@ -182,11 +183,7 @@ impl ListDelegate for NetworkListDelegate {
       .py(px(6.))
       .rounded(px(6.))
       .selected(is_selected)
-      .child(item_content)
-      .on_click(cx.listener(move |this, _ev, _window, cx| {
-        this.delegate_mut().selected_index = Some(ix);
-        cx.notify();
-      }));
+      .child(item_content);
 
     // Only show delete button for non-system networks
     if !is_system {
@@ -213,8 +210,13 @@ impl ListDelegate for NetworkListDelegate {
     Some(item)
   }
 
-  fn set_selected_index(&mut self, ix: Option<IndexPath>, _window: &mut Window, cx: &mut Context<'_, ListState<Self>>) {
-    self.selected_index = ix;
+  fn set_selected_index(
+    &mut self,
+    _ix: Option<IndexPath>,
+    _window: &mut Window,
+    cx: &mut Context<'_, ListState<Self>>,
+  ) {
+    // Selection is managed globally via DockerState.selection
     cx.notify();
   }
 }
@@ -234,7 +236,6 @@ impl NetworkList {
 
     let mut delegate = NetworkListDelegate {
       docker_state: docker_state.clone(),
-      selected_index: None,
       search_query: String::new(),
       sections: Vec::new(),
     };
@@ -258,7 +259,7 @@ impl NetworkList {
 
     // Subscribe to docker state changes to refresh list
     cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
-      if matches!(event, StateChanged::NetworksUpdated) {
+      if matches!(event, StateChanged::NetworksUpdated | StateChanged::SelectionChanged) {
         this.list_state.update(cx, |state, cx| {
           state.delegate_mut().rebuild_sections(cx);
           cx.notify();
@@ -430,6 +431,8 @@ impl gpui::EventEmitter<NetworkListEvent> for NetworkList {}
 
 impl Render for NetworkList {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+    let state = self.docker_state.read(cx);
+    let networks_state = state.networks_state.clone();
     let total_count = self.count_networks(cx);
     let colors = cx.theme().colors;
 
@@ -446,10 +449,16 @@ impl Render for NetworkList {
       self.sync_search_query(cx);
     }
 
-    let subtitle = if is_filtering {
-      format!("{filtered_count} of {total_count} networks")
-    } else {
-      format!("{total_count} networks")
+    let subtitle = match &networks_state {
+      LoadState::NotLoaded | LoadState::Loading => "Loading...".to_string(),
+      LoadState::Error(_) => "Error loading".to_string(),
+      LoadState::Loaded => {
+        if is_filtering {
+          format!("{filtered_count} of {total_count} networks")
+        } else {
+          format!("{total_count} networks")
+        }
+      }
     };
 
     // Toolbar
@@ -528,12 +537,28 @@ impl Render for NetworkList {
       None
     };
 
-    let content: gpui::Div = if networks_empty && !is_filtering {
-      Self::render_empty(cx)
-    } else if networks_empty && is_filtering {
-      self.render_no_results(cx)
-    } else {
-      div().size_full().p(px(8.)).child(List::new(&self.list_state))
+    let content: gpui::Div = match &networks_state {
+      LoadState::NotLoaded | LoadState::Loading => render_loading("networks", cx),
+      LoadState::Error(e) => {
+        let error_msg = e.clone();
+        render_error(
+          "networks",
+          &error_msg,
+          |_ev, _window, cx| {
+            services::refresh_networks(cx);
+          },
+          cx,
+        )
+      }
+      LoadState::Loaded => {
+        if networks_empty && !is_filtering {
+          Self::render_empty(cx)
+        } else if networks_empty && is_filtering {
+          self.render_no_results(cx)
+        } else {
+          div().size_full().p(px(8.)).child(List::new(&self.list_state))
+        }
+      }
     };
 
     div()

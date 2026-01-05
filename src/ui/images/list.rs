@@ -13,7 +13,8 @@ use gpui_component::{
 use crate::assets::AppIcon;
 use crate::docker::ImageInfo;
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state};
+use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
+use crate::ui::components::{render_error, render_loading};
 
 /// Image list events emitted to parent
 pub enum ImageListEvent {
@@ -24,7 +25,6 @@ pub enum ImageListEvent {
 /// Delegate for the image list
 pub struct ImageListDelegate {
   docker_state: Entity<DockerState>,
-  selected_index: Option<IndexPath>,
   search_query: String,
   /// Cached list: (`section_index`, `is_in_use`, images)
   sections: Vec<(bool, Vec<ImageInfo>)>,
@@ -80,7 +80,6 @@ impl ImageListDelegate {
 
   pub fn set_search_query(&mut self, query: String, cx: &App) {
     self.search_query = query;
-    self.selected_index = None;
     self.rebuild_sections(cx);
   }
 
@@ -132,7 +131,9 @@ impl ListDelegate for ImageListDelegate {
     let image = self.get_image(ix)?.clone();
     let colors = &cx.theme().colors;
 
-    let is_selected = self.selected_index == Some(ix);
+    // Use global selection as single source of truth
+    let global_selection = &self.docker_state.read(cx).selection;
+    let is_selected = matches!(global_selection, Selection::Image(img) if img.id == image.id);
     let image_id = image.id.clone();
 
     // Display name (repo:tag or short id)
@@ -244,17 +245,18 @@ impl ListDelegate for ImageListDelegate {
                 services::delete_image(id.clone(), cx);
               }),
           )
-      })
-      .on_click(cx.listener(move |this, _ev, _window, cx| {
-        this.delegate_mut().selected_index = Some(ix);
-        cx.notify();
-      }));
+      });
 
     Some(item)
   }
 
-  fn set_selected_index(&mut self, ix: Option<IndexPath>, _window: &mut Window, cx: &mut Context<'_, ListState<Self>>) {
-    self.selected_index = ix;
+  fn set_selected_index(
+    &mut self,
+    _ix: Option<IndexPath>,
+    _window: &mut Window,
+    cx: &mut Context<'_, ListState<Self>>,
+  ) {
+    // Selection is managed globally via DockerState.selection
     cx.notify();
   }
 }
@@ -274,7 +276,6 @@ impl ImageList {
 
     let mut delegate = ImageListDelegate {
       docker_state: docker_state.clone(),
-      selected_index: None,
       search_query: String::new(),
       sections: Vec::new(),
     };
@@ -298,7 +299,10 @@ impl ImageList {
 
     // Subscribe to docker state changes to refresh list
     cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
-      if matches!(event, StateChanged::ImagesUpdated | StateChanged::ContainersUpdated) {
+      if matches!(
+        event,
+        StateChanged::ImagesUpdated | StateChanged::ContainersUpdated | StateChanged::SelectionChanged
+      ) {
         this.list_state.update(cx, |state, cx| {
           state.delegate_mut().rebuild_sections(cx);
           cx.notify();
@@ -472,6 +476,7 @@ impl Render for ImageList {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let state = self.docker_state.read(cx);
     let total_count = state.images.len();
+    let images_state = state.images_state.clone();
     let total_size = self.calculate_total_size(cx);
     let colors = cx.theme().colors;
 
@@ -489,10 +494,16 @@ impl Render for ImageList {
       self.sync_search_query(cx);
     }
 
-    let subtitle = if is_filtering {
-      format!("{filtered_count} of {total_count} ({total_size} total)")
-    } else {
-      format!("{total_size} total")
+    let subtitle = match &images_state {
+      LoadState::NotLoaded | LoadState::Loading => "Loading...".to_string(),
+      LoadState::Error(_) => "Error loading".to_string(),
+      LoadState::Loaded => {
+        if is_filtering {
+          format!("{filtered_count} of {total_count} ({total_size} total)")
+        } else {
+          format!("{total_size} total")
+        }
+      }
     };
 
     // Toolbar
@@ -571,12 +582,28 @@ impl Render for ImageList {
       None
     };
 
-    let content: gpui::Div = if images_empty && !is_filtering {
-      Self::render_empty(cx)
-    } else if filtered_empty && is_filtering {
-      self.render_no_results(cx)
-    } else {
-      div().size_full().p(px(8.)).child(List::new(&self.list_state))
+    let content: gpui::Div = match &images_state {
+      LoadState::NotLoaded | LoadState::Loading => render_loading("images", cx),
+      LoadState::Error(e) => {
+        let error_msg = e.clone();
+        render_error(
+          "images",
+          &error_msg,
+          |_ev, _window, cx| {
+            services::refresh_images(cx);
+          },
+          cx,
+        )
+      }
+      LoadState::Loaded => {
+        if images_empty && !is_filtering {
+          Self::render_empty(cx)
+        } else if filtered_empty && is_filtering {
+          self.render_no_results(cx)
+        } else {
+          div().size_full().p(px(8.)).child(List::new(&self.list_state))
+        }
+      }
     };
 
     div()
