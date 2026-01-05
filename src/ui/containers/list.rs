@@ -135,7 +135,7 @@ impl ListDelegate for ContainerListDelegate {
                 services::pause_container(id.clone(), cx);
               }
             }))
-            .item(PopupMenuItem::new("Kill").icon(Icon::new(AppIcon::Stop)).on_click({
+            .item(PopupMenuItem::new("Kill").icon(Icon::new(AppIcon::Kill)).on_click({
               let id = id.clone();
               move |_, _, cx| {
                 services::kill_container(id.clone(), cx);
@@ -185,7 +185,7 @@ impl ListDelegate for ContainerListDelegate {
                 services::stop_container(id.clone(), cx);
               }
             }))
-            .item(PopupMenuItem::new("Kill").icon(Icon::new(AppIcon::Stop)).on_click({
+            .item(PopupMenuItem::new("Kill").icon(Icon::new(AppIcon::Kill)).on_click({
               let id = id.clone();
               move |_, _, cx| {
                 services::kill_container(id.clone(), cx);
