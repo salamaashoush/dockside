@@ -1726,6 +1726,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tray-icon",
+ "url",
  "vte",
  "which 7.0.3",
 ]

@@ -10,6 +10,7 @@
 //! - `navigation` - View and tab navigation functions
 //! - `prune` - Docker prune operations
 //! - `init` - Initial data loading
+//! - `watchers` - Real-time resource watchers for Docker and Kubernetes
 
 mod colima;
 mod core;
@@ -20,6 +21,7 @@ mod kubernetes;
 mod navigation;
 mod prune;
 mod task_manager;
+mod watchers;
 
 // Re-export everything for backward compatibility
 pub use colima::*;
@@ -31,6 +33,7 @@ pub use kubernetes::*;
 pub use navigation::*;
 pub use prune::*;
 pub use task_manager::*;
+pub use watchers::WatcherManager;
 
 use gpui::App;
 
@@ -48,4 +51,19 @@ pub fn init_services(cx: &mut App) {
   // Initialize services
   init_task_manager(cx);
   init_dispatcher(cx);
+}
+
+/// Start the real-time resource watchers
+///
+/// Call this after initial data loading to enable real-time updates.
+/// The watchers monitor Docker events and Kubernetes resource changes,
+/// automatically refreshing the UI when resources are added, modified, or deleted.
+pub fn start_watchers(cx: &mut App) {
+  let docker_client = docker_client();
+  let watcher_manager = WatcherManager::new(docker_client);
+  watcher_manager.start(cx);
+
+  // Store the manager globally so it stays alive
+  // (The manager's internal tasks are detached so we don't need to hold onto it,
+  // but we could add stop functionality later if needed)
 }

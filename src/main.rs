@@ -3,6 +3,7 @@ mod app;
 mod assets;
 mod colima;
 mod docker;
+mod keybindings;
 mod kubernetes;
 mod services;
 mod state;
@@ -33,22 +34,28 @@ pub use assets::Assets;
 fn open_main_window(cx: &mut App) -> WindowHandle<Root> {
   let bounds = Bounds::centered(None, size(px(1200.), px(800.)), cx);
 
-  cx.open_window(
-    WindowOptions {
-      window_bounds: Some(WindowBounds::Windowed(bounds)),
-      titlebar: Some(TitlebarOptions {
-        title: Some("Dockside".into()),
-        appears_transparent: true,
-        traffic_light_position: Some(gpui::point(px(9.), px(9.))),
-      }),
-      ..Default::default()
-    },
-    |window, cx| {
-      let view = cx.new(|cx| app::DocksideApp::new(window, cx));
-      cx.new(|cx| Root::new(view, window, cx))
-    },
-  )
-  .expect("Failed to open window")
+  let handle = cx
+    .open_window(
+      WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions {
+          title: Some("Dockside".into()),
+          appears_transparent: true,
+          traffic_light_position: Some(gpui::point(px(9.), px(9.))),
+        }),
+        ..Default::default()
+      },
+      |window, cx| {
+        let view = cx.new(|cx| app::DocksideApp::new(window, cx));
+        cx.new(|cx| Root::new(view, window, cx))
+      },
+    )
+    .expect("Failed to open window");
+
+  // Activate the window to ensure it receives keyboard focus
+  cx.activate(true);
+
+  handle
 }
 
 /// Get the themes directory path, checking multiple locations:
@@ -158,8 +165,20 @@ fn main() {
     // Initialize global services
     services::init_services(cx);
 
+    // Register keyboard shortcuts
+    keybindings::register_keybindings(cx);
+
+    // Register command palette keybindings
+    ui::command_palette::init(cx);
+
+    // Register global search keybindings
+    ui::global_search::init(cx);
+
     // Load initial data
     services::load_initial_data(cx);
+
+    // Start real-time resource watchers for automatic UI updates
+    services::start_watchers(cx);
 
     // Open the main window
     open_main_window(cx);

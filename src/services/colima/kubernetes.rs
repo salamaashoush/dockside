@@ -2,7 +2,7 @@
 
 use gpui::App;
 
-use crate::colima::{ColimaClient, ColimaStartOptions};
+use crate::colima::ColimaClient;
 use crate::services::{TaskStage, advance_stage, complete_task, fail_task, start_staged_task, start_task};
 use crate::state::{StateChanged, docker_state};
 use crate::utils::{colima_cmd, kubectl_cmd};
@@ -299,9 +299,11 @@ pub fn enable_kubernetes(name: String, cx: &mut App) {
       .spawn({
         let name = name.clone();
         async move {
-          // Start with kubernetes enabled, preserving the name
-          let options = ColimaStartOptions::new().with_name(name).with_kubernetes(true);
-          ColimaClient::start(&options)
+          // Read existing config and enable kubernetes
+          let name_opt = if name == "default" { None } else { Some(name.as_str()) };
+          let mut config = ColimaClient::read_config(name_opt).unwrap_or_default();
+          config.kubernetes.enabled = true;
+          ColimaClient::start_with_config(&name, &config)
         }
       })
       .await;
