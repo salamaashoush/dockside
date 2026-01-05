@@ -11,13 +11,16 @@ use gpui_component::{
 };
 use std::rc::Rc;
 
+// Re-export from state module for backwards compatibility
+pub use crate::state::ContainerDetailTab;
+
 use crate::assets::AppIcon;
 use crate::docker::{ContainerFileEntry, ContainerInfo};
 use crate::terminal::TerminalView;
 use crate::ui::components::{FileExplorer, FileExplorerConfig, FileExplorerState};
 
 type ContainerActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
-type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
+type TabChangeCallback = Rc<dyn Fn(&ContainerDetailTab, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
 type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type FileSelectCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
@@ -53,7 +56,7 @@ impl ContainerTabState {
 
 pub struct ContainerDetail {
   container: Option<ContainerInfo>,
-  active_tab: usize,
+  active_tab: ContainerDetailTab,
   container_state: Option<ContainerTabState>,
   terminal_view: Option<Entity<TerminalView>>,
   logs_editor: Option<Entity<InputState>>,
@@ -75,7 +78,7 @@ impl ContainerDetail {
   pub fn new() -> Self {
     Self {
       container: None,
-      active_tab: 0,
+      active_tab: ContainerDetailTab::Info,
       container_state: None,
       terminal_view: None,
       logs_editor: None,
@@ -99,7 +102,7 @@ impl ContainerDetail {
     self
   }
 
-  pub fn active_tab(mut self, tab: usize) -> Self {
+  pub fn active_tab(mut self, tab: ContainerDetailTab) -> Self {
     self.active_tab = tab;
     self
   }
@@ -163,7 +166,7 @@ impl ContainerDetail {
 
   pub fn on_tab_change<F>(mut self, callback: F) -> Self
   where
-    F: Fn(&usize, &mut Window, &mut App) + 'static,
+    F: Fn(&ContainerDetailTab, &mut Window, &mut App) + 'static,
   {
     self.on_tab_change = Some(Rc::new(callback));
     self
@@ -487,8 +490,6 @@ impl ContainerDetail {
     let on_delete = self.on_delete.clone();
     let on_tab_change = self.on_tab_change.clone();
 
-    let tabs = ["Info", "Logs", "Terminal", "Files", "Inspect"];
-
     // Toolbar with tabs and actions
     let toolbar = h_flex()
       .w_full()
@@ -502,14 +503,15 @@ impl ContainerDetail {
       .child(
         TabBar::new("container-tabs")
           .flex_1()
-          .children(tabs.iter().enumerate().map(|(i, label)| {
+          .children(ContainerDetailTab::ALL.iter().map(|tab| {
             let on_tab_change = on_tab_change.clone();
+            let tab_variant = *tab;
             Tab::new()
-              .label((*label).to_string())
-              .selected(self.active_tab == i)
+              .label(tab.label().to_string())
+              .selected(self.active_tab == *tab)
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tab_change {
-                  cb(&i, window, cx);
+                  cb(&tab_variant, window, cx);
                 }
               })
           })),
@@ -576,7 +578,10 @@ impl ContainerDetail {
       );
 
     // Terminal, Logs, and Files tabs need full height without scroll
-    let is_full_height_tab = self.active_tab == 1 || self.active_tab == 2 || self.active_tab == 3;
+    let is_full_height_tab = matches!(
+      self.active_tab,
+      ContainerDetailTab::Logs | ContainerDetailTab::Terminal | ContainerDetailTab::Files
+    );
 
     // Content based on active tab
     let mut result = div()
@@ -589,15 +594,15 @@ impl ContainerDetail {
 
     if is_full_height_tab {
       let content = match self.active_tab {
-        1 => self.render_logs_tab(cx).into_any_element(),
-        2 => self.render_terminal_tab(cx).into_any_element(),
-        3 => self.render_files_tab(is_running, window, cx),
+        ContainerDetailTab::Logs => self.render_logs_tab(cx).into_any_element(),
+        ContainerDetailTab::Terminal => self.render_terminal_tab(cx).into_any_element(),
+        ContainerDetailTab::Files => self.render_files_tab(is_running, window, cx),
         _ => Self::render_info_tab(container, cx).into_any_element(),
       };
       result = result.child(div().flex_1().min_h_0().w_full().overflow_hidden().child(content));
     } else {
       let content = match self.active_tab {
-        4 => self.render_inspect_tab(cx),
+        ContainerDetailTab::Inspect => self.render_inspect_tab(cx),
         _ => Self::render_info_tab(container, cx),
       };
       result = result.child(

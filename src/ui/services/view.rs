@@ -1,28 +1,37 @@
 use std::time::Duration;
 
-use gpui::{Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
-use gpui_component::{
-  WindowExt,
-  button::{Button, ButtonVariants},
-  theme::ActiveTheme,
-};
+use gpui::{App, Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui_component::theme::ActiveTheme;
 
-use super::create_dialog::CreateServiceDialog;
 use super::detail::ServiceDetail;
 use super::list::{ServiceList, ServiceListEvent};
 use crate::kubernetes::ServiceInfo;
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state, settings_state};
+use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
+use crate::ui::dialogs;
 
 /// Main services view with list and detail panels
 pub struct ServicesView {
-  _docker_state: Entity<DockerState>,
+  docker_state: Entity<DockerState>,
   list: Entity<ServiceList>,
   detail: Entity<ServiceDetail>,
-  selected_service: Option<ServiceInfo>,
 }
 
 impl ServicesView {
+  /// Get the currently selected service from global state
+  fn selected_service(&self, cx: &App) -> Option<ServiceInfo> {
+    let state = self.docker_state.read(cx);
+    if let Selection::Service {
+      ref name,
+      ref namespace,
+    } = state.selection
+    {
+      state.get_service(name, namespace).cloned()
+    } else {
+      None
+    }
+  }
+
   pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     let docker_state = docker_state(cx);
 
@@ -35,9 +44,15 @@ impl ServicesView {
       window,
       |this, _list, event: &ServiceListEvent, window, cx| match event {
         ServiceListEvent::Selected(service) => {
-          this.selected_service = Some(service.as_ref().clone());
           this.detail.update(cx, |detail, cx| {
             detail.set_service(service.as_ref().clone(), cx);
+          });
+          // Update global selection (single source of truth)
+          this.docker_state.update(cx, |state, _cx| {
+            state.set_selection(Selection::Service {
+              name: service.name.clone(),
+              namespace: service.namespace.clone(),
+            });
           });
           cx.notify();
         }
@@ -56,19 +71,52 @@ impl ServicesView {
           namespace,
           tab: _,
         } => {
-          let state = ds.read(cx);
-          if let Some(svc) = state.get_service(service_name, namespace) {
-            this.selected_service = Some(svc.clone());
+          // Clone the service first to avoid borrow conflict
+          let svc_opt = {
+            let state = ds.read(cx);
+            state.get_service(service_name, namespace).cloned()
+          };
+          if let Some(svc) = svc_opt {
+            // Update global selection
+            this.docker_state.update(cx, |state, _cx| {
+              state.set_selection(Selection::Service {
+                name: svc.name.clone(),
+                namespace: svc.namespace.clone(),
+              });
+            });
             cx.notify();
           }
         }
         StateChanged::ServicesUpdated => {
-          // Update selected service if it still exists
-          if let Some(ref current) = this.selected_service {
-            let state = ds.read(cx);
-            this.selected_service = state.get_service(&current.name, &current.namespace).cloned();
-            cx.notify();
+          // Update detail if service still exists
+          let selected_key = {
+            if let Selection::Service {
+              ref name,
+              ref namespace,
+            } = this.docker_state.read(cx).selection
+            {
+              Some((name.clone(), namespace.clone()))
+            } else {
+              None
+            }
+          };
+
+          if let Some((name, namespace)) = selected_key {
+            // Extract the service data first to avoid borrow conflicts
+            let svc_opt = ds.read(cx).get_service(&name, &namespace).cloned();
+            if let Some(svc) = svc_opt {
+              // Use update_service_data to preserve tab state during refresh
+              this.detail.update(cx, |detail, dcx| {
+                detail.update_service_data(svc, dcx);
+              });
+            } else {
+              // Service was deleted
+              this.docker_state.update(cx, |s, _| {
+                s.set_selection(Selection::None);
+              });
+            }
           }
+          cx.notify();
         }
         _ => {}
       }
@@ -93,52 +141,21 @@ impl ServicesView {
     services::refresh_services(cx);
 
     Self {
-      _docker_state: docker_state,
+      docker_state,
       list,
       detail,
-      selected_service: None,
     }
   }
 
   fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    let dialog_entity = cx.new(CreateServiceDialog::new);
-
-    window.open_dialog(cx, move |dialog, _window, cx| {
-      let _colors = cx.theme().colors;
-      let dialog_clone = dialog_entity.clone();
-
-      dialog
-        .title("New Service")
-        .min_w(px(550.))
-        .child(dialog_entity.clone())
-        .footer(move |_dialog_state, _, _window, _cx| {
-          let dialog_for_create = dialog_clone.clone();
-
-          vec![
-            Button::new("create")
-              .label("Create")
-              .primary()
-              .on_click({
-                let dialog = dialog_for_create.clone();
-                move |_ev, window, cx| {
-                  let options = dialog.read(cx).get_options(cx);
-                  if !options.name.is_empty() && !options.ports.is_empty() {
-                    services::create_service(options, cx);
-                    window.close_dialog(cx);
-                  }
-                }
-              })
-              .into_any_element(),
-          ]
-        })
-    });
+    dialogs::open_create_service_dialog(window, cx);
   }
 }
 
 impl Render for ServicesView {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let colors = cx.theme().colors;
-    let has_selection = self.selected_service.is_some();
+    let has_selection = self.selected_service(cx).is_some();
 
     div()
       .size_full()

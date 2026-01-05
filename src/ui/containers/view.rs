@@ -1,4 +1,4 @@
-use gpui::{Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
 use gpui_component::{
   WindowExt,
   button::{Button, ButtonVariants},
@@ -9,20 +9,20 @@ use std::time::Duration;
 
 use crate::docker::ContainerInfo;
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state, settings_state};
+use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
 use crate::terminal::{TerminalSessionType, TerminalView};
 use crate::ui::components::detect_language_from_path;
 
 use super::create_dialog::CreateContainerDialog;
-use super::detail::{ContainerDetail, ContainerTabState};
+use super::detail::{ContainerDetail, ContainerDetailTab, ContainerTabState};
 use super::list::{ContainerList, ContainerListEvent};
 
 /// Self-contained Containers view - handles list, detail, and all state
 pub struct ContainersView {
-  _docker_state: Entity<DockerState>,
+  docker_state: Entity<DockerState>,
   container_list: Entity<ContainerList>,
-  selected_container: Option<ContainerInfo>,
-  active_tab: usize,
+  // View-specific state (not selection - that's in global DockerState)
+  active_tab: ContainerDetailTab,
   terminal_view: Option<Entity<TerminalView>>,
   logs_editor: Option<Entity<InputState>>,
   inspect_editor: Option<Entity<InputState>>,
@@ -35,6 +35,14 @@ pub struct ContainersView {
 }
 
 impl ContainersView {
+  /// Get the currently selected container from global state
+  fn selected_container(&self, cx: &App) -> Option<ContainerInfo> {
+    match &self.docker_state.read(cx).selection {
+      Selection::Container(c) => Some(c.clone()),
+      _ => None,
+    }
+  }
+
   pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     let docker_state = docker_state(cx);
 
@@ -64,16 +72,28 @@ impl ContainersView {
         match event {
           StateChanged::ContainersUpdated => {
             // If selected container was deleted, clear selection
-            if let Some(ref selected) = this.selected_container {
-              let state = state.read(cx);
-              if state.containers.iter().any(|c| c.id == selected.id) {
-                // Update the selected container info
-                if let Some(updated) = state.containers.iter().find(|c| c.id == selected.id) {
-                  this.selected_container = Some(updated.clone());
-                }
+            // First, extract the selected container ID to avoid borrow conflicts
+            let selected_id = {
+              if let Selection::Container(ref c) = this.docker_state.read(cx).selection {
+                Some(c.id.clone())
               } else {
-                this.selected_container = None;
-                this.active_tab = 0;
+                None
+              }
+            };
+
+            if let Some(id) = selected_id {
+              let updated = state.read(cx).containers.iter().find(|c| c.id == id).cloned();
+              if let Some(container) = updated {
+                // Update the selected container info in global state
+                this.docker_state.update(cx, |s, _| {
+                  s.set_selection(Selection::Container(container));
+                });
+              } else {
+                // Container was deleted, clear selection
+                this.docker_state.update(cx, |s, _| {
+                  s.set_selection(Selection::None);
+                });
+                this.active_tab = ContainerDetailTab::Info;
                 this.terminal_view = None;
               }
             }
@@ -127,10 +147,9 @@ impl ContainersView {
     .detach();
 
     Self {
-      _docker_state: docker_state,
+      docker_state,
       container_list,
-      selected_container: None,
-      active_tab: 0,
+      active_tab: ContainerDetailTab::Info,
       terminal_view: None,
       logs_editor: None,
       inspect_editor: None,
@@ -354,10 +373,14 @@ impl ContainersView {
   }
 
   fn on_select_container(&mut self, container: &ContainerInfo, window: &mut Window, cx: &mut Context<'_, Self>) {
-    self.selected_container = Some(container.clone());
-    self.active_tab = 0;
+    // Update global selection (single source of truth)
+    self.docker_state.update(cx, |state, _cx| {
+      state.set_selection(Selection::Container(container.clone()));
+    });
+
+    // Reset view-specific state
+    self.active_tab = ContainerDetailTab::Info;
     self.terminal_view = None;
-    // Clear synced tracking for new container
     self.last_synced_logs.clear();
     self.last_synced_inspect.clear();
 
@@ -387,13 +410,13 @@ impl ContainersView {
     cx.notify();
   }
 
-  fn on_tab_change(&mut self, tab: usize, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn on_tab_change(&mut self, tab: ContainerDetailTab, window: &mut Window, cx: &mut Context<'_, Self>) {
     self.active_tab = tab;
 
     // If switching to terminal tab, create terminal view
-    if tab == 2
+    if tab == ContainerDetailTab::Terminal
       && self.terminal_view.is_none()
-      && let Some(ref container) = self.selected_container
+      && let Some(ref container) = self.selected_container(cx)
     {
       let container_id = container.id.clone();
       self.terminal_view =
@@ -401,8 +424,8 @@ impl ContainersView {
     }
 
     // If switching to files tab, load files
-    if tab == 3
-      && let Some(ref container) = self.selected_container
+    if tab == ContainerDetailTab::Files
+      && let Some(ref container) = self.selected_container(cx)
       && container.state.is_running()
     {
       let container_id = container.id.clone();
@@ -415,7 +438,7 @@ impl ContainersView {
 
   fn on_navigate_path(&mut self, path: &str, cx: &mut Context<'_, Self>) {
     self.container_tab_state.current_path = path.to_string();
-    if let Some(ref container) = self.selected_container
+    if let Some(ref container) = self.selected_container(cx)
       && container.state.is_running()
     {
       let container_id = container.id.clone();
@@ -479,7 +502,7 @@ impl ContainersView {
     cx.notify();
 
     // Load file content
-    if let Some(ref container) = self.selected_container {
+    if let Some(ref container) = self.selected_container(cx) {
       Self::load_container_file_content(&container.id.clone(), path, cx);
     }
   }
@@ -522,7 +545,7 @@ impl ContainersView {
   }
 
   fn on_symlink_follow(&mut self, path: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
-    if let Some(ref container) = self.selected_container.clone() {
+    if let Some(ref container) = self.selected_container(cx) {
       if !container.state.is_running() {
         return;
       }
@@ -570,7 +593,7 @@ impl ContainersView {
             if is_dir {
               // Navigate to directory
               this.container_tab_state.current_path = target;
-              if let Some(ref container) = this.selected_container {
+              if let Some(ref container) = this.selected_container(cx) {
                 this.load_container_files(
                   &container.id.clone(),
                   &this.container_tab_state.current_path.clone(),
@@ -583,7 +606,7 @@ impl ContainersView {
               this.last_synced_file_content.clear();
               this.container_tab_state.selected_file = Some(target.clone());
               this.container_tab_state.file_content_loading = true;
-              if let Some(ref container) = this.selected_container {
+              if let Some(ref container) = this.selected_container(cx) {
                 Self::load_container_file_content(&container.id.clone(), &target, cx);
               }
             }
@@ -665,7 +688,7 @@ impl ContainersView {
   }
 
   fn on_refresh_logs(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-    if let Some(ref container) = self.selected_container.clone() {
+    if let Some(ref container) = self.selected_container(cx) {
       self.load_container_data(&container.id, window, cx);
     }
   }
@@ -712,13 +735,14 @@ impl Render for ContainersView {
     }
 
     let colors = cx.theme().colors;
-    let selected_container = self.selected_container.clone();
+    let selected_container = self.selected_container(cx);
     let active_tab = self.active_tab;
     let container_tab_state = self.container_tab_state.clone();
     let terminal_view = self.terminal_view.clone();
     let logs_editor = self.logs_editor.clone();
     let inspect_editor = self.inspect_editor.clone();
     let file_content_editor = self.file_content_editor.clone();
+    let has_selection = selected_container.is_some();
 
     // Build detail panel
     let detail = ContainerDetail::new()
@@ -729,7 +753,7 @@ impl Render for ContainersView {
       .logs_editor(logs_editor)
       .inspect_editor(inspect_editor)
       .file_content_editor(file_content_editor)
-      .on_tab_change(cx.listener(|this, tab: &usize, window, cx| {
+      .on_tab_change(cx.listener(|this, tab: &ContainerDetailTab, window, cx| {
         this.on_tab_change(*tab, window, cx);
       }))
       .on_refresh_logs(cx.listener(|this, (): &(), window, cx| {
@@ -758,13 +782,12 @@ impl Render for ContainersView {
       }))
       .on_delete(cx.listener(|this, id: &str, _window, cx| {
         services::delete_container(id.to_string(), cx);
-        this.selected_container = None;
-        this.active_tab = 0;
+        // Clear selection in global state
+        this.docker_state.update(cx, |s, _| s.set_selection(Selection::None));
+        this.active_tab = ContainerDetailTab::Info;
         this.terminal_view = None;
         cx.notify();
       }));
-
-    let has_selection = self.selected_container.is_some();
 
     div()
       .size_full()

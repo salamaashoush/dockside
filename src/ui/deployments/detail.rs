@@ -13,13 +13,13 @@ use gpui_component::{
 use crate::assets::AppIcon;
 use crate::kubernetes::{DeploymentInfo, PodInfo};
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state};
+use crate::state::{DeploymentDetailTab, DockerState, StateChanged, docker_state};
 
 /// Detail view for a deployment with tabs
 pub struct DeploymentDetail {
   docker_state: Entity<DockerState>,
   deployment: Option<DeploymentInfo>,
-  active_tab: usize,
+  active_tab: DeploymentDetailTab,
   yaml_content: String,
   yaml_editor: Option<Entity<InputState>>,
   last_synced_yaml: String,
@@ -77,7 +77,7 @@ impl DeploymentDetail {
     Self {
       docker_state,
       deployment: None,
-      active_tab: 0,
+      active_tab: DeploymentDetailTab::Info,
       yaml_content: String::new(),
       yaml_editor: None,
       last_synced_yaml: String::new(),
@@ -86,7 +86,7 @@ impl DeploymentDetail {
 
   pub fn set_deployment(&mut self, deployment: DeploymentInfo, cx: &mut Context<'_, Self>) {
     self.deployment = Some(deployment.clone());
-    self.active_tab = 0;
+    self.active_tab = DeploymentDetailTab::Info;
     self.yaml_content.clear();
     self.yaml_editor = None;
     self.last_synced_yaml.clear();
@@ -94,6 +94,12 @@ impl DeploymentDetail {
     // Load YAML
     services::get_deployment_yaml(deployment.name, deployment.namespace, cx);
 
+    cx.notify();
+  }
+
+  /// Update deployment data without resetting tab state (for data refresh)
+  pub fn update_deployment_data(&mut self, deployment: DeploymentInfo, cx: &mut Context<'_, Self>) {
+    self.deployment = Some(deployment);
     cx.notify();
   }
 
@@ -604,27 +610,27 @@ impl Render for DeploymentDetail {
       .child(
         Tab::new()
           .label("Info")
-          .selected(active_tab == 0)
+          .selected(active_tab == DeploymentDetailTab::Info)
           .on_click(cx.listener(|this, _ev, _window, cx| {
-            this.active_tab = 0;
+            this.active_tab = DeploymentDetailTab::Info;
             cx.notify();
           })),
       )
       .child(
         Tab::new()
           .label("Pods")
-          .selected(active_tab == 1)
+          .selected(active_tab == DeploymentDetailTab::Pods)
           .on_click(cx.listener(|this, _ev, _window, cx| {
-            this.active_tab = 1;
+            this.active_tab = DeploymentDetailTab::Pods;
             cx.notify();
           })),
       )
       .child(
         Tab::new()
           .label("YAML")
-          .selected(active_tab == 2)
+          .selected(active_tab == DeploymentDetailTab::Yaml)
           .on_click(cx.listener(|this, _ev, _window, cx| {
-            this.active_tab = 2;
+            this.active_tab = DeploymentDetailTab::Yaml;
             if let Some(ref dep) = this.deployment {
               services::get_deployment_yaml(dep.name.clone(), dep.namespace.clone(), cx);
             }
@@ -633,10 +639,9 @@ impl Render for DeploymentDetail {
 
     // Tab content
     let content = match active_tab {
-      0 => Self::render_info_tab(&deployment, cx),
-      1 => self.render_pods_tab(&deployment, cx),
-      2 => self.render_yaml_tab(&deployment, cx),
-      _ => div(),
+      DeploymentDetailTab::Info => Self::render_info_tab(&deployment, cx),
+      DeploymentDetailTab::Pods => self.render_pods_tab(&deployment, cx),
+      DeploymentDetailTab::Yaml => self.render_yaml_tab(&deployment, cx),
     };
 
     div()

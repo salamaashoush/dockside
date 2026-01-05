@@ -1,29 +1,42 @@
 use std::time::Duration;
 
-use gpui::{Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
 use gpui_component::{
   WindowExt,
   button::{Button, ButtonVariants},
   theme::ActiveTheme,
 };
 
-use super::create_dialog::CreateDeploymentDialog;
 use super::detail::DeploymentDetail;
 use super::list::{DeploymentList, DeploymentListEvent};
 use super::scale_dialog::ScaleDialog;
 use crate::kubernetes::DeploymentInfo;
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state, settings_state};
+use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
+use crate::ui::dialogs;
 
 /// Main deployments view with list and detail panels
 pub struct DeploymentsView {
-  _docker_state: Entity<DockerState>,
+  docker_state: Entity<DockerState>,
   list: Entity<DeploymentList>,
   detail: Entity<DeploymentDetail>,
-  selected_deployment: Option<DeploymentInfo>,
 }
 
 impl DeploymentsView {
+  /// Get the currently selected deployment from global state
+  fn selected_deployment(&self, cx: &App) -> Option<DeploymentInfo> {
+    let state = self.docker_state.read(cx);
+    if let Selection::Deployment {
+      ref name,
+      ref namespace,
+    } = state.selection
+    {
+      state.get_deployment(name, namespace).cloned()
+    } else {
+      None
+    }
+  }
+
   pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     let docker_state = docker_state(cx);
 
@@ -36,9 +49,15 @@ impl DeploymentsView {
       window,
       |this, _list, event: &DeploymentListEvent, window, cx| match event {
         DeploymentListEvent::Selected(deployment) => {
-          this.selected_deployment = Some(deployment.clone());
           this.detail.update(cx, |detail, cx| {
             detail.set_deployment(deployment.clone(), cx);
+          });
+          // Update global selection (single source of truth)
+          this.docker_state.update(cx, |state, _cx| {
+            state.set_selection(Selection::Deployment {
+              name: deployment.name.clone(),
+              namespace: deployment.namespace.clone(),
+            });
           });
           cx.notify();
         }
@@ -57,19 +76,52 @@ impl DeploymentsView {
           namespace,
           tab: _,
         } => {
-          let state = ds.read(cx);
-          if let Some(dep) = state.get_deployment(deployment_name, namespace) {
-            this.selected_deployment = Some(dep.clone());
+          // Clone the deployment first to avoid borrow conflict
+          let dep_opt = {
+            let state = ds.read(cx);
+            state.get_deployment(deployment_name, namespace).cloned()
+          };
+          if let Some(dep) = dep_opt {
+            // Update global selection
+            this.docker_state.update(cx, |state, _cx| {
+              state.set_selection(Selection::Deployment {
+                name: dep.name.clone(),
+                namespace: dep.namespace.clone(),
+              });
+            });
             cx.notify();
           }
         }
         StateChanged::DeploymentsUpdated => {
-          // Update selected deployment if it still exists
-          if let Some(ref current) = this.selected_deployment {
-            let state = ds.read(cx);
-            this.selected_deployment = state.get_deployment(&current.name, &current.namespace).cloned();
-            cx.notify();
+          // Update detail if deployment still exists
+          let selected_key = {
+            if let Selection::Deployment {
+              ref name,
+              ref namespace,
+            } = this.docker_state.read(cx).selection
+            {
+              Some((name.clone(), namespace.clone()))
+            } else {
+              None
+            }
+          };
+
+          if let Some((name, namespace)) = selected_key {
+            // Extract the deployment data first to avoid borrow conflicts
+            let dep_opt = ds.read(cx).get_deployment(&name, &namespace).cloned();
+            if let Some(dep) = dep_opt {
+              // Use update_deployment_data to preserve tab state during refresh
+              this.detail.update(cx, |detail, dcx| {
+                detail.update_deployment_data(dep, dcx);
+              });
+            } else {
+              // Deployment was deleted
+              this.docker_state.update(cx, |s, _| {
+                s.set_selection(Selection::None);
+              });
+            }
           }
+          cx.notify();
         }
         StateChanged::DeploymentScaleRequest {
           deployment_name,
@@ -101,45 +153,14 @@ impl DeploymentsView {
     services::refresh_deployments(cx);
 
     Self {
-      _docker_state: docker_state,
+      docker_state,
       list,
       detail,
-      selected_deployment: None,
     }
   }
 
   fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    let dialog_entity = cx.new(CreateDeploymentDialog::new);
-
-    window.open_dialog(cx, move |dialog, _window, cx| {
-      let _colors = cx.theme().colors;
-      let dialog_clone = dialog_entity.clone();
-
-      dialog
-        .title("New Deployment")
-        .min_w(px(550.))
-        .child(dialog_entity.clone())
-        .footer(move |_dialog_state, _, _window, _cx| {
-          let dialog_for_create = dialog_clone.clone();
-
-          vec![
-            Button::new("create")
-              .label("Create")
-              .primary()
-              .on_click({
-                let dialog = dialog_for_create.clone();
-                move |_ev, window, cx| {
-                  let options = dialog.read(cx).get_options(cx);
-                  if !options.name.is_empty() && !options.image.is_empty() {
-                    services::create_deployment(options, cx);
-                    window.close_dialog(cx);
-                  }
-                }
-              })
-              .into_any_element(),
-          ]
-        })
-    });
+    dialogs::open_create_deployment_dialog(window, cx);
   }
 
   fn show_scale_dialog(
@@ -187,7 +208,7 @@ impl DeploymentsView {
 impl Render for DeploymentsView {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let colors = cx.theme().colors;
-    let has_selection = self.selected_deployment.is_some();
+    let has_selection = self.selected_deployment(cx).is_some();
 
     div()
       .size_full()

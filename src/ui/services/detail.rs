@@ -12,13 +12,13 @@ use gpui_component::{
 
 use crate::kubernetes::{PodInfo, ServiceInfo};
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state};
+use crate::state::{DockerState, ServiceDetailTab, StateChanged, docker_state};
 
 /// Detail view for a service with tabs
 pub struct ServiceDetail {
   docker_state: Entity<DockerState>,
   service: Option<ServiceInfo>,
-  active_tab: usize,
+  active_tab: ServiceDetailTab,
   yaml_content: String,
   yaml_editor: Option<Entity<InputState>>,
   last_synced_yaml: String,
@@ -76,7 +76,7 @@ impl ServiceDetail {
     Self {
       docker_state,
       service: None,
-      active_tab: 0,
+      active_tab: ServiceDetailTab::Info,
       yaml_content: String::new(),
       yaml_editor: None,
       last_synced_yaml: String::new(),
@@ -85,7 +85,7 @@ impl ServiceDetail {
 
   pub fn set_service(&mut self, service: ServiceInfo, cx: &mut Context<'_, Self>) {
     self.service = Some(service.clone());
-    self.active_tab = 0;
+    self.active_tab = ServiceDetailTab::Info;
     self.yaml_content.clear();
     self.yaml_editor = None;
     self.last_synced_yaml.clear();
@@ -93,6 +93,12 @@ impl ServiceDetail {
     // Load YAML
     services::get_service_yaml(service.name, service.namespace, cx);
 
+    cx.notify();
+  }
+
+  /// Update service data without resetting tab state (for data refresh)
+  pub fn update_service_data(&mut self, service: ServiceInfo, cx: &mut Context<'_, Self>) {
+    self.service = Some(service);
     cx.notify();
   }
 
@@ -637,36 +643,36 @@ impl Render for ServiceDetail {
       .child(
         Tab::new()
           .label("Info")
-          .selected(active_tab == 0)
+          .selected(active_tab == ServiceDetailTab::Info)
           .on_click(cx.listener(|this, _ev, _window, cx| {
-            this.active_tab = 0;
+            this.active_tab = ServiceDetailTab::Info;
             cx.notify();
           })),
       )
       .child(
         Tab::new()
           .label("Ports")
-          .selected(active_tab == 1)
+          .selected(active_tab == ServiceDetailTab::Ports)
           .on_click(cx.listener(|this, _ev, _window, cx| {
-            this.active_tab = 1;
+            this.active_tab = ServiceDetailTab::Ports;
             cx.notify();
           })),
       )
       .child(
         Tab::new()
           .label("Endpoints")
-          .selected(active_tab == 2)
+          .selected(active_tab == ServiceDetailTab::Endpoints)
           .on_click(cx.listener(|this, _ev, _window, cx| {
-            this.active_tab = 2;
+            this.active_tab = ServiceDetailTab::Endpoints;
             cx.notify();
           })),
       )
       .child(
         Tab::new()
           .label("YAML")
-          .selected(active_tab == 3)
+          .selected(active_tab == ServiceDetailTab::Yaml)
           .on_click(cx.listener(|this, _ev, _window, cx| {
-            this.active_tab = 3;
+            this.active_tab = ServiceDetailTab::Yaml;
             if let Some(ref svc) = this.service {
               services::get_service_yaml(svc.name.clone(), svc.namespace.clone(), cx);
             }
@@ -675,11 +681,10 @@ impl Render for ServiceDetail {
 
     // Tab content
     let content = match active_tab {
-      0 => Self::render_info_tab(&service, cx),
-      1 => Self::render_ports_tab(&service, cx),
-      2 => self.render_endpoints_tab(&service, cx),
-      3 => self.render_yaml_tab(&service, cx),
-      _ => div(),
+      ServiceDetailTab::Info => Self::render_info_tab(&service, cx),
+      ServiceDetailTab::Ports => Self::render_ports_tab(&service, cx),
+      ServiceDetailTab::Endpoints => self.render_endpoints_tab(&service, cx),
+      ServiceDetailTab::Yaml => self.render_yaml_tab(&service, cx),
     };
 
     div()

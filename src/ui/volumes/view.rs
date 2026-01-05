@@ -1,25 +1,20 @@
-use gpui::{Context, Entity, Render, Styled, Window, div, prelude::*, px};
-use gpui_component::{
-  WindowExt,
-  button::{Button, ButtonVariants},
-  input::InputState,
-  theme::ActiveTheme,
-};
+use gpui::{App, Context, Entity, Render, Styled, Window, div, prelude::*, px};
+use gpui_component::{input::InputState, theme::ActiveTheme};
 
 use crate::docker::VolumeInfo;
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state};
+use crate::state::{DockerState, Selection, StateChanged, docker_state};
 use crate::ui::components::detect_language_from_path;
+use crate::ui::dialogs;
 
-use super::create_dialog::CreateVolumeDialog;
 use super::detail::{VolumeDetail, VolumeTabState};
 use super::list::{VolumeList, VolumeListEvent};
 
 /// Self-contained Volumes view - handles list, detail, and all state
 pub struct VolumesView {
-  _docker_state: Entity<DockerState>,
+  docker_state: Entity<DockerState>,
   volume_list: Entity<VolumeList>,
-  selected_volume: Option<VolumeInfo>,
+  // View-specific state (not selection - that's in global DockerState)
   active_tab: usize,
   volume_tab_state: VolumeTabState,
   file_content_editor: Option<Entity<InputState>>,
@@ -27,6 +22,16 @@ pub struct VolumesView {
 }
 
 impl VolumesView {
+  /// Get the currently selected volume from global state
+  fn selected_volume(&self, cx: &App) -> Option<VolumeInfo> {
+    let state = self.docker_state.read(cx);
+    if let Selection::Volume(ref name) = state.selection {
+      state.volumes.iter().find(|v| v.name == *name).cloned()
+    } else {
+      None
+    }
+  }
+
   pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     let docker_state = docker_state(cx);
 
@@ -53,15 +58,21 @@ impl VolumesView {
       match event {
         StateChanged::VolumesUpdated => {
           // If selected volume was deleted, clear selection
-          if let Some(ref selected) = this.selected_volume {
-            let state = state.read(cx);
-            if state.volumes.iter().any(|v| v.name == selected.name) {
-              // Update the selected volume info
-              if let Some(updated) = state.volumes.iter().find(|v| v.name == selected.name) {
-                this.selected_volume = Some(updated.clone());
-              }
+          let selected_name = {
+            if let Selection::Volume(ref name) = this.docker_state.read(cx).selection {
+              Some(name.clone())
             } else {
-              this.selected_volume = None;
+              None
+            }
+          };
+
+          if let Some(name) = selected_name {
+            let ds = state.read(cx);
+            if !ds.volumes.iter().any(|v| v.name == name) {
+              // Volume was deleted
+              this.docker_state.update(cx, |s, _| {
+                s.set_selection(Selection::None);
+              });
               this.active_tab = 0;
               this.volume_tab_state = VolumeTabState::new();
             }
@@ -74,8 +85,8 @@ impl VolumesView {
           files,
         } => {
           // Update file state if this is for the currently selected volume
-          if let Some(ref selected) = this.selected_volume
-            && &selected.name == volume_name
+          if let Some(selected) = this.selected_volume(cx)
+            && selected.name == *volume_name
           {
             files.clone_into(&mut this.volume_tab_state.files);
             path.clone_into(&mut this.volume_tab_state.current_path);
@@ -85,8 +96,8 @@ impl VolumesView {
         }
         StateChanged::VolumeFilesError { volume_name } => {
           // Handle error for the currently selected volume
-          if let Some(ref selected) = this.selected_volume
-            && &selected.name == volume_name
+          if let Some(selected) = this.selected_volume(cx)
+            && selected.name == *volume_name
           {
             this.volume_tab_state.files_loading = false;
             this.volume_tab_state.files = vec![];
@@ -99,9 +110,8 @@ impl VolumesView {
     .detach();
 
     Self {
-      _docker_state: docker_state,
+      docker_state,
       volume_list,
-      selected_volume: None,
       active_tab: 0,
       volume_tab_state: VolumeTabState::new(),
       file_content_editor: None,
@@ -110,50 +120,21 @@ impl VolumesView {
   }
 
   fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    let dialog_entity = cx.new(CreateVolumeDialog::new);
-
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-      let dialog_clone = dialog_entity.clone();
-
-      dialog
-        .title("New Volume")
-        .min_w(px(500.))
-        .child(dialog_entity.clone())
-        .footer(move |_dialog_state, _, _window, _cx| {
-          let dialog_for_create = dialog_clone.clone();
-
-          vec![
-            Button::new("create")
-              .label("Create")
-              .primary()
-              .on_click({
-                let dialog = dialog_for_create.clone();
-                move |_ev, window, cx| {
-                  let options = dialog.read(cx).get_options(cx);
-                  if !options.name.is_empty() {
-                    services::create_volume(
-                      options.name,
-                      options.driver.as_docker_arg().to_string(),
-                      options.labels,
-                      cx,
-                    );
-                    window.close_dialog(cx);
-                  }
-                }
-              })
-              .into_any_element(),
-          ]
-        })
-    });
+    dialogs::open_create_volume_dialog(window, cx);
   }
 
   fn on_select_volume(&mut self, volume: &VolumeInfo, cx: &mut Context<'_, Self>) {
-    self.selected_volume = Some(volume.clone());
+    // Update global selection (single source of truth)
+    self.docker_state.update(cx, |state, _cx| {
+      state.set_selection(Selection::Volume(volume.name.clone()));
+    });
+
+    // Reset view-specific state
     self.active_tab = 0;
-    // Reset file state when selecting new volume
     self.volume_tab_state = VolumeTabState::new();
     self.file_content_editor = None;
     self.last_synced_file_content.clear();
+
     cx.notify();
   }
 
@@ -167,7 +148,7 @@ impl VolumesView {
   }
 
   fn load_volume_files(&mut self, path: &str, cx: &mut Context<'_, Self>) {
-    if let Some(ref volume) = self.selected_volume {
+    if let Some(volume) = self.selected_volume(cx) {
       self.volume_tab_state.files_loading = true;
       self.volume_tab_state.current_path = path.to_string();
       cx.notify();
@@ -205,7 +186,7 @@ impl VolumesView {
     cx.notify();
 
     // Load file content
-    if let Some(ref volume) = self.selected_volume {
+    if let Some(volume) = self.selected_volume(cx) {
       Self::load_volume_file_content(&volume.name.clone(), path, cx);
     }
   }
@@ -219,7 +200,7 @@ impl VolumesView {
   }
 
   fn on_symlink_follow(&mut self, path: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
-    if let Some(ref volume) = self.selected_volume.clone() {
+    if let Some(volume) = self.selected_volume(cx) {
       let volume_name = volume.name.clone();
       let path = path.to_string();
       let tokio_handle = services::Tokio::runtime_handle();
@@ -263,7 +244,7 @@ impl VolumesView {
             if is_dir {
               // Navigate to directory
               this.volume_tab_state.current_path.clone_from(&target);
-              if let Some(ref volume) = this.selected_volume {
+              if let Some(volume) = this.selected_volume(cx) {
                 this.volume_tab_state.files_loading = true;
                 cx.notify();
                 services::list_volume_files(volume.name.clone(), target, cx);
@@ -274,7 +255,7 @@ impl VolumesView {
               this.last_synced_file_content.clear();
               this.volume_tab_state.selected_file = Some(target.clone());
               this.volume_tab_state.file_content_loading = true;
-              if let Some(ref volume) = this.selected_volume {
+              if let Some(volume) = this.selected_volume(cx) {
                 Self::load_volume_file_content(&volume.name.clone(), &target, cx);
               }
             }
@@ -332,9 +313,10 @@ impl Render for VolumesView {
     }
 
     let colors = cx.theme().colors;
-    let selected_volume = self.selected_volume.clone();
+    let selected_volume = self.selected_volume(cx);
     let active_tab = self.active_tab;
     let file_content_editor = self.file_content_editor.clone();
+    let has_selection = selected_volume.is_some();
 
     // Build detail panel
     let detail = VolumeDetail::new()
@@ -357,14 +339,11 @@ impl Render for VolumesView {
       .on_symlink_click(cx.listener(|this, path: &str, window, cx| {
         this.on_symlink_follow(path, window, cx);
       }))
-      .on_delete(cx.listener(|this, name: &str, _window, cx| {
-        services::delete_volume(name.to_string(), cx);
-        this.selected_volume = None;
+      .on_delete(cx.listener(|this, _name: &str, _window, cx| {
+        this.docker_state.update(cx, |s, _| s.set_selection(Selection::None));
         this.active_tab = 0;
         cx.notify();
       }));
-
-    let has_selection = self.selected_volume.is_some();
 
     div()
       .size_full()

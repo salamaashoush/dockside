@@ -1,21 +1,20 @@
-use gpui::{Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
 use gpui_component::{input::InputState, theme::ActiveTheme};
 use std::time::Duration;
 
 use crate::kubernetes::{PodInfo, PodPhase};
 use crate::services;
-use crate::state::{DockerState, StateChanged, docker_state, settings_state};
+use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
 use crate::terminal::{TerminalSessionType, TerminalView};
 
-use super::detail::{PodDetail, PodTabState};
+use super::detail::{PodDetail, PodDetailTab, PodTabState};
 use super::list::{PodList, PodListEvent};
 
 /// Self-contained Pods view - handles list, detail, and all state
 pub struct PodsView {
-  _docker_state: Entity<DockerState>,
+  docker_state: Entity<DockerState>,
   pod_list: Entity<PodList>,
-  selected_pod: Option<PodInfo>,
-  active_tab: usize,
+  active_tab: PodDetailTab,
   pod_tab_state: PodTabState,
   terminal_view: Option<Entity<TerminalView>>,
   // Editors for logs/describe/yaml
@@ -29,6 +28,20 @@ pub struct PodsView {
 }
 
 impl PodsView {
+  /// Get the currently selected pod from global state
+  fn selected_pod(&self, cx: &App) -> Option<PodInfo> {
+    let state = self.docker_state.read(cx);
+    if let Selection::Pod {
+      ref name,
+      ref namespace,
+    } = state.selection
+    {
+      state.get_pod(name, namespace).cloned()
+    } else {
+      None
+    }
+  }
+
   pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     let docker_state = docker_state(cx);
 
@@ -50,17 +63,26 @@ impl PodsView {
         match event {
           StateChanged::PodsUpdated => {
             // If selected pod was deleted, clear selection
-            if let Some(ref selected) = this.selected_pod {
-              let state = state.read(cx);
-              if state.get_pod(&selected.name, &selected.namespace).is_none() {
-                this.selected_pod = None;
-                this.active_tab = 0;
-                this.terminal_view = None;
+            let selected_key = {
+              if let Selection::Pod {
+                ref name,
+                ref namespace,
+              } = this.docker_state.read(cx).selection
+              {
+                Some((name.clone(), namespace.clone()))
               } else {
-                // Update the selected pod info
-                if let Some(updated) = state.get_pod(&selected.name, &selected.namespace) {
-                  this.selected_pod = Some(updated.clone());
-                }
+                None
+              }
+            };
+
+            if let Some((name, namespace)) = selected_key {
+              let pod_exists = state.read(cx).get_pod(&name, &namespace).is_some();
+              if !pod_exists {
+                this.docker_state.update(cx, |s, _| {
+                  s.set_selection(Selection::None);
+                });
+                this.active_tab = PodDetailTab::Info;
+                this.terminal_view = None;
               }
             }
             cx.notify();
@@ -70,9 +92,9 @@ impl PodsView {
             namespace,
             logs,
           } => {
-            if let Some(ref pod) = this.selected_pod
-              && pod.name == *pod_name
-              && pod.namespace == *namespace
+            if let Selection::Pod { name, namespace: ns } = &this.docker_state.read(cx).selection
+              && name == pod_name
+              && ns == namespace
             {
               logs.clone_into(&mut this.pod_tab_state.logs);
               this.pod_tab_state.logs_loading = false;
@@ -84,9 +106,9 @@ impl PodsView {
             namespace,
             describe,
           } => {
-            if let Some(ref pod) = this.selected_pod
-              && pod.name == *pod_name
-              && pod.namespace == *namespace
+            if let Selection::Pod { name, namespace: ns } = &this.docker_state.read(cx).selection
+              && name == pod_name
+              && ns == namespace
             {
               describe.clone_into(&mut this.pod_tab_state.describe);
               this.pod_tab_state.describe_loading = false;
@@ -98,9 +120,9 @@ impl PodsView {
             namespace,
             yaml,
           } => {
-            if let Some(ref pod) = this.selected_pod
-              && pod.name == *pod_name
-              && pod.namespace == *namespace
+            if let Selection::Pod { name, namespace: ns } = &this.docker_state.read(cx).selection
+              && name == pod_name
+              && ns == namespace
             {
               yaml.clone_into(&mut this.pod_tab_state.yaml);
               this.pod_tab_state.yaml_loading = false;
@@ -118,11 +140,7 @@ impl PodsView {
               state.get_pod(pod_name, namespace).cloned()
             };
             if let Some(pod) = pod {
-              // Select in the list UI
-              this.pod_list.update(cx, |list, cx| {
-                list.select_pod(pod_name, namespace, cx);
-              });
-              // Select in the view
+              // Select in the view (updates global selection which list observes)
               this.on_select_pod(&pod, window, cx);
               this.on_tab_change(*tab, window, cx);
             }
@@ -152,10 +170,9 @@ impl PodsView {
     services::refresh_namespaces(cx);
 
     Self {
-      _docker_state: docker_state,
+      docker_state,
       pod_list,
-      selected_pod: None,
-      active_tab: 0,
+      active_tab: PodDetailTab::Info,
       pod_tab_state: PodTabState::new(),
       terminal_view: None,
       logs_editor: None,
@@ -168,8 +185,16 @@ impl PodsView {
   }
 
   fn on_select_pod(&mut self, pod: &PodInfo, window: &mut Window, cx: &mut Context<'_, Self>) {
-    self.selected_pod = Some(pod.clone());
-    self.active_tab = 0;
+    // Update global selection (single source of truth)
+    self.docker_state.update(cx, |state, _cx| {
+      state.set_selection(Selection::Pod {
+        name: pod.name.clone(),
+        namespace: pod.namespace.clone(),
+      });
+    });
+
+    // Reset view-specific state
+    self.active_tab = PodDetailTab::Info;
     self.terminal_view = None;
 
     // Clear synced tracking for new pod
@@ -215,13 +240,12 @@ impl PodsView {
     cx.notify();
   }
 
-  fn on_tab_change(&mut self, tab: usize, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn on_tab_change(&mut self, tab: PodDetailTab, window: &mut Window, cx: &mut Context<'_, Self>) {
     self.active_tab = tab;
 
-    if let Some(ref pod) = self.selected_pod.clone() {
+    if let Some(pod) = self.selected_pod(cx) {
       match tab {
-        // Terminal tab
-        2 => {
+        PodDetailTab::Terminal => {
           if self.terminal_view.is_none() && matches!(pod.phase, PodPhase::Running) {
             let container = self.pod_tab_state.selected_container.clone();
             self.terminal_view = Some(cx.new(|cx| {
@@ -233,15 +257,13 @@ impl PodsView {
             }));
           }
         }
-        // Describe tab
-        3 => {
+        PodDetailTab::Describe => {
           if self.pod_tab_state.describe.is_empty() && !self.pod_tab_state.describe_loading {
             self.pod_tab_state.describe_loading = true;
             services::get_pod_describe(pod.name.clone(), pod.namespace.clone(), cx);
           }
         }
-        // YAML tab
-        4 => {
+        PodDetailTab::Yaml => {
           if self.pod_tab_state.yaml.is_empty() && !self.pod_tab_state.yaml_loading {
             self.pod_tab_state.yaml_loading = true;
             services::get_pod_yaml(pod.name.clone(), pod.namespace.clone(), cx);
@@ -268,20 +290,23 @@ impl PodsView {
     self.pod_tab_state.selected_container = Some(container.to_string());
 
     // Reset terminal if we're on terminal tab
-    if self.active_tab == 2 {
+    if self.active_tab == PodDetailTab::Terminal {
       self.terminal_view = None;
     }
 
+    // Get selected pod once for subsequent operations
+    let pod = self.selected_pod(cx);
+
     // Reload logs if we're on logs tab
-    if self.active_tab == 1
-      && let Some(ref pod) = self.selected_pod.clone()
+    if self.active_tab == PodDetailTab::Logs
+      && let Some(ref pod) = pod
     {
       self.load_pod_logs(pod, cx);
     }
 
     // Recreate terminal if on terminal tab
-    if self.active_tab == 2
-      && let Some(ref pod) = self.selected_pod.clone()
+    if self.active_tab == PodDetailTab::Terminal
+      && let Some(ref pod) = pod
       && matches!(pod.phase, PodPhase::Running)
     {
       let container = self.pod_tab_state.selected_container.clone();
@@ -298,8 +323,8 @@ impl PodsView {
   }
 
   fn on_refresh_logs(&mut self, cx: &mut Context<'_, Self>) {
-    if let Some(ref pod) = self.selected_pod.clone() {
-      self.load_pod_logs(pod, cx);
+    if let Some(pod) = self.selected_pod(cx) {
+      self.load_pod_logs(&pod, cx);
     }
   }
 }
@@ -341,13 +366,14 @@ impl Render for PodsView {
     }
 
     let colors = cx.theme().colors;
-    let selected_pod = self.selected_pod.clone();
+    let selected_pod = self.selected_pod(cx);
     let active_tab = self.active_tab;
     let pod_tab_state = self.pod_tab_state.clone();
     let terminal_view = self.terminal_view.clone();
     let logs_editor = self.logs_editor.clone();
     let describe_editor = self.describe_editor.clone();
     let yaml_editor = self.yaml_editor.clone();
+    let has_selection = selected_pod.is_some();
 
     // Build detail panel
     let detail = PodDetail::new()
@@ -358,7 +384,7 @@ impl Render for PodsView {
       .logs_editor(logs_editor)
       .describe_editor(describe_editor)
       .yaml_editor(yaml_editor)
-      .on_tab_change(cx.listener(|this, tab: &usize, window, cx| {
+      .on_tab_change(cx.listener(|this, tab: &PodDetailTab, window, cx| {
         this.on_tab_change(*tab, window, cx);
       }))
       .on_refresh_logs(cx.listener(|this, (): &(), _window, cx| {
@@ -369,13 +395,11 @@ impl Render for PodsView {
       }))
       .on_delete(cx.listener(|this, (name, ns): &(String, String), _window, cx| {
         services::delete_pod(name.clone(), ns.clone(), cx);
-        this.selected_pod = None;
-        this.active_tab = 0;
+        this.docker_state.update(cx, |s, _| s.set_selection(Selection::None));
+        this.active_tab = PodDetailTab::Info;
         this.terminal_view = None;
         cx.notify();
       }));
-
-    let has_selection = self.selected_pod.is_some();
 
     div()
       .size_full()

@@ -11,6 +11,9 @@ use gpui_component::{
 };
 use std::rc::Rc;
 
+// Re-export from state module for backwards compatibility
+pub use crate::state::MachineDetailTab;
+
 /// Parsed colima version information
 #[derive(Debug, Clone, Default)]
 struct ColimaVersionInfo {
@@ -59,7 +62,7 @@ use crate::ui::components::{FileExplorer, FileExplorerConfig, FileExplorerState}
 
 type MachineActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type MachineEditCallback = Rc<dyn Fn(&ColimaVm, &mut Window, &mut App) + 'static>;
-type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
+type TabChangeCallback = Rc<dyn Fn(&MachineDetailTab, &mut Window, &mut App) + 'static>;
 type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
 type LogTypeCallback = Rc<dyn Fn(&MachineLogType, &mut Window, &mut App) + 'static>;
@@ -68,7 +71,7 @@ type SymlinkClickCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 
 pub struct MachineDetail {
   machine: Option<ColimaVm>,
-  active_tab: usize,
+  active_tab: MachineDetailTab,
   machine_state: Option<MachineTabState>,
   terminal_view: Option<Entity<TerminalView>>,
   logs_editor: Option<Entity<InputState>>,
@@ -85,13 +88,17 @@ pub struct MachineDetail {
   on_file_select: Option<FileSelectCallback>,
   on_close_file_viewer: Option<RefreshCallback>,
   on_symlink_click: Option<SymlinkClickCallback>,
+  // Kubernetes action callbacks
+  on_k8s_start: Option<MachineActionCallback>,
+  on_k8s_stop: Option<MachineActionCallback>,
+  on_k8s_reset: Option<MachineActionCallback>,
 }
 
 impl MachineDetail {
   pub fn new() -> Self {
     Self {
       machine: None,
-      active_tab: 0,
+      active_tab: MachineDetailTab::Info,
       machine_state: None,
       terminal_view: None,
       logs_editor: None,
@@ -108,6 +115,9 @@ impl MachineDetail {
       on_file_select: None,
       on_close_file_viewer: None,
       on_symlink_click: None,
+      on_k8s_start: None,
+      on_k8s_stop: None,
+      on_k8s_reset: None,
     }
   }
 
@@ -116,7 +126,7 @@ impl MachineDetail {
     self
   }
 
-  pub fn active_tab(mut self, tab: usize) -> Self {
+  pub fn active_tab(mut self, tab: MachineDetailTab) -> Self {
     self.active_tab = tab;
     self
   }
@@ -183,7 +193,7 @@ impl MachineDetail {
 
   pub fn on_tab_change<F>(mut self, callback: F) -> Self
   where
-    F: Fn(&usize, &mut Window, &mut App) + 'static,
+    F: Fn(&MachineDetailTab, &mut Window, &mut App) + 'static,
   {
     self.on_tab_change = Some(Rc::new(callback));
     self
@@ -234,6 +244,30 @@ impl MachineDetail {
     F: Fn(&str, &mut Window, &mut App) + 'static,
   {
     self.on_symlink_click = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_k8s_start<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_k8s_start = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_k8s_stop<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_k8s_stop = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_k8s_reset<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_k8s_reset = Some(Rc::new(callback));
     self
   }
 
@@ -313,15 +347,27 @@ impl MachineDetail {
       ("Runtime", machine.runtime.to_string()),
     ];
 
-    if machine.kubernetes {
-      settings_info.push(("Kubernetes", "Enabled".to_string()));
-    }
-
     if let Some(socket) = &machine.docker_socket {
       settings_info.push(("Docker Socket", socket.clone()));
     }
 
-    v_flex()
+    // Network info
+    let mut network_info = Vec::new();
+    if let Some(addr) = &machine.address {
+      network_info.push(("IP Address", addr.clone()));
+    }
+    if let Some(hostname) = &machine.hostname {
+      network_info.push(("Hostname", hostname.clone()));
+    }
+    network_info.push((
+      "SSH Agent",
+      if machine.ssh_agent { "Enabled" } else { "Disabled" }.to_string(),
+    ));
+    if machine.rosetta {
+      network_info.push(("Rosetta", "Enabled".to_string()));
+    }
+
+    let mut container = v_flex()
       .flex_1()
       .w_full()
       .p(px(16.))
@@ -329,7 +375,148 @@ impl MachineDetail {
       .child(Self::render_section(None, basic_info, cx))
       .child(Self::render_version_section(&version_info, cx))
       .child(Self::render_section(Some("Image"), image_info, cx))
-      .child(Self::render_section(Some("Settings"), settings_info, cx))
+      .child(Self::render_section(Some("Settings"), settings_info, cx));
+
+    // Add Kubernetes section if enabled
+    if machine.kubernetes {
+      container = container.child(self.render_kubernetes_section(machine, cx));
+    }
+
+    // Add network section if we have info
+    if !network_info.is_empty() {
+      container = container.child(Self::render_section(Some("Network"), network_info, cx));
+    }
+
+    container
+  }
+
+  fn render_kubernetes_section(&self, machine: &ColimaVm, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+    let is_machine_running = machine.status.is_running();
+    // K8s is running when the machine is running and kubernetes is enabled
+    let is_k8s_running = is_machine_running && machine.kubernetes;
+    let machine_name = machine.name.clone();
+
+    let on_k8s_start = self.on_k8s_start.clone();
+    let on_k8s_stop = self.on_k8s_stop.clone();
+    let on_k8s_reset = self.on_k8s_reset.clone();
+
+    v_flex()
+      .gap(px(1.))
+      .child(
+        div()
+          .py(px(8.))
+          .text_sm()
+          .font_weight(gpui::FontWeight::MEDIUM)
+          .text_color(colors.foreground)
+          .child("Kubernetes"),
+      )
+      .child(
+        div()
+          .bg(colors.background)
+          .rounded(px(8.))
+          .overflow_hidden()
+          // Status row with all actions
+          .child(
+            h_flex()
+              .w_full()
+              .px(px(16.))
+              .py(px(12.))
+              .items_center()
+              .justify_between()
+              .child(
+                h_flex()
+                  .gap(px(8.))
+                  .items_center()
+                  .child(
+                    Icon::new(AppIcon::Kubernetes)
+                      .size(px(16.))
+                      .text_color(if is_k8s_running { colors.success } else { colors.muted_foreground }),
+                  )
+                  .child(
+                    div()
+                      .text_sm()
+                      .text_color(colors.secondary_foreground)
+                      .child("K3s Cluster"),
+                  )
+                  .child(
+                    div()
+                      .px(px(8.))
+                      .py(px(2.))
+                      .rounded(px(4.))
+                      .bg(if is_k8s_running {
+                        colors.success.opacity(0.15)
+                      } else {
+                        colors.muted_foreground.opacity(0.15)
+                      })
+                      .text_xs()
+                      .font_weight(gpui::FontWeight::MEDIUM)
+                      .text_color(if is_k8s_running { colors.success } else { colors.muted_foreground })
+                      .child(if is_k8s_running { "Running" } else { "Stopped" }),
+                  ),
+              )
+              // Action buttons on the right
+              .child(
+                h_flex()
+                  .gap(px(8.))
+                  .items_center()
+                  // When K8s is running: show Reset and Stop buttons
+                  .when(is_k8s_running, |el| {
+                    let name_reset = machine_name.clone();
+                    let name_stop = machine_name.clone();
+                    let on_reset = on_k8s_reset.clone();
+                    let on_stop = on_k8s_stop.clone();
+                    el.child(
+                      Button::new("k8s-reset")
+                        .label("Reset")
+                        .xsmall()
+                        .ghost()
+                        .when_some(on_reset, |btn, cb| {
+                          btn.on_click(move |_ev, window, cx| {
+                            cb(&name_reset, window, cx);
+                          })
+                        }),
+                    )
+                    .child(
+                      Button::new("k8s-stop")
+                        .label("Stop")
+                        .xsmall()
+                        .ghost()
+                        .when_some(on_stop, |btn, cb| {
+                          btn.on_click(move |_ev, window, cx| {
+                            cb(&name_stop, window, cx);
+                          })
+                        }),
+                    )
+                  })
+                  // When K8s is NOT running but machine IS running: show Start button
+                  .when(!is_k8s_running && is_machine_running, |el| {
+                    let name = machine_name.clone();
+                    let on_start = on_k8s_start.clone();
+                    el.child(
+                      Button::new("k8s-start")
+                        .label("Start")
+                        .xsmall()
+                        .primary()
+                        .when_some(on_start, |btn, cb| {
+                          btn.on_click(move |_ev, window, cx| {
+                            cb(&name, window, cx);
+                          })
+                        }),
+                    )
+                  })
+                  // When machine is NOT running: show informational message
+                  .when(!is_machine_running, |el| {
+                    el.child(
+                      div()
+                        .text_xs()
+                        .text_color(colors.muted_foreground)
+                        .child("Start machine first"),
+                    )
+                  }),
+              ),
+          ),
+      )
   }
 
   fn render_version_section(version_info: &ColimaVersionInfo, cx: &App) -> gpui::Div {
@@ -1202,8 +1389,6 @@ impl MachineDetail {
     let on_tab_change = self.on_tab_change.clone();
     let machine_for_edit = machine.clone();
 
-    let tabs = ["Info", "Processes", "Stats", "Logs", "Terminal", "Files"];
-
     // Toolbar with tabs and actions
     let toolbar = h_flex()
       .w_full()
@@ -1218,14 +1403,15 @@ impl MachineDetail {
         TabBar::new("machine-tabs")
           .flex_1()
           .py(px(0.))
-          .children(tabs.iter().enumerate().map(|(i, label)| {
+          .children(MachineDetailTab::ALL.iter().map(|tab| {
             let on_tab_change = on_tab_change.clone();
+            let tab_variant = *tab;
             Tab::new()
-              .label((*label).to_string())
-              .selected(self.active_tab == i)
+              .label(tab.label().to_string())
+              .selected(self.active_tab == *tab)
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tab_change {
-                  cb(&i, window, cx);
+                  cb(&tab_variant, window, cx);
                 }
               })
           })),
@@ -1305,7 +1491,10 @@ impl MachineDetail {
       );
 
     // Terminal, Logs, and Files tabs need full height without scroll (they handle their own scrolling)
-    let is_full_height_tab = self.active_tab == 3 || self.active_tab == 4 || self.active_tab == 5;
+    let is_full_height_tab = matches!(
+      self.active_tab,
+      MachineDetailTab::Logs | MachineDetailTab::Terminal | MachineDetailTab::Files
+    );
 
     let mut result = div()
       .size_full()
@@ -1317,16 +1506,16 @@ impl MachineDetail {
 
     if is_full_height_tab {
       let content = match self.active_tab {
-        3 => self.render_logs_tab(cx).into_any_element(),
-        4 => self.render_terminal_tab(cx).into_any_element(),
-        5 => self.render_files_tab(window, cx),
+        MachineDetailTab::Logs => self.render_logs_tab(cx).into_any_element(),
+        MachineDetailTab::Terminal => self.render_terminal_tab(cx).into_any_element(),
+        MachineDetailTab::Files => self.render_files_tab(window, cx),
         _ => self.render_info_tab(machine, cx).into_any_element(),
       };
       result = result.child(div().flex_1().min_h_0().w_full().overflow_hidden().child(content));
     } else {
       let content = match self.active_tab {
-        1 => self.render_processes_tab(cx),
-        2 => self.render_stats_tab(cx),
+        MachineDetailTab::Processes => self.render_processes_tab(cx),
+        MachineDetailTab::Stats => self.render_stats_tab(cx),
         _ => self.render_info_tab(machine, cx),
       };
       result = result.child(

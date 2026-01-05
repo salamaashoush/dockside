@@ -15,8 +15,11 @@ use crate::assets::AppIcon;
 use crate::kubernetes::{PodInfo, PodPhase};
 use crate::terminal::TerminalView;
 
+// Re-export from state module for backwards compatibility
+pub use crate::state::PodDetailTab;
+
 type PodActionCallback = Rc<dyn Fn(&(String, String), &mut Window, &mut App) + 'static>;
-type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
+type TabChangeCallback = Rc<dyn Fn(&PodDetailTab, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
 type ContainerSelectCallback = Rc<dyn Fn(&String, &mut Window, &mut App) + 'static>;
 
@@ -40,7 +43,7 @@ impl PodTabState {
 
 pub struct PodDetail {
   pod: Option<PodInfo>,
-  active_tab: usize,
+  active_tab: PodDetailTab,
   pod_state: Option<PodTabState>,
   terminal_view: Option<Entity<TerminalView>>,
   logs_editor: Option<Entity<InputState>>,
@@ -56,7 +59,7 @@ impl PodDetail {
   pub fn new() -> Self {
     Self {
       pod: None,
-      active_tab: 0,
+      active_tab: PodDetailTab::Info,
       pod_state: None,
       terminal_view: None,
       logs_editor: None,
@@ -74,7 +77,7 @@ impl PodDetail {
     self
   }
 
-  pub fn active_tab(mut self, tab: usize) -> Self {
+  pub fn active_tab(mut self, tab: PodDetailTab) -> Self {
     self.active_tab = tab;
     self
   }
@@ -114,7 +117,7 @@ impl PodDetail {
 
   pub fn on_tab_change<F>(mut self, callback: F) -> Self
   where
-    F: Fn(&usize, &mut Window, &mut App) + 'static,
+    F: Fn(&PodDetailTab, &mut Window, &mut App) + 'static,
   {
     self.on_tab_change = Some(Rc::new(callback));
     self
@@ -466,8 +469,6 @@ impl PodDetail {
     let on_delete = self.on_delete.clone();
     let on_tab_change = self.on_tab_change.clone();
 
-    let tabs = ["Info", "Logs", "Terminal", "Describe", "YAML"];
-
     // Toolbar with tabs and actions
     let toolbar = h_flex()
       .w_full()
@@ -481,14 +482,15 @@ impl PodDetail {
       .child(
         TabBar::new("pod-tabs")
           .flex_1()
-          .children(tabs.iter().enumerate().map(|(i, label)| {
+          .children(PodDetailTab::ALL.iter().map(|tab| {
             let on_tab_change = on_tab_change.clone();
+            let tab_variant = *tab;
             Tab::new()
-              .label((*label).to_string())
-              .selected(self.active_tab == i)
+              .label(tab.label().to_string())
+              .selected(self.active_tab == *tab)
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tab_change {
-                  cb(&i, window, cx);
+                  cb(&tab_variant, window, cx);
                 }
               })
           })),
@@ -510,15 +512,15 @@ impl PodDetail {
 
     // Content based on active tab
     let content = match self.active_tab {
-      1 => self.render_logs_tab(pod, cx),
-      2 => self.render_terminal_tab(pod, cx),
-      3 => self.render_describe_tab(cx),
-      4 => self.render_yaml_tab(cx),
-      _ => Self::render_info_tab(pod, cx),
+      PodDetailTab::Logs => self.render_logs_tab(pod, cx),
+      PodDetailTab::Terminal => self.render_terminal_tab(pod, cx),
+      PodDetailTab::Describe => self.render_describe_tab(cx),
+      PodDetailTab::Yaml => self.render_yaml_tab(cx),
+      PodDetailTab::Info => Self::render_info_tab(pod, cx),
     };
 
     // Terminal tab needs full height without scroll
-    let is_terminal_tab = self.active_tab == 2;
+    let is_terminal_tab = self.active_tab == PodDetailTab::Terminal;
 
     let mut result = div()
       .size_full()
