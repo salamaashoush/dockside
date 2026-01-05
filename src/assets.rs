@@ -51,44 +51,60 @@ impl AssetSource for Assets {
 /// Application-specific icons not available in gpui-component
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppIcon {
+  // Actions
   Play,
   Stop,
   Restart,
   Trash,
-  Container,
-  Volume,
-  Pod,
-  Deployment,
-  Machine,
-  Terminal,
   Plus,
   Search,
+  // Resources
+  Container,
+  Image,
+  Volume,
+  Network,
+  Pod,
+  Deployment,
+  Service,
+  Machine,
+  // UI elements
+  Terminal,
   Logs,
   Files,
+  Activity,
   ChevronRight,
   ChevronDown,
+  // Platforms
   Kubernetes,
 }
 
 impl IconNamed for AppIcon {
   fn path(self) -> SharedString {
     match self {
+      // Actions
       Self::Play => "icons/play.svg",
       Self::Stop => "icons/stop.svg",
       Self::Restart => "icons/restart.svg",
       Self::Trash => "icons/trash.svg",
-      Self::Container => "icons/container.svg",
-      Self::Volume => "icons/volume.svg",
-      Self::Pod => "icons/pod.svg",
-      Self::Deployment => "icons/deployment.svg",
-      Self::Machine => "icons/machine.svg",
-      Self::Terminal => "icons/terminal.svg",
       Self::Plus => "icons/plus.svg",
       Self::Search => "icons/search.svg",
+      // Resources
+      Self::Container => "icons/container.svg",
+      Self::Image => "icons/image.svg",
+      Self::Volume => "icons/volume.svg",
+      Self::Network => "icons/network.svg",
+      Self::Pod => "icons/pod.svg",
+      Self::Deployment => "icons/deployment.svg",
+      Self::Service => "icons/service.svg",
+      Self::Machine => "icons/machine.svg",
+      // UI elements
+      Self::Terminal => "icons/terminal.svg",
       Self::Logs => "icons/logs.svg",
       Self::Files => "icons/files.svg",
+      Self::Activity => "icons/activity.svg",
       Self::ChevronRight => "icons/chevron-right.svg",
       Self::ChevronDown => "icons/chevron-down.svg",
+      // Platforms
       Self::Kubernetes => "icons/kubernetes.svg",
     }
     .into()

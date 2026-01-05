@@ -156,7 +156,7 @@ impl ListDelegate for ServiceListDelegate {
               .flex()
               .items_center()
               .justify_center()
-              .child(Icon::new(IconName::Globe).text_color(colors.background)),
+              .child(Icon::new(AppIcon::Service).text_color(colors.background)),
           )
           .child(
             v_flex()
@@ -351,7 +351,7 @@ impl ServiceList {
           .items_center()
           .justify_center()
           .child(
-            Icon::new(IconName::Globe)
+            Icon::new(AppIcon::Service)
               .size(px(32.))
               .text_color(colors.muted_foreground),
           ),

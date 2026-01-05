@@ -1,6 +1,6 @@
 use gpui::{App, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, IconName, Selectable, Sizable,
+  Icon, Selectable, Sizable,
   button::{Button, ButtonVariants},
   h_flex,
   scroll::ScrollableElement,
@@ -73,7 +73,7 @@ impl NetworkDetail {
           .items_center()
           .gap(px(16.))
           .child(
-            Icon::new(IconName::Globe)
+            Icon::new(AppIcon::Network)
               .size(px(48.))
               .text_color(colors.muted_foreground),
           )

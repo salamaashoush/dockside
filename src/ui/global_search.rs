@@ -19,6 +19,8 @@ use gpui_component::{
   v_flex,
 };
 
+use crate::assets::AppIcon;
+
 use crate::state::{CurrentView, DockerState, Selection, StateChanged, docker_state};
 use crate::ui::components::spinning_loader_circle;
 
@@ -50,14 +52,16 @@ pub enum SearchResultType {
 }
 
 impl SearchResultType {
-  fn icon(&self) -> IconName {
+  fn icon(&self) -> AppIcon {
     match self {
-      SearchResultType::Container => IconName::SquareTerminal,
-      SearchResultType::Image => IconName::GalleryVerticalEnd,
-      SearchResultType::Volume => IconName::Folder,
-      SearchResultType::Network | SearchResultType::Pod | SearchResultType::Service => IconName::Globe,
-      SearchResultType::Deployment => IconName::Copy,
-      SearchResultType::Machine => IconName::Frame,
+      SearchResultType::Container => AppIcon::Container,
+      SearchResultType::Image => AppIcon::Image,
+      SearchResultType::Volume => AppIcon::Volume,
+      SearchResultType::Network => AppIcon::Network,
+      SearchResultType::Pod => AppIcon::Pod,
+      SearchResultType::Deployment => AppIcon::Deployment,
+      SearchResultType::Service => AppIcon::Service,
+      SearchResultType::Machine => AppIcon::Machine,
     }
   }
 

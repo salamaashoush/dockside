@@ -591,7 +591,7 @@ impl DocksideApp {
                     SidebarMenu::new()
                         .child(
                             SidebarMenuItem::new("Activity Monitor")
-                                .icon(IconName::ChartPie)
+                                .icon(AppIcon::Activity)
                                 .active(current_view == CurrentView::ActivityMonitor)
                                 .on_click(cx.listener(|_this, _ev, _window, cx| {
                                     crate::services::set_view(CurrentView::ActivityMonitor, cx);

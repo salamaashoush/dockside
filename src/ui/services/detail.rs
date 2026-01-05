@@ -10,6 +10,7 @@ use gpui_component::{
   v_flex,
 };
 
+use crate::assets::AppIcon;
 use crate::kubernetes::{PodInfo, ServiceInfo};
 use crate::services;
 use crate::state::{DockerState, ServiceDetailTab, StateChanged, docker_state};
@@ -583,7 +584,7 @@ impl ServiceDetail {
             .flex()
             .items_center()
             .justify_center()
-            .child(Icon::new(IconName::Globe).text_color(colors.muted_foreground)),
+            .child(Icon::new(AppIcon::Service).text_color(colors.muted_foreground)),
         )
         .child(
           div()

@@ -154,7 +154,7 @@ impl ListDelegate for NetworkListDelegate {
           .flex()
           .items_center()
           .justify_center()
-          .child(Icon::new(IconName::Globe).text_color(colors.background)),
+          .child(Icon::new(AppIcon::Network).text_color(colors.background)),
       )
       .child(
         v_flex()
@@ -332,7 +332,7 @@ impl NetworkList {
           .items_center()
           .justify_center()
           .child(
-            Icon::new(IconName::Globe)
+            Icon::new(AppIcon::Network)
               .size(px(32.))
               .text_color(colors.muted_foreground),
           ),

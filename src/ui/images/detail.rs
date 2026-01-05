@@ -81,7 +81,7 @@ impl ImageDetail {
           .items_center()
           .gap(px(16.))
           .child(
-            Icon::new(AppIcon::Container)
+            Icon::new(AppIcon::Image)
               .size(px(48.))
               .text_color(colors.muted_foreground),
           )
@@ -330,7 +330,7 @@ impl ImageDetail {
               .py(px(10.))
               .items_center()
               .gap(px(8.))
-              .child(Icon::new(AppIcon::Container).text_color(colors.secondary_foreground))
+              .child(Icon::new(AppIcon::Image).text_color(colors.secondary_foreground))
               .child(div().text_sm().text_color(colors.foreground).child(name.clone()));
 
             if i > 0 {

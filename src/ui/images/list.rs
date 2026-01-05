@@ -182,7 +182,7 @@ impl ListDelegate for ImageListDelegate {
           .flex()
           .items_center()
           .justify_center()
-          .child(Icon::new(AppIcon::Container).text_color(colors.background)),
+          .child(Icon::new(AppIcon::Image).text_color(colors.background)),
       )
       .child(
         v_flex()
@@ -375,7 +375,7 @@ impl ImageList {
           .items_center()
           .justify_center()
           .child(
-            Icon::new(AppIcon::Container)
+            Icon::new(AppIcon::Image)
               .size(px(32.))
               .text_color(colors.muted_foreground),
           ),
