@@ -513,7 +513,7 @@ impl DocksideApp {
                         )
                         .child(
                             SidebarMenuItem::new("Compose")
-                                .icon(AppIcon::Container)
+                                .icon(AppIcon::Compose)
                                 .active(current_view == CurrentView::Compose)
                                 .on_click(cx.listener(|_this, _ev, _window, cx| {
                                     crate::services::set_view(CurrentView::Compose, cx);

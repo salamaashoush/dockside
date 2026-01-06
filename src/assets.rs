@@ -66,6 +66,7 @@ pub enum AppIcon {
   Settings,
   // Resources
   Container,
+  Compose,
   Image,
   Volume,
   Network,
@@ -103,6 +104,7 @@ impl IconNamed for AppIcon {
       Self::Settings => "icons/settings.svg",
       // Resources
       Self::Container => "icons/container.svg",
+      Self::Compose => "icons/compose.svg",
       Self::Image => "icons/image.svg",
       Self::Volume => "icons/volume.svg",
       Self::Network => "icons/network.svg",
