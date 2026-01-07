@@ -1,8 +1,29 @@
+//! Terminal emulation using `alacritty_terminal` backend
+//!
+//! This provides full terminal emulation support including:
+//! - vim, nano, htop, and other full-screen applications
+//! - Per-cell colors and attributes
+//! - Alternate screen buffer
+//! - All keyboard combinations (Ctrl, Alt, function keys)
+//! - Terminal resize
+//! - Mouse support (future)
+
+use alacritty_terminal::event::{Event, EventListener, WindowSize};
+use alacritty_terminal::event_loop::{EventLoop, Msg, Notifier};
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::sync::FairMutex;
+use alacritty_terminal::term::cell::Flags as CellFlags;
+use alacritty_terminal::term::test::TermSize;
+use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
+use alacritty_terminal::tty::{self, Options as PtyOptions, Shell};
+use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Rgb};
 use anyhow::Result;
 use parking_lot::Mutex;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use std::io::{Read, Write};
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 /// Type of terminal session
@@ -42,28 +63,41 @@ impl TerminalSessionType {
     }
   }
 
-  fn build_command(&self) -> CommandBuilder {
-    let mut cmd = match self {
+  /// Build shell command for this session type
+  fn to_shell(&self) -> Shell {
+    match self {
       Self::ColimaSsh { profile } => {
-        let mut cmd = CommandBuilder::new("colima");
-        cmd.arg("ssh");
+        let mut args = vec!["ssh".to_string()];
         if let Some(p) = profile
           && p != "default"
         {
-          cmd.arg("--profile");
-          cmd.arg(p);
+          args.push("--profile".to_string());
+          args.push(p.clone());
         }
-        cmd
+        Shell::new("colima".to_string(), args)
       }
       Self::DockerExec { container_id, shell } => {
-        let mut cmd = CommandBuilder::new("docker");
-        cmd.arg("exec");
-        cmd.arg("-it");
-        cmd.arg("-e");
-        cmd.arg("TERM=xterm-256color");
-        cmd.arg(container_id);
-        cmd.arg(shell.as_deref().unwrap_or("/bin/sh"));
-        cmd
+        // Build docker exec command with proper shell
+        let mut args = vec![
+          "exec".to_string(),
+          "-it".to_string(),
+          "-e".to_string(),
+          "TERM=xterm-256color".to_string(),
+          container_id.clone(),
+        ];
+
+        if let Some(sh) = shell {
+          // User specified a shell, use it directly
+          args.push(sh.clone());
+        } else {
+          // Try shells in order of preference: bash, zsh, ash, sh
+          // bash/zsh have full readline, ash has basic line editing, sh is last resort
+          args.push("sh".to_string());
+          args.push("-c".to_string());
+          args.push("exec $(command -v bash || command -v zsh || command -v ash || command -v sh)".to_string());
+        }
+
+        Shell::new("docker".to_string(), args)
       }
       Self::KubectlExec {
         pod_name,
@@ -71,105 +105,72 @@ impl TerminalSessionType {
         container,
         shell,
       } => {
-        let mut cmd = CommandBuilder::new("kubectl");
-        cmd.arg("exec");
-        cmd.arg("-it");
-        cmd.arg("-n");
-        cmd.arg(namespace);
+        let mut args = vec![
+          "exec".to_string(),
+          "-it".to_string(),
+          "-n".to_string(),
+          namespace.clone(),
+        ];
         if let Some(c) = container {
-          cmd.arg("-c");
-          cmd.arg(c);
+          args.push("-c".to_string());
+          args.push(c.clone());
         }
-        cmd.arg(pod_name);
-        cmd.arg("--");
-        cmd.arg(shell.as_deref().unwrap_or("/bin/sh"));
-        cmd
+        args.push(pod_name.clone());
+        args.push("--".to_string());
+
+        if let Some(sh) = shell {
+          // User specified shell - set TERM and run it
+          args.push("sh".to_string());
+          args.push("-c".to_string());
+          args.push(format!("TERM=xterm-256color exec {sh}"));
+        } else {
+          // Try shells in order of preference with TERM set
+          args.push("sh".to_string());
+          args.push("-c".to_string());
+          args.push(
+            "TERM=xterm-256color exec $(command -v bash || command -v zsh || command -v ash || command -v sh)"
+              .to_string(),
+          );
+        }
+
+        Shell::new("kubectl".to_string(), args)
       }
-    };
-    cmd.env("TERM", "xterm-256color");
-    cmd
+    }
   }
 }
 
-/// Terminal key input
-#[derive(Debug, Clone, Copy)]
-pub enum TerminalKey {
-  Char(char),
-  Enter,
-  Backspace,
-  Tab,
-  Escape,
-  Up,
-  Down,
-  Right,
-  Left,
-  Home,
-  End,
-  PageUp,
-  PageDown,
-  Delete,
-  CtrlC,
-  CtrlD,
-  CtrlL,
-  CtrlZ,
+/// A terminal cell with text and styling
+#[derive(Debug, Clone)]
+pub struct TerminalCell {
+  pub char: char,
+  pub fg: (u8, u8, u8),
+  pub bg: (u8, u8, u8),
+  pub bold: bool,
+  pub italic: bool,
+  pub underline: bool,
+  pub strikethrough: bool,
+  pub dim: bool,
 }
 
-impl TerminalKey {
-  pub fn to_bytes(self) -> Vec<u8> {
-    match self {
-      Self::Char(c) => {
-        let mut buf = [0u8; 4];
-        c.encode_utf8(&mut buf).as_bytes().to_vec()
-      }
-      Self::Enter => vec![0x0d],
-      Self::Backspace => vec![0x7f],
-      Self::Tab => vec![0x09],
-      Self::Escape => vec![0x1b],
-      Self::Up => vec![0x1b, 0x5b, 0x41],
-      Self::Down => vec![0x1b, 0x5b, 0x42],
-      Self::Right => vec![0x1b, 0x5b, 0x43],
-      Self::Left => vec![0x1b, 0x5b, 0x44],
-      Self::Home => vec![0x1b, 0x5b, 0x48],
-      Self::End => vec![0x1b, 0x5b, 0x46],
-      Self::PageUp => vec![0x1b, 0x5b, 0x35, 0x7e],
-      Self::PageDown => vec![0x1b, 0x5b, 0x36, 0x7e],
-      Self::Delete => vec![0x1b, 0x5b, 0x33, 0x7e],
-      Self::CtrlC => vec![0x03],
-      Self::CtrlD => vec![0x04],
-      Self::CtrlL => vec![0x0c],
-      Self::CtrlZ => vec![0x1a],
+impl Default for TerminalCell {
+  fn default() -> Self {
+    Self {
+      char: ' ',
+      fg: (169, 177, 214), // Tokyo Night foreground
+      bg: (26, 27, 38),    // Tokyo Night background
+      bold: false,
+      italic: false,
+      underline: false,
+      strikethrough: false,
+      dim: false,
     }
   }
 }
 
 /// Rendered line from terminal
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TerminalLine {
   pub cells: Vec<TerminalCell>,
-}
-
-impl TerminalLine {
-  pub fn new() -> Self {
-    Self { cells: Vec::new() }
-  }
-}
-
-impl Default for TerminalLine {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
-/// A terminal cell with text
-#[derive(Debug, Clone)]
-pub struct TerminalCell {
-  pub char: char,
-}
-
-impl Default for TerminalCell {
-  fn default() -> Self {
-    Self { char: ' ' }
-  }
 }
 
 /// Terminal content for rendering
@@ -198,484 +199,469 @@ impl Default for TerminalContent {
   }
 }
 
-/// Terminal state managed with simple buffer approach
-pub struct TerminalBuffer {
-  lines: Vec<TerminalLine>,
-  cursor_row: usize,
-  cursor_col: usize,
-  cols: usize,
-  rows: usize,
-  scroll_offset: i32,
-  current_fg: (u8, u8, u8),
-  current_bg: (u8, u8, u8),
-  current_bold: bool,
+/// Event proxy for alacritty terminal events
+#[derive(Clone)]
+struct EventProxy {
+  sender: Sender<TerminalEvent>,
+}
+
+impl EventProxy {
+  fn new(sender: Sender<TerminalEvent>) -> Self {
+    Self { sender }
+  }
+}
+
+impl EventListener for EventProxy {
+  fn send_event(&self, event: Event) {
+    let _ = self.sender.send(TerminalEvent::AlacrittyEvent(event));
+  }
+}
+
+/// Internal terminal events
+enum TerminalEvent {
+  AlacrittyEvent(Event),
+}
+
+/// Terminal state wrapper
+#[derive(Default)]
+pub struct TerminalState {
   pub connected: bool,
   pub error: Option<String>,
 }
 
-impl Default for TerminalBuffer {
-  fn default() -> Self {
-    Self::new(80, 24)
-  }
-}
-
-impl TerminalBuffer {
-  pub fn new(cols: usize, rows: usize) -> Self {
-    Self {
-      lines: vec![TerminalLine::new()],
-      cursor_row: 0,
-      cursor_col: 0,
-      cols,
-      rows,
-      scroll_offset: 0,
-      current_fg: (169, 177, 214),
-      current_bg: (26, 27, 38),
-      current_bold: false,
-      connected: false,
-      error: None,
-    }
-  }
-
-  fn ensure_line(&mut self, row: usize) {
-    while self.lines.len() <= row {
-      self.lines.push(TerminalLine::new());
-    }
-  }
-
-  fn ensure_cell(&mut self, row: usize, col: usize) {
-    self.ensure_line(row);
-    while self.lines[row].cells.len() <= col {
-      self.lines[row].cells.push(TerminalCell::default());
-    }
-  }
-
-  pub fn put_char(&mut self, c: char) {
-    self.ensure_cell(self.cursor_row, self.cursor_col);
-    self.lines[self.cursor_row].cells[self.cursor_col] = TerminalCell { char: c };
-    self.cursor_col += 1;
-
-    // Wrap at column limit
-    if self.cursor_col >= self.cols {
-      self.cursor_col = 0;
-      self.cursor_row += 1;
-      self.ensure_line(self.cursor_row);
-    }
-  }
-
-  pub fn newline(&mut self) {
-    const MAX_LINES: usize = 10000;
-
-    self.cursor_row += 1;
-    self.cursor_col = 0;
-    self.ensure_line(self.cursor_row);
-
-    // Limit scrollback to MAX_LINES
-    if self.lines.len() > MAX_LINES {
-      let excess = self.lines.len() - MAX_LINES;
-      self.lines.drain(0..excess);
-      self.cursor_row = self.cursor_row.saturating_sub(excess);
-    }
-  }
-
-  pub fn carriage_return(&mut self) {
-    self.cursor_col = 0;
-  }
-
-  pub fn backspace(&mut self) {
-    if self.cursor_col > 0 {
-      self.cursor_col -= 1;
-    }
-  }
-
-  pub fn clear_line_from_cursor(&mut self) {
-    self.ensure_line(self.cursor_row);
-    if self.cursor_col < self.lines[self.cursor_row].cells.len() {
-      self.lines[self.cursor_row].cells.truncate(self.cursor_col);
-    }
-  }
-
-  pub fn clear_screen(&mut self) {
-    self.lines.clear();
-    self.lines.push(TerminalLine::new());
-    self.cursor_row = 0;
-    self.cursor_col = 0;
-  }
-
-  pub fn move_cursor(&mut self, row: usize, col: usize) {
-    self.cursor_row = row;
-    self.cursor_col = col;
-    self.ensure_line(self.cursor_row);
-  }
-
-  pub fn set_fg(&mut self, r: u8, g: u8, b: u8) {
-    self.current_fg = (r, g, b);
-  }
-
-  pub fn set_bg(&mut self, r: u8, g: u8, b: u8) {
-    self.current_bg = (r, g, b);
-  }
-
-  pub fn set_bold(&mut self, bold: bool) {
-    self.current_bold = bold;
-  }
-
-  pub fn reset_style(&mut self) {
-    self.current_fg = (169, 177, 214);
-    self.current_bg = (26, 27, 38);
-    self.current_bold = false;
-  }
-
-  pub fn scroll(&mut self, delta: i32) {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-    let max_scroll = self.lines.len().saturating_sub(self.rows) as i32;
-    self.scroll_offset = (self.scroll_offset + delta).clamp(0, max_scroll.max(0));
-  }
-
-  pub fn scroll_to_bottom(&mut self) {
-    self.scroll_offset = 0;
-  }
-
-  pub fn set_display_rows(&mut self, rows: usize) {
-    self.rows = rows.max(10); // Minimum 10 rows
-  }
-
-  pub fn get_content(&self) -> TerminalContent {
-    let total_lines = self.lines.len();
-    let scroll_offset_usize = usize::try_from(self.scroll_offset).unwrap_or(0);
-    let visible_start = if self.scroll_offset > 0 {
-      total_lines.saturating_sub(self.rows + scroll_offset_usize)
-    } else {
-      total_lines.saturating_sub(self.rows)
-    };
-
-    let visible_end = (visible_start + self.rows).min(total_lines);
-    let visible_lines: Vec<TerminalLine> = self.lines[visible_start..visible_end].to_vec();
-
-    TerminalContent {
-      lines: visible_lines,
-      cursor_row: self.cursor_row.saturating_sub(visible_start),
-      cursor_col: self.cursor_col,
-      cursor_visible: self.scroll_offset == 0,
-      rows: self.rows,
-      total_lines,
-      scroll_offset: scroll_offset_usize,
-    }
-  }
-}
-
-/// VTE performer for parsing terminal escape sequences
-struct TerminalPerformer {
-  buffer: Arc<Mutex<TerminalBuffer>>,
-}
-
-impl TerminalPerformer {
-  fn new(buffer: Arc<Mutex<TerminalBuffer>>) -> Self {
-    Self { buffer }
-  }
-
-  /// Safely convert u16 to u8, clamping to 255
-  fn to_u8(val: u16) -> u8 {
-    val.min(255) as u8
-  }
-
-  fn ansi_color_to_rgb(code: u8) -> (u8, u8, u8) {
-    // Tokyo Night color palette
-    match code {
-      0 => (26, 27, 38),         // Black
-      1 | 9 => (247, 118, 142),  // Red / Bright Red
-      2 | 10 => (158, 206, 106), // Green / Bright Green
-      3 | 11 => (224, 175, 104), // Yellow / Bright Yellow
-      4 | 12 => (122, 162, 247), // Blue / Bright Blue
-      5 | 13 => (187, 154, 247), // Magenta / Bright Magenta
-      6 | 14 => (125, 207, 255), // Cyan / Bright Cyan
-      7 => (192, 202, 245),      // White
-      8 => (65, 77, 104),        // Bright Black
-      15 => (255, 255, 255),     // Bright White
-      // 216 color cube (16-231)
-      16..=231 => {
-        let n = code - 16;
-        let r = (n / 36) % 6;
-        let g = (n / 6) % 6;
-        let b = n % 6;
-        let to_255 = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
-        (to_255(r), to_255(g), to_255(b))
-      }
-      // Grayscale (232-255)
-      232..=255 => {
-        let gray = 8 + (code - 232) * 10;
-        (gray, gray, gray)
+/// Tokyo Night color palette for ANSI color mapping
+fn ansi_to_rgb(color: AnsiColor) -> (u8, u8, u8) {
+  match color {
+    AnsiColor::Named(named) => match named {
+      NamedColor::Black | NamedColor::Background => (26, 27, 38),
+      NamedColor::Red | NamedColor::BrightRed => (247, 118, 142),
+      NamedColor::Green | NamedColor::BrightGreen => (158, 206, 106),
+      NamedColor::Yellow | NamedColor::BrightYellow => (224, 175, 104),
+      NamedColor::Blue | NamedColor::BrightBlue => (122, 162, 247),
+      NamedColor::Magenta | NamedColor::BrightMagenta => (187, 154, 247),
+      NamedColor::Cyan | NamedColor::BrightCyan => (125, 207, 255),
+      NamedColor::White => (192, 202, 245),
+      NamedColor::BrightBlack => (65, 77, 104),
+      NamedColor::BrightWhite => (255, 255, 255),
+      _ => (169, 177, 214), // Default foreground, cursor
+    },
+    AnsiColor::Spec(Rgb { r, g, b }) => (r, g, b),
+    AnsiColor::Indexed(idx) => {
+      // 256 color palette - standard 16 ANSI colors
+      match idx {
+        0 => (26, 27, 38),         // Black
+        1 | 9 => (247, 118, 142),  // Red / Bright Red
+        2 | 10 => (158, 206, 106), // Green / Bright Green
+        3 | 11 => (224, 175, 104), // Yellow / Bright Yellow
+        4 | 12 => (122, 162, 247), // Blue / Bright Blue
+        5 | 13 => (187, 154, 247), // Magenta / Bright Magenta
+        6 | 14 => (125, 207, 255), // Cyan / Bright Cyan
+        7 => (192, 202, 245),      // White
+        8 => (65, 77, 104),        // Bright Black
+        15 => (255, 255, 255),     // Bright White
+        // 216 color cube (16-231)
+        16..=231 => {
+          let color_idx = idx - 16;
+          let red = (color_idx / 36) % 6;
+          let green = (color_idx / 6) % 6;
+          let blue = color_idx % 6;
+          let to_255 = |val: u8| if val == 0 { 0 } else { 55 + val * 40 };
+          (to_255(red), to_255(green), to_255(blue))
+        }
+        // Grayscale (232-255)
+        232..=255 => {
+          let gray = 8 + (idx - 232) * 10;
+          (gray, gray, gray)
+        }
       }
     }
   }
 }
 
-impl vte::Perform for TerminalPerformer {
-  fn print(&mut self, c: char) {
-    self.buffer.lock().put_char(c);
-  }
-
-  fn execute(&mut self, byte: u8) {
-    let mut buf = self.buffer.lock();
-    match byte {
-      0x08 => buf.backspace(),
-      0x09 => {
-        let spaces = 8 - (buf.cursor_col % 8);
-        for _ in 0..spaces {
-          buf.put_char(' ');
-        }
-      }
-      0x0a..=0x0c => buf.newline(),
-      0x0d => buf.carriage_return(),
-      _ => {}
-    }
-  }
-
-  fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {}
-  fn put(&mut self, _byte: u8) {}
-  fn unhook(&mut self) {}
-  fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
-
-  fn csi_dispatch(&mut self, params: &vte::Params, _intermediates: &[u8], _ignore: bool, action: char) {
-    let mut buf = self.buffer.lock();
-    let params: Vec<u16> = params.iter().map(|p| p.first().copied().unwrap_or(0)).collect();
-
-    match action {
-      'm' => {
-        if params.is_empty() {
-          buf.reset_style();
-          return;
-        }
-        let mut i = 0;
-        while i < params.len() {
-          match params[i] {
-            0 => buf.reset_style(),
-            1 => buf.set_bold(true),
-            22 => buf.set_bold(false),
-            30..=37 => {
-              let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i]) - 30);
-              buf.set_fg(rgb.0, rgb.1, rgb.2);
-            }
-            38 => {
-              if i + 2 < params.len() && params[i + 1] == 5 {
-                let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i + 2]));
-                buf.set_fg(rgb.0, rgb.1, rgb.2);
-                i += 2;
-              } else if i + 4 < params.len() && params[i + 1] == 2 {
-                buf.set_fg(
-                  Self::to_u8(params[i + 2]),
-                  Self::to_u8(params[i + 3]),
-                  Self::to_u8(params[i + 4]),
-                );
-                i += 4;
-              }
-            }
-            39 => buf.set_fg(169, 177, 214),
-            40..=47 => {
-              let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i]) - 40);
-              buf.set_bg(rgb.0, rgb.1, rgb.2);
-            }
-            48 => {
-              if i + 2 < params.len() && params[i + 1] == 5 {
-                let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i + 2]));
-                buf.set_bg(rgb.0, rgb.1, rgb.2);
-                i += 2;
-              } else if i + 4 < params.len() && params[i + 1] == 2 {
-                buf.set_bg(
-                  Self::to_u8(params[i + 2]),
-                  Self::to_u8(params[i + 3]),
-                  Self::to_u8(params[i + 4]),
-                );
-                i += 4;
-              }
-            }
-            49 => buf.set_bg(26, 27, 38),
-            90..=97 => {
-              let rgb = Self::ansi_color_to_rgb(Self::to_u8(params[i]) - 90 + 8);
-              buf.set_fg(rgb.0, rgb.1, rgb.2);
-            }
-            _ => {}
-          }
-          i += 1;
-        }
-      }
-      'H' | 'f' => {
-        let row = params.first().copied().unwrap_or(1).saturating_sub(1) as usize;
-        let col = params.get(1).copied().unwrap_or(1).saturating_sub(1) as usize;
-        buf.move_cursor(row, col);
-      }
-      'J' => {
-        let mode = params.first().copied().unwrap_or(0);
-        if mode == 2 || mode == 3 {
-          buf.clear_screen();
-        }
-      }
-      'K' => {
-        let mode = params.first().copied().unwrap_or(0);
-        if mode == 0 {
-          buf.clear_line_from_cursor();
-        }
-      }
-      'A' => {
-        let n = params.first().copied().unwrap_or(1).max(1) as usize;
-        buf.cursor_row = buf.cursor_row.saturating_sub(n);
-      }
-      'B' => {
-        let n = params.first().copied().unwrap_or(1).max(1) as usize;
-        buf.cursor_row += n;
-        let row = buf.cursor_row;
-        buf.ensure_line(row);
-      }
-      'C' => {
-        let n = params.first().copied().unwrap_or(1).max(1) as usize;
-        buf.cursor_col += n;
-      }
-      'D' => {
-        let n = params.first().copied().unwrap_or(1).max(1) as usize;
-        buf.cursor_col = buf.cursor_col.saturating_sub(n);
-      }
-      _ => {}
-    }
-  }
-
-  fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
-}
-
-/// PTY-based terminal with scrolling support
+/// PTY-based terminal with full emulation via `alacritty_terminal`
 pub struct PtyTerminal {
-  buffer: Arc<Mutex<TerminalBuffer>>,
-  writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
-  running: Arc<Mutex<bool>>,
+  term: Arc<FairMutex<Term<EventProxy>>>,
+  notifier: Notifier,
+  state: Arc<Mutex<TerminalState>>,
+  _event_receiver: Receiver<TerminalEvent>,
 }
 
 impl PtyTerminal {
   pub fn new(session_type: &TerminalSessionType) -> Result<Self> {
-    let pty_system = native_pty_system();
+    Self::with_size(session_type, 120, 40) // Larger default for better coverage
+  }
 
-    let pair = pty_system.openpty(PtySize {
-      rows: 24,
-      cols: 80,
-      pixel_width: 0,
-      pixel_height: 0,
-    })?;
+  pub fn with_size(session_type: &TerminalSessionType, cols: u16, rows: u16) -> Result<Self> {
+    // Create event channel
+    let (event_sender, event_receiver) = mpsc::channel();
+    let event_proxy = EventProxy::new(event_sender);
 
-    let cmd = session_type.build_command();
-    let _child = pair.slave.spawn_command(cmd)?;
+    // Terminal configuration with scrollback history
+    let term_config = TermConfig {
+      scrolling_history: 10000, // 10k lines of scrollback
+      ..TermConfig::default()
+    };
 
-    let pty_writer = pair.master.take_writer()?;
-    let writer: Arc<Mutex<Option<Box<dyn Write + Send>>>> = Arc::new(Mutex::new(Some(pty_writer)));
+    // Create terminal size
+    let term_size = TermSize::new(cols as usize, rows as usize);
 
-    let buffer = Arc::new(Mutex::new(TerminalBuffer::new(80, 40)));
-    let running = Arc::new(Mutex::new(true));
+    // Create the terminal
+    let term = Term::new(term_config, &term_size, event_proxy.clone());
+    let term = Arc::new(FairMutex::new(term));
 
-    buffer.lock().connected = true;
+    // PTY options - set TERM for proper escape sequence handling
+    let shell = session_type.to_shell();
+    let mut env = HashMap::new();
+    env.insert("TERM".to_string(), "xterm-256color".to_string());
 
-    let buffer_clone = Arc::clone(&buffer);
-    let running_clone = Arc::clone(&running);
-    let mut reader = pair.master.try_clone_reader()?;
+    let pty_options = PtyOptions {
+      shell: Some(shell),
+      working_directory: Some(PathBuf::from("/")),
+      env,
+      drain_on_exit: false,
+    };
+
+    // Window size for PTY
+    let window_size = WindowSize {
+      num_cols: cols,
+      num_lines: rows,
+      cell_width: 1,
+      cell_height: 1,
+    };
+
+    // Create PTY
+    let pty = tty::new(&pty_options, window_size, 0)?;
+
+    // Create event loop
+    let event_loop = EventLoop::new(term.clone(), event_proxy, pty, false, false)?;
+
+    // Get notifier for sending input
+    let notifier = Notifier(event_loop.channel());
+
+    // Spawn event loop thread
+    let _event_loop_handle = event_loop.spawn();
+
+    // Create state
+    let state = Arc::new(Mutex::new(TerminalState {
+      connected: true,
+      error: None,
+    }));
+
+    // Spawn event handler thread
+    let state_clone = Arc::clone(&state);
+    let event_receiver_clone = event_receiver;
 
     thread::spawn(move || {
-      let mut parser = vte::Parser::new();
-      let mut performer = TerminalPerformer::new(buffer_clone.clone());
-      let mut buf = [0u8; 4096];
-      let mut total_bytes_read = 0usize;
-      let mut early_output = String::new();
-      let start_time = std::time::Instant::now();
-
-      loop {
-        if !*running_clone.lock() {
+      while let Ok(event) = event_receiver_clone.recv() {
+        if let TerminalEvent::AlacrittyEvent(Event::Exit) = event {
+          let mut state = state_clone.lock();
+          state.connected = false;
           break;
-        }
-
-        match reader.read(&mut buf) {
-          Ok(0) => {
-            // EOF received - check if this was an early failure
-            let mut b = buffer_clone.lock();
-            b.connected = false;
-
-            // If we got EOF very quickly with little/no output, it's likely a connection failure
-            if start_time.elapsed().as_millis() < 2000 && total_bytes_read < 500 {
-              // Try to extract error message from early output
-              if early_output.is_empty() {
-                b.error = Some("Connection closed unexpectedly".to_string());
-              } else {
-                // Clean up ANSI codes and extract meaningful error
-                let clean_output = early_output
-                  .lines()
-                  .filter(|line| !line.trim().is_empty())
-                  .collect::<Vec<_>>()
-                  .join(" ");
-
-                if clean_output.contains("OCI runtime exec failed")
-                  || clean_output.contains("executable file not found")
-                  || clean_output.contains("no such file or directory")
-                {
-                  b.error = Some("Container does not have a shell available".to_string());
-                } else if clean_output.contains("No such container") || clean_output.contains("is not running") {
-                  b.error = Some("Container is not running".to_string());
-                } else if clean_output.contains("error") || clean_output.contains("Error") {
-                  b.error = Some(clean_output.chars().take(200).collect());
-                } else {
-                  b.error = Some("Connection closed unexpectedly".to_string());
-                }
-              }
-            }
-            break;
-          }
-          Ok(n) => {
-            total_bytes_read += n;
-
-            // Capture early output for error detection
-            if start_time.elapsed().as_millis() < 2000
-              && let Ok(s) = std::str::from_utf8(&buf[..n])
-            {
-              early_output.push_str(s);
-            }
-
-            parser.advance(&mut performer, &buf[..n]);
-            // Auto-scroll to bottom on new output
-            buffer_clone.lock().scroll_to_bottom();
-          }
-          Err(e) => {
-            let mut b = buffer_clone.lock();
-            b.error = Some(format!("Read error: {e}"));
-            b.connected = false;
-            break;
-          }
         }
       }
     });
 
+    // Re-create event channel for storage (original was moved)
+    let (_new_sender, new_receiver) = mpsc::channel();
+
     Ok(Self {
-      buffer,
-      writer,
-      running,
+      term,
+      notifier,
+      state,
+      _event_receiver: new_receiver,
     })
   }
 
-  pub fn send_key(&self, key: TerminalKey) -> Result<()> {
-    if let Some(writer) = self.writer.lock().as_mut() {
-      writer.write_all(&key.to_bytes())?;
-      writer.flush()?;
+  /// Send raw bytes to the terminal
+  pub fn send_bytes(&self, bytes: &[u8]) {
+    let _ = self.notifier.0.send(Msg::Input(Cow::Owned(bytes.to_vec())));
+  }
+
+  /// Send a character to the terminal
+  pub fn send_char(&self, c: char) {
+    let mut buf = [0u8; 4];
+    let bytes = c.encode_utf8(&mut buf).as_bytes();
+    self.send_bytes(bytes);
+  }
+
+  /// Send a key with modifiers
+  pub fn send_key(&self, key: &str, ctrl: bool, alt: bool, shift: bool) {
+    // For shells like bash/zsh, we use normal mode (ESC [ A style)
+    // Application cursor mode (ESC O A style) is only used by specific apps like vim
+    let app_cursor = {
+      let term = self.term.lock();
+      term.mode().contains(TermMode::APP_CURSOR)
+    };
+
+    let bytes = key_to_bytes(key, ctrl, alt, shift, app_cursor);
+    self.send_bytes(&bytes);
+  }
+
+  /// Get terminal content for rendering with a specific scroll offset
+  /// `scroll_offset`: 0 = at bottom (current screen), >0 = scrolled up into history
+  pub fn get_content_with_offset(&self, scroll_offset: usize) -> TerminalContent {
+    let term = self.term.lock();
+    let grid = term.grid();
+
+    let cols = grid.columns();
+    let rows = grid.screen_lines();
+    let history_size = grid.history_size();
+    let total_lines = history_size + rows;
+
+    // Clamp scroll offset to valid range
+    let max_scroll = history_size;
+    let actual_offset = scroll_offset.min(max_scroll);
+
+    let mut lines = Vec::with_capacity(rows);
+
+    // Calculate the line range to display based on our scroll offset
+    // Line indices: negative = history, 0 to rows-1 = current screen
+    // actual_offset=0: show lines 0 to rows-1 (current screen)
+    // actual_offset=N: show lines -N to rows-1-N (scrolled into history)
+    #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+    let start_line = -(actual_offset as i32);
+    #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+    let end_line = start_line + rows as i32;
+
+    for line_idx in start_line..end_line {
+      let row_line = alacritty_terminal::index::Line(line_idx);
+
+      // Check if this line exists in the grid
+      let mut cells = Vec::with_capacity(cols);
+
+      // Only access if the line is within valid range
+      #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+      let history_min = -(history_size as i32);
+      #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+      let rows_max = rows as i32;
+      if line_idx >= history_min && line_idx < rows_max {
+        let row = &grid[row_line];
+
+        for col_idx in 0..cols {
+          let cell = &row[alacritty_terminal::index::Column(col_idx)];
+          let c = cell.c;
+
+          // Get foreground and background colors
+          let fg = ansi_to_rgb(cell.fg);
+          let bg = ansi_to_rgb(cell.bg);
+
+          // Get cell flags
+          let flags = cell.flags;
+
+          cells.push(TerminalCell {
+            char: if c == '\0' { ' ' } else { c },
+            fg,
+            bg,
+            bold: flags.contains(CellFlags::BOLD),
+            italic: flags.contains(CellFlags::ITALIC),
+            underline: flags.contains(CellFlags::UNDERLINE),
+            strikethrough: flags.contains(CellFlags::STRIKEOUT),
+            dim: flags.contains(CellFlags::DIM),
+          });
+        }
+      } else {
+        // Fill with empty cells for out-of-range lines
+        for _ in 0..cols {
+          cells.push(TerminalCell {
+            char: ' ',
+            fg: (200, 200, 200),
+            bg: (0, 0, 0),
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            dim: false,
+          });
+        }
+      }
+
+      lines.push(TerminalLine { cells });
     }
-    Ok(())
+
+    // Get cursor position
+    let cursor = term.grid().cursor.point;
+    let cursor_visible = term.mode().contains(TermMode::SHOW_CURSOR);
+
+    // Convert cursor line to row index in our lines vector
+    // If scrolled up, cursor might not be visible
+    #[allow(clippy::cast_sign_loss)]
+    let cursor_row = if cursor.line.0 >= start_line && cursor.line.0 < end_line {
+      (cursor.line.0 - start_line) as usize
+    } else {
+      usize::MAX // Cursor not visible
+    };
+
+    TerminalContent {
+      lines,
+      cursor_row,
+      cursor_col: cursor.column.0,
+      cursor_visible: cursor_visible && cursor_row < rows,
+      rows,
+      total_lines,
+      scroll_offset: actual_offset,
+    }
   }
 
-  pub fn buffer(&self) -> Arc<Mutex<TerminalBuffer>> {
-    Arc::clone(&self.buffer)
+  /// Get max scroll offset (history size)
+  pub fn max_scroll(&self) -> usize {
+    let term = self.term.lock();
+    term.grid().history_size()
   }
 
-  pub fn scroll(&self, delta: i32) {
-    self.buffer.lock().scroll(delta);
+  /// Check if connected
+  pub fn is_connected(&self) -> bool {
+    self.state.lock().connected
   }
 
+  /// Get error if any
+  pub fn error(&self) -> Option<String> {
+    self.state.lock().error.clone()
+  }
+
+  /// Resize the terminal
+  pub fn resize(&self, cols: u16, rows: u16) {
+    let window_size = WindowSize {
+      num_cols: cols,
+      num_lines: rows,
+      cell_width: 1,
+      cell_height: 1,
+    };
+    let _ = self.notifier.0.send(Msg::Resize(window_size));
+    self.term.lock().resize(TermSize::new(cols as usize, rows as usize));
+  }
+
+  /// Get current terminal dimensions
+  #[allow(dead_code)]
+  pub fn size(&self) -> (usize, usize) {
+    let term = self.term.lock();
+    let grid = term.grid();
+    (grid.columns(), grid.screen_lines())
+  }
+
+  /// Close the terminal
   pub fn close(&mut self) {
-    *self.running.lock() = false;
-    *self.writer.lock() = None;
+    let _ = self.notifier.0.send(Msg::Shutdown);
+    self.state.lock().connected = false;
   }
 }
 
 impl Drop for PtyTerminal {
   fn drop(&mut self) {
     self.close();
+  }
+}
+
+/// Convert key name to terminal escape sequence
+#[allow(clippy::fn_params_excessive_bools)]
+fn key_to_bytes(key: &str, ctrl: bool, alt: bool, _shift: bool, app_cursor: bool) -> Vec<u8> {
+  // Handle Ctrl+key combinations
+  if ctrl {
+    return match key.to_lowercase().as_str() {
+      "a" => vec![0x01],
+      "b" => vec![0x02],
+      "c" => vec![0x03],
+      "d" => vec![0x04],
+      "e" => vec![0x05],
+      "f" => vec![0x06],
+      "g" => vec![0x07],
+      "h" => vec![0x08],
+      "i" => vec![0x09],
+      "j" => vec![0x0a],
+      "k" => vec![0x0b],
+      "l" => vec![0x0c],
+      "m" => vec![0x0d],
+      "n" => vec![0x0e],
+      "o" => vec![0x0f],
+      "p" => vec![0x10],
+      "q" => vec![0x11],
+      "r" => vec![0x12],
+      "s" => vec![0x13],
+      "t" => vec![0x14],
+      "u" => vec![0x15],
+      "v" => vec![0x16],
+      "w" => vec![0x17],
+      "x" => vec![0x18],
+      "y" => vec![0x19],
+      "z" => vec![0x1a],
+      "[" | "escape" => vec![0x1b],
+      "\\" => vec![0x1c],
+      "]" => vec![0x1d],
+      "^" | "6" => vec![0x1e],
+      "_" | "-" => vec![0x1f],
+      "space" | " " => vec![0x00],
+      _ => vec![],
+    };
+  }
+
+  // Handle Alt+key combinations
+  if alt {
+    let mut bytes = vec![0x1b]; // ESC prefix
+    if key.len() == 1 {
+      bytes.extend(key.as_bytes());
+    }
+    return bytes;
+  }
+
+  // Handle special keys
+  match key {
+    "enter" => vec![0x0d],
+    "backspace" => vec![0x7f],
+    "tab" => vec![0x09],
+    "escape" => vec![0x1b],
+    "space" => vec![0x20],
+    "up" => {
+      if app_cursor {
+        vec![0x1b, b'O', b'A'] // ESC O A
+      } else {
+        vec![0x1b, b'[', b'A'] // ESC [ A
+      }
+    }
+    "down" => {
+      if app_cursor {
+        vec![0x1b, b'O', b'B']
+      } else {
+        vec![0x1b, b'[', b'B']
+      }
+    }
+    "right" => {
+      if app_cursor {
+        vec![0x1b, b'O', b'C']
+      } else {
+        vec![0x1b, b'[', b'C']
+      }
+    }
+    "left" => {
+      if app_cursor {
+        vec![0x1b, b'O', b'D']
+      } else {
+        vec![0x1b, b'[', b'D']
+      }
+    }
+    "home" => vec![0x1b, b'[', b'H'],
+    "end" => vec![0x1b, b'[', b'F'],
+    "pageup" => vec![0x1b, b'[', b'5', b'~'],
+    "pagedown" => vec![0x1b, b'[', b'6', b'~'],
+    "insert" => vec![0x1b, b'[', b'2', b'~'],
+    "delete" => vec![0x1b, b'[', b'3', b'~'],
+    "f1" => vec![0x1b, b'O', b'P'],
+    "f2" => vec![0x1b, b'O', b'Q'],
+    "f3" => vec![0x1b, b'O', b'R'],
+    "f4" => vec![0x1b, b'O', b'S'],
+    "f5" => vec![0x1b, b'[', b'1', b'5', b'~'],
+    "f6" => vec![0x1b, b'[', b'1', b'7', b'~'],
+    "f7" => vec![0x1b, b'[', b'1', b'8', b'~'],
+    "f8" => vec![0x1b, b'[', b'1', b'9', b'~'],
+    "f9" => vec![0x1b, b'[', b'2', b'0', b'~'],
+    "f10" => vec![0x1b, b'[', b'2', b'1', b'~'],
+    "f11" => vec![0x1b, b'[', b'2', b'3', b'~'],
+    "f12" => vec![0x1b, b'[', b'2', b'4', b'~'],
+    _ => {
+      // Single character
+      if key.len() == 1 {
+        key.as_bytes().to_vec()
+      } else {
+        vec![]
+      }
+    }
   }
 }

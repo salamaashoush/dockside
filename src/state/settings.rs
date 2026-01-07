@@ -156,6 +156,30 @@ pub enum ExternalEditor {
   Zed,
 }
 
+/// Terminal cursor style
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TerminalCursorStyle {
+  #[default]
+  Block,
+  Underline,
+  Bar,
+}
+
+#[allow(dead_code)]
+impl TerminalCursorStyle {
+  pub fn all() -> Vec<Self> {
+    vec![Self::Block, Self::Underline, Self::Bar]
+  }
+
+  pub fn display_name(&self) -> &str {
+    match self {
+      Self::Block => "Block",
+      Self::Underline => "Underline",
+      Self::Bar => "Bar",
+    }
+  }
+}
+
 impl ExternalEditor {
   pub fn all() -> Vec<ExternalEditor> {
     vec![ExternalEditor::VSCode, ExternalEditor::Cursor, ExternalEditor::Zed]
@@ -208,6 +232,14 @@ pub struct AppSettings {
   pub max_log_lines: usize,
   /// Terminal font size
   pub terminal_font_size: f32,
+  /// Terminal line height multiplier
+  pub terminal_line_height: f32,
+  /// Terminal cursor style
+  pub terminal_cursor_style: TerminalCursorStyle,
+  /// Terminal cursor blink enabled
+  pub terminal_cursor_blink: bool,
+  /// Terminal scrollback lines
+  pub terminal_scrollback_lines: usize,
   /// External editor for opening files
   pub external_editor: ExternalEditor,
 }
@@ -222,6 +254,10 @@ impl Default for AppSettings {
       stats_refresh_interval: 2,
       max_log_lines: 1000,
       terminal_font_size: 14.0,
+      terminal_line_height: 1.4,
+      terminal_cursor_style: TerminalCursorStyle::default(),
+      terminal_cursor_blink: true,
+      terminal_scrollback_lines: 10000,
       external_editor: ExternalEditor::default(),
     }
   }
@@ -358,6 +394,10 @@ mod tests {
     assert_eq!(settings.stats_refresh_interval, 2);
     assert_eq!(settings.max_log_lines, 1000);
     assert!((settings.terminal_font_size - 14.0).abs() < 0.01);
+    assert!((settings.terminal_line_height - 1.4).abs() < 0.01);
+    assert_eq!(settings.terminal_cursor_style, TerminalCursorStyle::Block);
+    assert!(settings.terminal_cursor_blink);
+    assert_eq!(settings.terminal_scrollback_lines, 10000);
   }
 
   #[test]
@@ -386,6 +426,10 @@ mod tests {
       stats_refresh_interval: 5,
       max_log_lines: 5000,
       terminal_font_size: 16.0,
+      terminal_line_height: 1.5,
+      terminal_cursor_style: TerminalCursorStyle::Underline,
+      terminal_cursor_blink: false,
+      terminal_scrollback_lines: 5000,
       external_editor: ExternalEditor::Cursor,
     };
 
@@ -394,6 +438,27 @@ mod tests {
     assert_eq!(settings.default_colima_profile, "dev");
     assert_eq!(settings.container_refresh_interval, 10);
     assert_eq!(settings.external_editor, ExternalEditor::Cursor);
+  }
+
+  #[test]
+  fn test_terminal_cursor_style_default() {
+    assert_eq!(TerminalCursorStyle::default(), TerminalCursorStyle::Block);
+  }
+
+  #[test]
+  fn test_terminal_cursor_style_all() {
+    let styles = TerminalCursorStyle::all();
+    assert_eq!(styles.len(), 3);
+    assert!(styles.contains(&TerminalCursorStyle::Block));
+    assert!(styles.contains(&TerminalCursorStyle::Underline));
+    assert!(styles.contains(&TerminalCursorStyle::Bar));
+  }
+
+  #[test]
+  fn test_terminal_cursor_style_display_name() {
+    assert_eq!(TerminalCursorStyle::Block.display_name(), "Block");
+    assert_eq!(TerminalCursorStyle::Underline.display_name(), "Underline");
+    assert_eq!(TerminalCursorStyle::Bar.display_name(), "Bar");
   }
 
   #[test]

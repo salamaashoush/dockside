@@ -39,14 +39,15 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 bytesize = "2.3"
-portable-pty = "0.9"
 parking_lot = "0.12"
-vte = "0.15"
+alacritty_terminal = "0.25"
+regex = "1"
+polling = "3"
 rust-embed = "8"
 kube = { version = "2", features = ["client", "runtime"] }
 k8s-openapi = { version = "0.26", features = ["v1_32"] }
 which = "7"
-url = "2.5.7"
+url = "2.5.8"
 hex = "0.4"
 
 [dev-dependencies]

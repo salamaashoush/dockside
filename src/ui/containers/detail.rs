@@ -378,10 +378,9 @@ impl ContainerDetail {
     // If we have a terminal view, render it full size
     if let Some(terminal) = &self.terminal_view {
       return div()
-        .size_full()
         .flex_1()
         .min_h_0()
-        .p(px(8.))
+        .w_full()
         .child(terminal.clone())
         .into_any_element();
     }
@@ -653,7 +652,16 @@ impl ContainerDetail {
         ContainerDetailTab::Files => self.render_files_tab(is_running, window, cx),
         _ => Self::render_info_tab(container, cx).into_any_element(),
       };
-      result = result.child(div().flex_1().min_h_0().w_full().overflow_hidden().child(content));
+      result = result.child(
+        div()
+          .flex_1()
+          .min_h_0()
+          .w_full()
+          .overflow_hidden()
+          .flex()
+          .flex_col()
+          .child(content),
+      );
     } else {
       let content = match self.active_tab {
         ContainerDetailTab::Inspect => self.render_inspect_tab(cx),
