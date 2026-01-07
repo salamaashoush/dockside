@@ -181,29 +181,28 @@ doc-open:
 version:
     @grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/'
 
-# Bump version (usage: just bump patch|minor|major)
+# Bump version only (usage: just bump patch|minor|major)
 bump TYPE:
     ./scripts/bump-version.sh {{TYPE}}
 
-# Create a new release
+# Generate changelog for unreleased changes
+changelog:
+    git-cliff --unreleased
+
+# Preview what the next release would look like
+release-preview TYPE:
+    #!/usr/bin/env bash
+    ./scripts/bump-version.sh {{TYPE}} --dry-run 2>/dev/null || true
+    VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    echo "Would release: v$VERSION"
+    echo ""
+    echo "Changelog preview:"
+    git-cliff --unreleased --tag "v$VERSION"
+
+# Create a new release (bumps version, updates changelog, commits, pushes)
+# CI will automatically build and create GitHub release
 release TYPE:
     ./scripts/release.sh {{TYPE}}
-
-# Package binaries for GitHub release
-package VERSION:
-    ./scripts/gh-package.sh {{VERSION}}
-
-# Create GitHub release
-gh-release VERSION:
-    ./scripts/gh-release.sh {{VERSION}}
-
-# Full release workflow
-release-all TYPE: (bump TYPE)
-    #!/usr/bin/env bash
-    VERSION=$(just version)
-    just build-release
-    just package $VERSION
-    just gh-release $VERSION
 
 # ==================== CI ====================
 

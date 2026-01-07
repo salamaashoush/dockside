@@ -577,6 +577,9 @@ impl PtyTerminal {
       let mut parser = vte::Parser::new();
       let mut performer = TerminalPerformer::new(buffer_clone.clone());
       let mut buf = [0u8; 4096];
+      let mut total_bytes_read = 0usize;
+      let mut early_output = String::new();
+      let start_time = std::time::Instant::now();
 
       loop {
         if !*running_clone.lock() {
@@ -585,10 +588,49 @@ impl PtyTerminal {
 
         match reader.read(&mut buf) {
           Ok(0) => {
-            buffer_clone.lock().connected = false;
+            // EOF received - check if this was an early failure
+            let mut b = buffer_clone.lock();
+            b.connected = false;
+
+            // If we got EOF very quickly with little/no output, it's likely a connection failure
+            if start_time.elapsed().as_millis() < 2000 && total_bytes_read < 500 {
+              // Try to extract error message from early output
+              if early_output.is_empty() {
+                b.error = Some("Connection closed unexpectedly".to_string());
+              } else {
+                // Clean up ANSI codes and extract meaningful error
+                let clean_output = early_output
+                  .lines()
+                  .filter(|line| !line.trim().is_empty())
+                  .collect::<Vec<_>>()
+                  .join(" ");
+
+                if clean_output.contains("OCI runtime exec failed")
+                  || clean_output.contains("executable file not found")
+                  || clean_output.contains("no such file or directory")
+                {
+                  b.error = Some("Container does not have a shell available".to_string());
+                } else if clean_output.contains("No such container") || clean_output.contains("is not running") {
+                  b.error = Some("Container is not running".to_string());
+                } else if clean_output.contains("error") || clean_output.contains("Error") {
+                  b.error = Some(clean_output.chars().take(200).collect());
+                } else {
+                  b.error = Some("Connection closed unexpectedly".to_string());
+                }
+              }
+            }
             break;
           }
           Ok(n) => {
+            total_bytes_read += n;
+
+            // Capture early output for error detection
+            if start_time.elapsed().as_millis() < 2000
+              && let Ok(s) = std::str::from_utf8(&buf[..n])
+            {
+              early_output.push_str(s);
+            }
+
             parser.advance(&mut performer, &buf[..n]);
             // Auto-scroll to bottom on new output
             buffer_clone.lock().scroll_to_bottom();

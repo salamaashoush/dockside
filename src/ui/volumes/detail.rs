@@ -346,9 +346,11 @@ impl VolumeDetail {
     let explorer_state = FileExplorerState {
       current_path: state.map_or_else(|| "/".to_string(), |s| s.current_path.clone()),
       is_loading: state.is_some_and(|s| s.files_loading),
+      error: None,
       selected_file: state.and_then(|s| s.selected_file.clone()),
       file_content: state.map(|s| s.file_content.clone()).unwrap_or_default(),
       file_content_loading: state.is_some_and(|s| s.file_content_loading),
+      file_content_error: None,
     };
 
     let files = state.map(|s| s.files.clone()).unwrap_or_default();

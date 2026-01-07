@@ -1735,6 +1735,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "gpui-component-assets",
+ "hex",
  "http-body-util",
  "image",
  "k8s-openapi",

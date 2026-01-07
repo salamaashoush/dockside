@@ -173,12 +173,22 @@ impl MachinesView {
       state.set_selection(Selection::Machine(machine.name.clone()));
     });
 
-    // Reset view-specific state
-    self.active_tab = MachineDetailTab::Info;
+    // Reset view-specific state but keep active_tab
+    // This allows users to stay on their current tab when switching machines
     self.terminal_view = None;
 
     // Clear synced tracking for new machine
     self.last_synced_logs.clear();
+    self.last_synced_file_content.clear();
+
+    // Reset file explorer state to root
+    self.machine_tab_state = MachineTabState {
+      current_path: "/".to_string(),
+      ..Default::default()
+    };
+
+    // Reset file content editor
+    self.file_content_editor = None;
 
     // Create logs editor
     self.logs_editor = Some(cx.new(|cx| {
@@ -192,6 +202,11 @@ impl MachinesView {
 
     // Load OS info, logs, files for the selected machine
     self.load_machine_data(&machine.name, cx);
+
+    // If on Files tab, load the file list for the new machine
+    if self.active_tab == MachineDetailTab::Files {
+      self.on_navigate_path("/", cx);
+    }
 
     cx.notify();
   }
@@ -584,6 +599,13 @@ impl MachinesView {
       .detach();
     }
   }
+
+  fn on_open_in_editor(&mut self, data: &(String, bool), _window: &mut Window, cx: &mut Context<'_, Self>) {
+    let (path, _is_dir) = data;
+    if let Some(machine) = self.selected_machine(cx) {
+      services::open_machine_in_editor(&machine.name, path, cx);
+    }
+  }
 }
 
 impl Render for MachinesView {
@@ -657,7 +679,10 @@ impl Render for MachinesView {
       }))
       .on_copy(|text: &str, _window, cx| {
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
-      });
+      })
+      .on_open_in_editor(cx.listener(|this, data: &(String, bool), window, cx| {
+        this.on_open_in_editor(data, window, cx);
+      }));
 
     div()
       .size_full()

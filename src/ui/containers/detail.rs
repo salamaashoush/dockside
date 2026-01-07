@@ -26,6 +26,7 @@ type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type FileSelectCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type CloseViewerCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
 type SymlinkClickCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
+type OpenInEditorCallback = Rc<dyn Fn(&(String, bool), &mut Window, &mut App) + 'static>;
 
 /// State for container detail tabs
 #[derive(Debug, Clone, Default)]
@@ -37,12 +38,16 @@ pub struct ContainerTabState {
   pub current_path: String,
   pub files: Vec<ContainerFileEntry>,
   pub files_loading: bool,
+  /// Error when listing files failed
+  pub files_error: Option<String>,
   /// Selected file path for viewing
   pub selected_file: Option<String>,
   /// Content of selected file
   pub file_content: String,
   /// Whether file content is loading
   pub file_content_loading: bool,
+  /// Error when loading file content failed
+  pub file_content_error: Option<String>,
 }
 
 impl ContainerTabState {
@@ -72,6 +77,7 @@ pub struct ContainerDetail {
   on_file_select: Option<FileSelectCallback>,
   on_close_file_viewer: Option<CloseViewerCallback>,
   on_symlink_click: Option<SymlinkClickCallback>,
+  on_open_in_editor: Option<OpenInEditorCallback>,
 }
 
 impl ContainerDetail {
@@ -94,6 +100,7 @@ impl ContainerDetail {
       on_file_select: None,
       on_close_file_viewer: None,
       on_symlink_click: None,
+      on_open_in_editor: None,
     }
   }
 
@@ -209,6 +216,14 @@ impl ContainerDetail {
     F: Fn(&str, &mut Window, &mut App) + 'static,
   {
     self.on_symlink_click = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_open_in_editor<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&(String, bool), &mut Window, &mut App) + 'static,
+  {
+    self.on_open_in_editor = Some(Rc::new(callback));
     self
   }
 
@@ -334,15 +349,44 @@ impl ContainerDetail {
     )
   }
 
-  fn render_terminal_tab(&self, cx: &App) -> gpui::Div {
-    // If we have a terminal view, render it full size
-    if let Some(terminal) = &self.terminal_view {
-      return div().size_full().flex_1().min_h_0().p(px(8.)).child(terminal.clone());
-    }
-
+  fn render_terminal_tab(&self, is_running: bool, cx: &App) -> gpui::AnyElement {
     let colors = &cx.theme().colors;
 
-    // Fallback: show message
+    // Container must be running to connect terminal
+    if !is_running {
+      return v_flex()
+        .flex_1()
+        .w_full()
+        .p(px(16.))
+        .items_center()
+        .justify_center()
+        .gap(px(16.))
+        .child(
+          Icon::new(AppIcon::Terminal)
+            .size(px(48.))
+            .text_color(colors.muted_foreground),
+        )
+        .child(
+          div()
+            .text_sm()
+            .text_color(colors.muted_foreground)
+            .child("Container must be running to connect terminal"),
+        )
+        .into_any_element();
+    }
+
+    // If we have a terminal view, render it full size
+    if let Some(terminal) = &self.terminal_view {
+      return div()
+        .size_full()
+        .flex_1()
+        .min_h_0()
+        .p(px(8.))
+        .child(terminal.clone())
+        .into_any_element();
+    }
+
+    // Fallback: show message (shouldn't normally happen if tab change creates terminal)
     v_flex()
       .flex_1()
       .w_full()
@@ -359,8 +403,9 @@ impl ContainerDetail {
         div()
           .text_sm()
           .text_color(colors.muted_foreground)
-          .child("Click Terminal tab to connect to container"),
+          .child("Connecting to container..."),
       )
+      .into_any_element()
   }
 
   fn render_inspect_tab(&self, cx: &App) -> gpui::Div {
@@ -427,9 +472,11 @@ impl ContainerDetail {
     let explorer_state = FileExplorerState {
       current_path: state.map_or_else(|| "/".to_string(), |s| s.current_path.clone()),
       is_loading: state.is_some_and(|s| s.files_loading),
+      error: state.and_then(|s| s.files_error.clone()),
       selected_file: state.and_then(|s| s.selected_file.clone()),
       file_content: state.map(|s| s.file_content.clone()).unwrap_or_default(),
       file_content_loading: state.is_some_and(|s| s.file_content_loading),
+      file_content_error: state.and_then(|s| s.file_content_error.clone()),
     };
 
     let files = state.map(|s| s.files.clone()).unwrap_or_default();
@@ -465,6 +512,13 @@ impl ContainerDetail {
       let cb = cb.clone();
       explorer = explorer.on_symlink_click(move |path, window, cx| {
         cb(path, window, cx);
+      });
+    }
+
+    if let Some(ref cb) = self.on_open_in_editor {
+      let cb = cb.clone();
+      explorer = explorer.on_open_in_editor(move |data: &(String, bool), window, cx| {
+        cb(data, window, cx);
       });
     }
 
@@ -595,7 +649,7 @@ impl ContainerDetail {
     if is_full_height_tab {
       let content = match self.active_tab {
         ContainerDetailTab::Logs => self.render_logs_tab(cx).into_any_element(),
-        ContainerDetailTab::Terminal => self.render_terminal_tab(cx).into_any_element(),
+        ContainerDetailTab::Terminal => self.render_terminal_tab(is_running, cx),
         ContainerDetailTab::Files => self.render_files_tab(is_running, window, cx),
         _ => Self::render_info_tab(container, cx).into_any_element(),
       };

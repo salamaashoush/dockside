@@ -625,3 +625,111 @@ pub fn create_container(options: crate::ui::containers::CreateContainerOptions, 
   })
   .detach();
 }
+
+/// Open a container path in an external editor (VS Code, Cursor, or Zed)
+///
+/// For VS Code and Cursor, uses the Dev Containers extension to attach to the running container.
+/// For Zed, uses SSH remote connection if the container exposes SSH port.
+///
+/// # Arguments
+/// * `container_name` - The container name to attach to
+/// * `path` - The path inside the container to open
+/// * `is_directory` - Whether the path is a directory (true) or file (false)
+/// * `ssh_port` - Optional SSH host port if the container exposes SSH (port 22)
+pub fn open_container_in_editor(
+  container_name: &str,
+  path: &str,
+  is_directory: bool,
+  ssh_port: Option<u16>,
+  cx: &mut App,
+) {
+  use crate::state::{ExternalEditor, settings_state};
+  use std::process::Command;
+
+  let settings = settings_state(cx).read(cx);
+  let editor = settings.settings.external_editor.clone();
+  let disp = dispatcher(cx);
+
+  // Handle VS Code / Cursor with Dev Containers
+  if editor.supports_container_attach() {
+    // Build the remote URI for VS Code / Cursor
+    // Format: attached-container+<hex-encoded-json-config>/<path>
+    // The JSON config must contain containerName with leading slash
+    // Container names in Docker sometimes have leading slash, sometimes not - normalize to include it
+    let normalized_name = if container_name.starts_with('/') {
+      container_name.to_string()
+    } else {
+      format!("/{container_name}")
+    };
+    let config_json = format!("{{\"containerName\":\"{normalized_name}\"}}");
+    let config_hex = hex::encode(config_json);
+    let remote_uri = format!("attached-container+{config_hex}{path}");
+
+    let command = editor.command();
+
+    // Use --folder-uri for directories, --file-uri for files
+    let uri_arg = if is_directory { "--folder-uri" } else { "--file-uri" };
+
+    // Spawn the command in background
+    let result = Command::new(command)
+      .arg(uri_arg)
+      .arg(format!("vscode-remote://{remote_uri}"))
+      .spawn();
+
+    match result {
+      Ok(_) => {
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Opening container in {}", editor.display_name()),
+          });
+        });
+      }
+      Err(e) => {
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to open {}: {e}", editor.display_name()),
+          });
+        });
+      }
+    }
+    return;
+  }
+
+  // Handle Zed - requires SSH since it doesn't support attaching to arbitrary containers
+  // Note: Zed supports Dev Containers for projects with devcontainer.json, but not
+  // arbitrary container attachment like VS Code's "Attach to Running Container"
+  if matches!(editor, ExternalEditor::Zed) {
+    let Some(port) = ssh_port else {
+      disp.update(cx, |_, cx| {
+        cx.emit(DispatcherEvent::TaskFailed {
+          error: "Container does not expose SSH port (22). Zed requires SSH for container access. \
+                  Consider using VS Code or Cursor which support direct container attachment."
+            .to_string(),
+        });
+      });
+      return;
+    };
+
+    // Build SSH URL for Zed: zed ssh://root@localhost:<port>/<path>
+    let ssh_url = format!("ssh://root@localhost:{port}{path}");
+
+    let result = Command::new(editor.command()).arg(ssh_url).spawn();
+
+    match result {
+      Ok(_) => {
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Opening container in {} via SSH", editor.display_name()),
+          });
+        });
+      }
+      Err(e) => {
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to open {}: {e}", editor.display_name()),
+          });
+        });
+      }
+    }
+  }
+}

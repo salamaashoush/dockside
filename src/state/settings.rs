@@ -147,6 +147,50 @@ impl ThemeName {
   }
 }
 
+/// External editor for opening container files
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ExternalEditor {
+  #[default]
+  VSCode,
+  Cursor,
+  Zed,
+}
+
+impl ExternalEditor {
+  pub fn all() -> Vec<ExternalEditor> {
+    vec![ExternalEditor::VSCode, ExternalEditor::Cursor, ExternalEditor::Zed]
+  }
+
+  pub fn display_name(&self) -> &str {
+    match self {
+      Self::VSCode => "VS Code",
+      Self::Cursor => "Cursor",
+      Self::Zed => "Zed",
+    }
+  }
+
+  /// Returns the CLI command for this editor
+  pub fn command(&self) -> &str {
+    match self {
+      Self::VSCode => "code",
+      Self::Cursor => "cursor",
+      Self::Zed => "zed",
+    }
+  }
+
+  /// Whether this editor supports attaching to Docker containers via Dev Containers extension
+  /// VS Code and Cursor use the vscode-remote:// URI scheme
+  pub fn supports_container_attach(&self) -> bool {
+    matches!(self, Self::VSCode | Self::Cursor)
+  }
+
+  /// Whether this editor supports SSH remote connections
+  #[allow(clippy::unused_self)]
+  pub const fn supports_ssh(&self) -> bool {
+    true
+  }
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -164,6 +208,8 @@ pub struct AppSettings {
   pub max_log_lines: usize,
   /// Terminal font size
   pub terminal_font_size: f32,
+  /// External editor for opening files
+  pub external_editor: ExternalEditor,
 }
 
 impl Default for AppSettings {
@@ -176,6 +222,7 @@ impl Default for AppSettings {
       stats_refresh_interval: 2,
       max_log_lines: 1000,
       terminal_font_size: 14.0,
+      external_editor: ExternalEditor::default(),
     }
   }
 }
@@ -339,12 +386,14 @@ mod tests {
       stats_refresh_interval: 5,
       max_log_lines: 5000,
       terminal_font_size: 16.0,
+      external_editor: ExternalEditor::Cursor,
     };
 
     assert_eq!(settings.theme, ThemeName::GruvboxDark);
     assert_eq!(settings.docker_socket, "/custom/docker.sock");
     assert_eq!(settings.default_colima_profile, "dev");
     assert_eq!(settings.container_refresh_interval, 10);
+    assert_eq!(settings.external_editor, ExternalEditor::Cursor);
   }
 
   #[test]

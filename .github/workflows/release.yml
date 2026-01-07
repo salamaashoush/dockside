@@ -92,19 +92,56 @@ jobs:
         with:
           path: artifacts
 
-      - name: Generate changelog
+      - name: Extract changelog for version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${GITHUB_REF#refs/tags/v}
 
-          # Generate simple changelog from git log
-          CHANGELOG=$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")..HEAD 2>/dev/null || git log --pretty=format:"- %s" -20)
+          # Extract the section for this version from CHANGELOG.md
+          # Looks for ## [VERSION] and extracts until the next ## [
+          if [[ -f "CHANGELOG.md" ]]; then
+            # Extract content between version headers
+            awk "/^## \[$VERSION\]/{found=1; next} /^## \[/{found=0} found" CHANGELOG.md > changelog.md
 
-          # Write to file for multiline output
-          echo "## What's Changed" > changelog.md
-          echo "" >> changelog.md
-          echo "$CHANGELOG" >> changelog.md
-          echo "" >> changelog.md
-          echo "**Full Changelog**: https://github.com/${{ github.repository }}/commits/$VERSION" >> changelog.md
+            # If we got content, prepend a header
+            if [[ -s changelog.md ]]; then
+              # Add installation section
+              cat >> changelog.md << 'EOF'
+
+## Installation
+
+### Quick Install (macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/install.sh | bash
+```
+
+### Manual Installation
+
+Download `Dockside-vX.X.X-macos-arm64.zip` from the assets below, extract, and move `Dockside.app` to `/Applications`.
+
+### Build from Source
+
+```bash
+git clone https://github.com/salamaashoush/dockside
+cd dockside
+just bundle
+```
+EOF
+            else
+              # Fallback if version not found in changelog
+              echo "## What's Changed" > changelog.md
+              echo "" >> changelog.md
+              git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")..HEAD 2>/dev/null | head -20 >> changelog.md || echo "- Initial release" >> changelog.md
+            fi
+          else
+            # No changelog file, generate from git
+            echo "## What's Changed" > changelog.md
+            echo "" >> changelog.md
+            git log --pretty=format:"- %s" -20 >> changelog.md
+          fi
+
+          echo "Generated release notes:"
+          cat changelog.md
 
       - name: Create release
         uses: softprops/action-gh-release@v2

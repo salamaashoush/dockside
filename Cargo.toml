@@ -47,6 +47,7 @@ kube = { version = "2", features = ["client", "runtime"] }
 k8s-openapi = { version = "0.26", features = ["v1_32"] }
 which = "7"
 url = "2.5.7"
+hex = "0.4"
 
 [dev-dependencies]
 criterion = "0.8"

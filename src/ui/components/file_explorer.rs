@@ -1,9 +1,10 @@
-use gpui::{App, Entity, Styled, Window, div, prelude::*, px};
+use gpui::{App, Entity, SharedString, Styled, Window, div, prelude::*, px};
 use gpui_component::{
   Icon, IconName,
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
+  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   theme::ActiveTheme,
   v_flex,
@@ -104,6 +105,8 @@ type NavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type FileSelectCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type CloseViewerCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
 type SymlinkClickCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
+/// Callback for opening a path in external editor (path, `is_directory`)
+type OpenInEditorCallback = Rc<dyn Fn(&(String, bool), &mut Window, &mut App) + 'static>;
 
 /// State for the file explorer
 #[derive(Debug, Clone, Default)]
@@ -112,12 +115,16 @@ pub struct FileExplorerState {
   pub current_path: String,
   /// Whether files are loading
   pub is_loading: bool,
+  /// Error message if file listing failed
+  pub error: Option<String>,
   /// Selected file path for viewing
   pub selected_file: Option<String>,
   /// Content of selected file
   pub file_content: String,
   /// Whether file content is loading
   pub file_content_loading: bool,
+  /// Error loading file content
+  pub file_content_error: Option<String>,
 }
 
 impl FileExplorerState {
@@ -175,6 +182,7 @@ pub struct FileExplorer<F: FileEntry + 'static> {
   on_file_select: Option<FileSelectCallback>,
   on_close_viewer: Option<CloseViewerCallback>,
   on_symlink_click: Option<SymlinkClickCallback>,
+  on_open_in_editor: Option<OpenInEditorCallback>,
 }
 
 impl<F: FileEntry + 'static> FileExplorer<F> {
@@ -188,6 +196,7 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
       on_file_select: None,
       on_close_viewer: None,
       on_symlink_click: None,
+      on_open_in_editor: None,
     }
   }
 
@@ -244,6 +253,16 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
     self
   }
 
+  /// Set callback for opening a file or folder in external editor
+  /// Callback receives &(path, `is_directory`)
+  pub fn on_open_in_editor<C>(mut self, callback: C) -> Self
+  where
+    C: Fn(&(String, bool), &mut Window, &mut App) + 'static,
+  {
+    self.on_open_in_editor = Some(Rc::new(callback));
+    self
+  }
+
   /// Render the file explorer
   pub fn render(self, _window: &mut Window, cx: &App) -> gpui::AnyElement {
     let colors = &cx.theme().colors;
@@ -251,6 +270,11 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
     // Check if disabled
     if let Some(ref disabled_msg) = self.config.disabled_message {
       return Self::render_disabled(disabled_msg, cx).into_any_element();
+    }
+
+    // Check if there's an error
+    if let Some(ref error) = self.state.error {
+      return Self::render_error(error, cx).into_any_element();
     }
 
     // Check if viewing file content
@@ -266,9 +290,11 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
     let on_navigate_up = self.on_navigate.clone();
     let on_file_select = self.on_file_select.clone();
     let on_symlink_click = self.on_symlink_click.clone();
+    let on_open_in_editor = self.on_open_in_editor.clone();
 
     // Calculate parent path
     let parent_path = calculate_parent_path(current_path);
+    let editor_path = current_path.clone();
 
     let mut file_list = v_flex().gap(px(2.));
 
@@ -276,43 +302,55 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
       let file_path_nav = file.path().to_string();
       let file_path_select = file.path().to_string();
       let file_path_symlink = file.path().to_string();
+      let file_path_menu = file.path().to_string();
       let is_dir = file.is_dir();
       let is_symlink = file.is_symlink();
       let nav_cb = on_navigate.clone();
       let select_cb = on_file_select.clone();
       let symlink_cb = on_symlink_click.clone();
+      let editor_cb = on_open_in_editor.clone();
+
+      // Build context menu for this file
+      let menu = Self::build_file_context_menu(&file_path_menu, is_dir, editor_cb, cx);
 
       file_list = file_list.child(
-        self
-          .render_file_entry(file, cx)
-          .cursor_pointer()
-          // Symlinks get special handling - resolve and follow
-          .when(is_symlink && symlink_cb.is_some(), |el| {
-            el.when_some(symlink_cb, move |el, cb| {
-              let path = file_path_symlink.clone();
-              el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
-                cb(&path, window, cx);
+        h_flex()
+          .w_full()
+          .items_center()
+          .child(
+            self
+              .render_file_entry(file, cx)
+              .flex_1()
+              .cursor_pointer()
+              // Symlinks get special handling - resolve and follow
+              .when(is_symlink && symlink_cb.is_some(), |el| {
+                el.when_some(symlink_cb, move |el, cb| {
+                  let path = file_path_symlink.clone();
+                  el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
+                    cb(&path, window, cx);
+                  })
+                })
               })
-            })
-          })
-          // Directories navigate into them
-          .when(is_dir && !is_symlink, |el| {
-            el.when_some(nav_cb, move |el, cb| {
-              let path = file_path_nav.clone();
-              el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
-                cb(&path, window, cx);
+              // Directories navigate into them
+              .when(is_dir && !is_symlink, |el| {
+                el.when_some(nav_cb, move |el, cb| {
+                  let path = file_path_nav.clone();
+                  el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
+                    cb(&path, window, cx);
+                  })
+                })
               })
-            })
-          })
-          // Regular files open file viewer
-          .when(!is_dir && !is_symlink, |el| {
-            el.when_some(select_cb, move |el, cb| {
-              let path = file_path_select.clone();
-              el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
-                cb(&path, window, cx);
-              })
-            })
-          }),
+              // Regular files open file viewer
+              .when(!is_dir && !is_symlink, |el| {
+                el.when_some(select_cb, move |el, cb| {
+                  let path = file_path_select.clone();
+                  el.on_mouse_down(gpui::MouseButton::Left, move |_ev, window, cx| {
+                    cb(&path, window, cx);
+                  })
+                })
+              }),
+          )
+          .child(menu),
       );
     }
 
@@ -345,7 +383,18 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
               .text_sm()
               .text_color(colors.secondary_foreground)
               .child(current_path.clone()),
-          ),
+          )
+          .when_some(on_open_in_editor, move |el, cb| {
+            el.child(
+              Button::new("open-in-editor")
+                .icon(IconName::ExternalLink)
+                .ghost()
+                .compact()
+                .on_click(move |_ev, window, cx| {
+                  cb(&(editor_path.clone(), true), window, cx);
+                }),
+            )
+          }),
       )
       .child(
         div()
@@ -403,11 +452,49 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
       )
   }
 
+  fn render_error(error: &str, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+
+    // Parse error to show friendlier message
+    let error_message = if error.contains("No such container")
+      || error.contains("container not found")
+      || error.contains("is not running")
+    {
+      "Container is not running or no longer exists".to_string()
+    } else if error.contains("Permission denied") {
+      "Permission denied - cannot access this directory".to_string()
+    } else if error.contains("No such file or directory") {
+      "Directory does not exist".to_string()
+    } else {
+      format!("Failed to list files: {error}")
+    };
+
+    v_flex()
+      .flex_1()
+      .w_full()
+      .p(px(16.))
+      .items_center()
+      .justify_center()
+      .gap(px(16.))
+      .child(Icon::new(IconName::CircleX).size(px(48.)).text_color(colors.danger))
+      .child(
+        div()
+          .text_sm()
+          .text_color(colors.danger)
+          .max_w(px(400.))
+          .text_center()
+          .child(error_message),
+      )
+  }
+
   fn render_file_viewer(&self, file_path: &str, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let is_loading = self.state.file_content_loading;
+    let has_error = self.state.file_content_error.is_some();
     let on_close = self.on_close_viewer.clone();
+    let on_open_in_editor = self.on_open_in_editor.clone();
+    let file_path_for_editor = file_path.to_string();
 
     // Extract file name from path
     let file_name = file_path.rsplit('/').next().unwrap_or(file_path).to_string();
@@ -453,19 +540,70 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
               .overflow_hidden()
               .text_ellipsis()
               .child(file_path.to_string()),
-          ),
+          )
+          // Open in Editor button
+          .when_some(on_open_in_editor, move |el, cb| {
+            el.child(
+              Button::new("open-file-in-editor")
+                .icon(IconName::ExternalLink)
+                .ghost()
+                .compact()
+                .on_click(move |_ev, window, cx| {
+                  cb(&(file_path_for_editor.clone(), false), window, cx);
+                }),
+            )
+          }),
       )
       .when(is_loading, |el| {
         el.child(
           div().flex_1().flex().items_center().justify_center().child(
-            div()
-              .text_sm()
-              .text_color(colors.muted_foreground)
-              .child("Loading file..."),
+            v_flex()
+              .items_center()
+              .gap(px(16.))
+              .child(
+                Icon::new(IconName::Loader)
+                  .size(px(32.))
+                  .text_color(colors.muted_foreground),
+              )
+              .child(
+                div()
+                  .text_sm()
+                  .text_color(colors.muted_foreground)
+                  .child("Loading file..."),
+              ),
           ),
         )
       })
-      .when(!is_loading, |el| {
+      .when(!is_loading && has_error, |el| {
+        let error = self.state.file_content_error.clone().unwrap_or_default();
+        let error_message = if error.contains("Permission denied") {
+          "Permission denied - cannot read this file".to_string()
+        } else if error.contains("Is a directory") {
+          "Cannot read a directory as a file".to_string()
+        } else if error.contains("Binary file") || error.contains("binary") {
+          "Cannot display binary file contents".to_string()
+        } else {
+          format!("Failed to read file: {error}")
+        };
+
+        el.child(
+          div().flex_1().flex().items_center().justify_center().child(
+            v_flex()
+              .items_center()
+              .gap(px(16.))
+              .child(Icon::new(IconName::CircleX).size(px(48.)).text_color(colors.danger))
+              .child(
+                div()
+                  .text_sm()
+                  .text_color(colors.danger)
+                  .max_w(px(400.))
+                  .text_center()
+                  .child(error_message),
+              ),
+          ),
+        )
+      })
+      .when(!is_loading && !has_error, |el| {
         if let Some(ref editor) = self.file_content_editor {
           el.child(
             div()
@@ -489,6 +627,74 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
               .child(content),
           )
         }
+      })
+  }
+
+  /// Build context menu for a file entry
+  fn build_file_context_menu(
+    path: &str,
+    is_dir: bool,
+    on_open_in_editor: Option<OpenInEditorCallback>,
+    _cx: &App,
+  ) -> impl IntoElement {
+    let path_owned = path.to_string();
+    let editor_cb = on_open_in_editor;
+    let button_id = SharedString::from(format!("file-menu-{path}"));
+
+    Button::new(button_id)
+      .icon(IconName::Ellipsis)
+      .ghost()
+      .compact()
+      .dropdown_menu(move |menu, _window, _cx| {
+        let mut menu = menu;
+        let path_for_editor = path_owned.clone();
+        let path_for_copy = path_owned.clone();
+        let path_for_name = path_owned.clone();
+
+        // Open in Editor action (only if callback is provided)
+        if let Some(ref cb) = editor_cb {
+          let cb = cb.clone();
+          let path = path_for_editor.clone();
+          let label = if is_dir {
+            "Open Folder in Editor"
+          } else {
+            "Open in Editor"
+          };
+          menu = menu.item(
+            PopupMenuItem::new(label)
+              .icon(Icon::new(IconName::ExternalLink))
+              .on_click(move |_, window, cx| {
+                cb(&(path.clone(), is_dir), window, cx);
+              }),
+          );
+        }
+
+        // Copy Path action
+        menu = menu.item(
+          PopupMenuItem::new("Copy Path")
+            .icon(Icon::new(IconName::Copy))
+            .on_click(move |_, _, cx| {
+              cx.write_to_clipboard(gpui::ClipboardItem::new_string(path_for_copy.clone()));
+            }),
+        );
+
+        // Copy name action
+        let name_label = if is_dir { "Copy Folder Name" } else { "Copy File Name" };
+        let name_icon = if is_dir { IconName::Folder } else { IconName::File };
+        menu = menu.item(
+          PopupMenuItem::new(name_label)
+            .icon(Icon::new(name_icon))
+            .on_click(move |_, _, cx| {
+              // Extract name from path
+              let name = path_for_name
+                .rsplit('/')
+                .find(|s| !s.is_empty())
+                .unwrap_or(&path_for_name);
+              cx.write_to_clipboard(gpui::ClipboardItem::new_string(name.to_string()));
+            }),
+        );
+
+        menu
       })
   }
 

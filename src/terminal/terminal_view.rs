@@ -3,8 +3,11 @@ use gpui::{
   ScrollWheelEvent, Styled, Window, div, prelude::*, px,
 };
 use gpui_component::{
+  Icon, IconName,
   button::{Button, ButtonVariants},
+  h_flex,
   theme::ActiveTheme,
+  v_flex,
 };
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -131,25 +134,49 @@ impl Render for TerminalView {
     let cursor_color = colors.link;
 
     if let Some(err) = error {
-      // Error state
+      // Error state - show helpful message with icon and reconnect option
+      let error_message =
+        if err.contains("No such container") || err.contains("container not found") || err.contains("is not running") {
+          "Container is not running or no longer exists".to_string()
+        } else if err.contains("OCI runtime exec failed")
+          || err.contains("executable file not found")
+          || err.contains("no such file or directory")
+        {
+          "Container does not have a shell available (minimal image)".to_string()
+        } else {
+          format!("Connection failed: {err}")
+        };
+
       return div()
         .id("terminal-error")
         .size_full()
         .bg(bg_color)
         .flex()
-        .flex_col()
         .items_center()
         .justify_center()
-        .child(div().text_sm().text_color(colors.danger).child(err))
         .child(
-          div().mt(px(16.)).child(
-            Button::new("reconnect")
-              .label("Reconnect")
-              .primary()
-              .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.connect(cx);
-              })),
-          ),
+          v_flex()
+            .items_center()
+            .gap(px(16.))
+            .child(Icon::new(IconName::CircleX).size(px(48.)).text_color(colors.danger))
+            .child(
+              div()
+                .text_sm()
+                .text_color(colors.danger)
+                .max_w(px(400.))
+                .text_center()
+                .child(error_message),
+            )
+            .child(
+              h_flex().gap(px(8.)).child(
+                Button::new("reconnect")
+                  .label("Reconnect")
+                  .primary()
+                  .on_click(cx.listener(|this, _ev, _window, cx| {
+                    this.connect(cx);
+                  })),
+              ),
+            ),
         )
         .into_any_element();
     }
@@ -163,7 +190,22 @@ impl Render for TerminalView {
         .flex()
         .items_center()
         .justify_center()
-        .child(div().text_sm().text_color(text_color).child("Connecting..."))
+        .child(
+          v_flex()
+            .items_center()
+            .gap(px(16.))
+            .child(
+              Icon::new(IconName::Loader)
+                .size(px(48.))
+                .text_color(colors.muted_foreground),
+            )
+            .child(
+              div()
+                .text_sm()
+                .text_color(colors.muted_foreground)
+                .child("Connecting to container..."),
+            ),
+        )
         .into_any_element();
     }
 

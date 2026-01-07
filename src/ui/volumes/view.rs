@@ -129,11 +129,16 @@ impl VolumesView {
       state.set_selection(Selection::Volume(volume.name.clone()));
     });
 
-    // Reset view-specific state
-    self.active_tab = 0;
+    // Reset view-specific state but keep active_tab
+    // This allows users to stay on their current tab when switching volumes
     self.volume_tab_state = VolumeTabState::new();
     self.file_content_editor = None;
     self.last_synced_file_content.clear();
+
+    // If on Files tab, load the file list for the new volume
+    if self.active_tab == 1 {
+      self.load_volume_files("/", cx);
+    }
 
     cx.notify();
   }

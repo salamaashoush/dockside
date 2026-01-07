@@ -772,3 +772,83 @@ pub fn run_provision_script(name: String, script: String, as_root: bool, cx: &mu
   })
   .detach();
 }
+
+/// Open a machine folder in an external editor (VS Code, Cursor, or Zed)
+///
+/// For VS Code and Cursor, uses the SSH Remote extension.
+/// For Zed, uses SSH remote connection.
+///
+/// # Arguments
+/// * `profile` - The colima profile name
+/// * `path` - The path inside the machine to open
+pub fn open_machine_in_editor(profile: &str, path: &str, cx: &mut App) {
+  use crate::state::settings_state;
+  use std::process::Command;
+
+  let settings = settings_state(cx).read(cx);
+  let editor = settings.settings.external_editor.clone();
+  let disp = dispatcher(cx);
+
+  // Build SSH host from colima profile
+  // Colima sets up SSH config entries like "colima" or "colima-<profile>"
+  let ssh_host = if profile == "default" {
+    "colima".to_string()
+  } else {
+    format!("colima-{profile}")
+  };
+
+  // Handle VS Code / Cursor with SSH Remote
+  if editor.supports_container_attach() {
+    // VS Code/Cursor use: code --remote ssh-remote+<host> <path>
+    let command = editor.command();
+
+    let result = Command::new(command)
+      .arg("--remote")
+      .arg(format!("ssh-remote+{ssh_host}"))
+      .arg(path)
+      .spawn();
+
+    match result {
+      Ok(_) => {
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Opening machine in {} via SSH", editor.display_name()),
+          });
+        });
+      }
+      Err(e) => {
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to open {}: {e}", editor.display_name()),
+          });
+        });
+      }
+    }
+    return;
+  }
+
+  // Handle Zed with SSH
+  if editor.supports_ssh() {
+    // Build SSH URL for Zed: zed ssh://<host>/<path>
+    let ssh_url = format!("ssh://{ssh_host}{path}");
+
+    let result = Command::new(editor.command()).arg(ssh_url).spawn();
+
+    match result {
+      Ok(_) => {
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Opening machine in {} via SSH", editor.display_name()),
+          });
+        });
+      }
+      Err(e) => {
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to open {}: {e}", editor.display_name()),
+          });
+        });
+      }
+    }
+  }
+}

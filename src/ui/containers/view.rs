@@ -378,11 +378,15 @@ impl ContainersView {
       state.set_selection(Selection::Container(container.clone()));
     });
 
-    // Reset view-specific state
-    self.active_tab = ContainerDetailTab::Info;
+    // Reset view-specific state but keep active_tab
+    // This allows users to stay on their current tab when switching containers
     self.terminal_view = None;
     self.last_synced_logs.clear();
     self.last_synced_inspect.clear();
+    self.last_synced_file_content.clear();
+
+    // Reset file explorer state to root
+    self.container_tab_state = ContainerTabState::new();
 
     // Create editors for logs and inspect with syntax highlighting
     // Note: code_editor() is required for replace() method to work
@@ -404,8 +408,16 @@ impl ContainersView {
         .soft_wrap(false)
     }));
 
-    // Load logs for the selected container
+    // Reset file content editor
+    self.file_content_editor = None;
+
+    // Load data for the selected container
     self.load_container_data(&container.id, window, cx);
+
+    // If on Files tab, load the file list for the new container
+    if self.active_tab == ContainerDetailTab::Files {
+      self.on_navigate_path("/", cx);
+    }
 
     cx.notify();
   }
@@ -449,6 +461,7 @@ impl ContainersView {
   fn load_container_files(&mut self, container_id: &str, path: &str, cx: &mut Context<'_, Self>) {
     self.container_tab_state.files_loading = true;
     self.container_tab_state.files.clear();
+    self.container_tab_state.files_error = None;
     cx.notify();
 
     let id = container_id.to_string();
@@ -457,21 +470,30 @@ impl ContainersView {
     let client = services::docker_client();
 
     cx.spawn(async move |this, cx| {
-      let files = cx
+      let result = cx
         .background_executor()
         .spawn(async move {
           tokio_handle.block_on(async {
             let guard = client.read().await;
             match guard.as_ref() {
-              Some(c) => c.list_container_files(&id, &path).await.ok(),
-              None => None,
+              Some(c) => c.list_container_files(&id, &path).await,
+              None => Err(anyhow::anyhow!("Docker client not connected")),
             }
           })
         })
         .await;
 
       let _ = this.update(cx, |this, cx| {
-        this.container_tab_state.files = files.unwrap_or_default();
+        match result {
+          Ok(files) => {
+            this.container_tab_state.files = files;
+            this.container_tab_state.files_error = None;
+          }
+          Err(e) => {
+            this.container_tab_state.files = Vec::new();
+            this.container_tab_state.files_error = Some(e.to_string());
+          }
+        }
         this.container_tab_state.files_loading = false;
         cx.notify();
       });
@@ -499,6 +521,7 @@ impl ContainersView {
     // Set selected file in state
     self.container_tab_state.selected_file = Some(path.to_string());
     self.container_tab_state.file_content_loading = true;
+    self.container_tab_state.file_content_error = None;
     cx.notify();
 
     // Load file content
@@ -510,6 +533,7 @@ impl ContainersView {
   fn on_close_file_viewer(&mut self, cx: &mut Context<'_, Self>) {
     self.container_tab_state.selected_file = None;
     self.container_tab_state.file_content.clear();
+    self.container_tab_state.file_content_error = None;
     self.file_content_editor = None;
     self.last_synced_file_content.clear();
     cx.notify();
@@ -522,21 +546,30 @@ impl ContainersView {
     let client = services::docker_client();
 
     cx.spawn(async move |this, cx| {
-      let content = cx
+      let result = cx
         .background_executor()
         .spawn(async move {
           tokio_handle.block_on(async {
             let guard = client.read().await;
             match guard.as_ref() {
-              Some(c) => c.read_container_file(&id, &path).await.ok(),
-              None => None,
+              Some(c) => c.read_container_file(&id, &path).await,
+              None => Err(anyhow::anyhow!("Docker client not connected")),
             }
           })
         })
         .await;
 
       let _ = this.update(cx, |this, cx| {
-        this.container_tab_state.file_content = content.unwrap_or_else(|| "Failed to read file".to_string());
+        match result {
+          Ok(content) => {
+            this.container_tab_state.file_content = content;
+            this.container_tab_state.file_content_error = None;
+          }
+          Err(e) => {
+            this.container_tab_state.file_content.clear();
+            this.container_tab_state.file_content_error = Some(e.to_string());
+          }
+        }
         this.container_tab_state.file_content_loading = false;
         cx.notify();
       });
@@ -615,6 +648,21 @@ impl ContainersView {
         });
       })
       .detach();
+    }
+  }
+
+  fn on_open_in_editor(&mut self, data: &(String, bool), _window: &mut Window, cx: &mut Context<'_, Self>) {
+    let (path, is_dir) = data;
+    if let Some(ref container) = self.selected_container(cx) {
+      // Find SSH port (port 22 mapped to host)
+      let ssh_port = container
+        .ports
+        .iter()
+        .find(|p| p.private_port == 22)
+        .and_then(|p| p.public_port);
+
+      // Use container name for VS Code/Cursor Dev Containers extension
+      services::open_container_in_editor(&container.name, path, *is_dir, ssh_port, cx);
     }
   }
 
@@ -770,6 +818,9 @@ impl Render for ContainersView {
       }))
       .on_symlink_click(cx.listener(|this, path: &str, window, cx| {
         this.on_symlink_follow(path, window, cx);
+      }))
+      .on_open_in_editor(cx.listener(|this, data: &(String, bool), window, cx| {
+        this.on_open_in_editor(data, window, cx);
       }))
       .on_start(cx.listener(|_this, id: &str, _window, cx| {
         services::start_container(id.to_string(), cx);

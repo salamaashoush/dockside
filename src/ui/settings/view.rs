@@ -13,7 +13,7 @@ use gpui_component::{
 
 use crate::assets::AppIcon;
 use crate::colima::ColimaClient;
-use crate::state::{SettingsChanged, SettingsState, ThemeName, settings_state};
+use crate::state::{ExternalEditor, SettingsChanged, SettingsState, ThemeName, settings_state};
 
 /// Theme wrapper for Select
 #[derive(Debug, Clone)]
@@ -45,11 +45,42 @@ impl SelectItem for ThemeOption {
   }
 }
 
+/// External editor wrapper for Select
+#[derive(Debug, Clone)]
+struct EditorOption {
+  editor: ExternalEditor,
+  label: SharedString,
+}
+
+impl EditorOption {
+  fn new(editor: ExternalEditor) -> Self {
+    let label = SharedString::from(editor.display_name().to_string());
+    Self { editor, label }
+  }
+
+  fn all() -> Vec<Self> {
+    ExternalEditor::all().into_iter().map(Self::new).collect()
+  }
+}
+
+impl SelectItem for EditorOption {
+  type Value = EditorOption;
+
+  fn value(&self) -> &Self::Value {
+    self
+  }
+
+  fn title(&self) -> SharedString {
+    self.label.clone()
+  }
+}
+
 /// Settings view - full page settings
 pub struct SettingsView {
   settings_state: Entity<SettingsState>,
   // Form state
   theme_select: Option<Entity<SelectState<Vec<ThemeOption>>>>,
+  editor_select: Option<Entity<SelectState<Vec<EditorOption>>>>,
   docker_socket_input: Option<Entity<InputState>>,
   colima_profile_input: Option<Entity<InputState>>,
   container_refresh_input: Option<Entity<InputState>>,
@@ -73,6 +104,7 @@ impl SettingsView {
     Self {
       settings_state,
       theme_select: None,
+      editor_select: None,
       docker_socket_input: None,
       colima_profile_input: None,
       container_refresh_input: None,
@@ -120,6 +152,15 @@ impl SettingsView {
     .detach();
 
     self.theme_select = Some(theme_select);
+
+    // Initialize editor select
+    let editors = EditorOption::all();
+    let current_editor_idx = editors
+      .iter()
+      .position(|e| e.editor == settings.external_editor)
+      .unwrap_or(0);
+    let editor_select = cx.new(|cx| SelectState::new(editors, Some(IndexPath::new(current_editor_idx)), window, cx));
+    self.editor_select = Some(editor_select);
 
     self.docker_socket_input = Some(cx.new(|cx| {
       InputState::new(window, cx)
@@ -194,6 +235,9 @@ impl SettingsView {
     let Some(theme_select) = &self.theme_select else {
       return;
     };
+    let Some(editor_select) = &self.editor_select else {
+      return;
+    };
 
     // Get current values from inputs
     let docker_socket = docker_socket_input.read(cx).text().to_string();
@@ -230,6 +274,13 @@ impl SettingsView {
       .map(|opt| opt.theme.clone())
       .unwrap_or_default();
 
+    // Get selected external editor
+    let external_editor = editor_select
+      .read(cx)
+      .selected_value()
+      .map(|opt| opt.editor.clone())
+      .unwrap_or_default();
+
     // Apply the theme immediately using ThemeRegistry
     let theme_name = SharedString::from(theme.theme_name().to_string());
     if let Some(theme_config) = ThemeRegistry::global(cx).themes().get(&theme_name).cloned() {
@@ -246,6 +297,7 @@ impl SettingsView {
       state.settings.max_log_lines = log_lines;
       state.settings.terminal_font_size = font_size;
       state.settings.theme = theme.clone();
+      state.settings.external_editor = external_editor;
       let _ = state.settings.save();
 
       if old_theme != theme {
@@ -474,6 +526,7 @@ impl Render for SettingsView {
 
     let content = if let (
       Some(theme_select),
+      Some(editor_select),
       Some(docker_socket_input),
       Some(colima_profile_input),
       Some(container_refresh_input),
@@ -482,6 +535,7 @@ impl Render for SettingsView {
       Some(font_size_input),
     ) = (
       &self.theme_select,
+      &self.editor_select,
       &self.docker_socket_input,
       &self.colima_profile_input,
       &self.container_refresh_input,
@@ -499,6 +553,14 @@ impl Render for SettingsView {
                     "Theme",
                     "Choose the color theme for the application",
                     Select::new(theme_select).w_full().small(),
+                    cx,
+                ))
+                // Editor section
+                .child(Self::render_section_header("External Editor", cx))
+                .child(Self::render_form_row(
+                    "Editor",
+                    "Editor for opening container files remotely",
+                    Select::new(editor_select).w_full().small(),
                     cx,
                 ))
                 // Docker section
