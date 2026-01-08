@@ -349,14 +349,14 @@ impl Render for TerminalView {
         let is_cursor = show_cursor && col_idx == content.cursor_col;
 
         // Get cell colors
-        let cell_fg = rgb_to_hsla(cell.fg.0, cell.fg.1, cell.fg.2);
-        let cell_bg = rgb_to_hsla(cell.bg.0, cell.bg.1, cell.bg.2);
+        let foreground = rgb_to_hsla(cell.fg.0, cell.fg.1, cell.fg.2);
+        let background = rgb_to_hsla(cell.bg.0, cell.bg.1, cell.bg.2);
 
         // Apply dim effect by reducing saturation/lightness
-        let cell_fg = if cell.dim {
-          hsla(cell_fg.h, cell_fg.s * 0.7, cell_fg.l * 0.7, cell_fg.a)
+        let foreground = if cell.dim {
+          hsla(foreground.h, foreground.s * 0.7, foreground.l * 0.7, foreground.a)
         } else {
-          cell_fg
+          foreground
         };
 
         let char_str = if cell.char == '\0' || cell.char == ' ' {
@@ -368,8 +368,8 @@ impl Render for TerminalView {
         let mut cell_div = div()
           .text_size(px(font_size))
           .font_family("monospace")
-          .text_color(cell_fg)
-          .bg(cell_bg)
+          .text_color(foreground)
+          .bg(background)
           .child(char_str);
 
         // Apply text styles
