@@ -102,31 +102,30 @@ jobs:
             # Extract content between version headers
             awk "/^## \[$VERSION\]/{found=1; next} /^## \[/{found=0} found" CHANGELOG.md > changelog.md
 
-            # If we got content, prepend a header
+            # If we got content, add installation section
             if [[ -s changelog.md ]]; then
-              # Add installation section
-              cat >> changelog.md << 'EOF'
-
-## Installation
-
-### Quick Install (macOS)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/install.sh | bash
-```
-
-### Manual Installation
-
-Download `Dockside-vX.X.X-macos-arm64.zip` from the assets below, extract, and move `Dockside.app` to `/Applications`.
-
-### Build from Source
-
-```bash
-git clone https://github.com/salamaashoush/dockside
-cd dockside
-just bundle
-```
-EOF
+              {
+                echo ""
+                echo "## Installation"
+                echo ""
+                echo "### Quick Install (macOS)"
+                echo ""
+                echo '```bash'
+                echo "curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/install.sh | bash"
+                echo '```'
+                echo ""
+                echo "### Manual Installation"
+                echo ""
+                echo 'Download `Dockside-vX.X.X-macos-arm64.zip` from the assets below, extract, and move `Dockside.app` to `/Applications`.'
+                echo ""
+                echo "### Build from Source"
+                echo ""
+                echo '```bash'
+                echo "git clone https://github.com/salamaashoush/dockside"
+                echo "cd dockside"
+                echo "just bundle"
+                echo '```'
+              } >> changelog.md
             else
               # Fallback if version not found in changelog
               echo "## What's Changed" > changelog.md
