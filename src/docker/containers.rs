@@ -4,6 +4,7 @@ use bollard::models::{ContainerCreateBody, HostConfig};
 use bollard::query_parameters::{
   CommitContainerOptions, CreateContainerOptions, KillContainerOptions, ListContainersOptions, LogsOptions,
   RemoveContainerOptions, RenameContainerOptions, RestartContainerOptions, StartContainerOptions, StopContainerOptions,
+  TopOptionsBuilder,
 };
 use chrono::{DateTime, Utc};
 use futures::stream::StreamExt;
@@ -589,13 +590,73 @@ impl DockerClient {
     Ok(output.map(|s| s.contains("dir")).unwrap_or(false))
   }
 
-  /// Get running processes in a container using ps aux inside the container
-  /// This uses docker exec to get PIDs from the container's namespace,
-  /// which allows us to kill processes using those same PIDs
+  /// Get running processes in a container using Docker's top API
+  ///
+  /// This uses Docker's native `top` endpoint which works for all containers,
+  /// even minimal ones that don't have `ps` installed.
+  /// Falls back to `docker exec ps aux` if the API fails.
+  ///
+  /// Returns output formatted like `ps aux` for compatibility with parsing.
   pub async fn get_container_processes(&self, id: &str) -> Result<String> {
-    // Use docker exec to run ps aux inside the container
-    // This gives us PIDs in the container's namespace, which is what we need for kill
-    self.exec_command(id, vec!["ps", "aux"]).await
+    let docker = self.client()?;
+
+    // First, try Docker's native top API - this works for all containers
+    // regardless of what binaries are installed
+    let top_opts = TopOptionsBuilder::new().ps_args("aux").build();
+    match docker.top_processes(id, Some(top_opts)).await {
+      Ok(top_result) => {
+        // Format the result like `ps aux` output
+        let mut output = String::new();
+
+        // Add header from titles
+        if let Some(titles) = &top_result.titles {
+          output.push_str(&titles.join("\t"));
+          output.push('\n');
+        }
+
+        // Add process rows
+        if let Some(processes) = &top_result.processes {
+          for proc in processes {
+            output.push_str(&proc.join("\t"));
+            output.push('\n');
+          }
+        }
+
+        if output.is_empty() || output.trim().lines().count() <= 1 {
+          // Only header or empty - return header so UI shows "No processes found"
+          return Ok("USER\tPID\t%CPU\t%MEM\tVSZ\tRSS\tTTY\tSTAT\tSTART\tTIME\tCOMMAND\n".to_string());
+        }
+
+        return Ok(output);
+      }
+      Err(e) => {
+        // Log the error but try fallback methods
+        tracing::debug!("Docker top API failed for container {id}: {e}, trying fallback methods");
+      }
+    }
+
+    // Fallback: try exec with different ps variants
+    // Some containers might have busybox ps, some might have procps
+    let ps_commands = [
+      vec!["ps", "aux"],                                     // Standard ps (procps)
+      vec!["ps", "-ef"],                                     // POSIX compatible
+      vec!["ps", "-eo", "user,pid,pcpu,pmem,vsz,rss,tty,stat,start,time,comm"], // Custom format
+      vec!["/bin/ps", "aux"],                                // Explicit path
+    ];
+
+    for cmd in &ps_commands {
+      match self.exec_command(id, cmd.iter().map(|s| *s).collect()).await {
+        Ok(output) if !output.is_empty() && !output.contains("not found") => {
+          return Ok(output);
+        }
+        Ok(_) | Err(_) => continue,
+      }
+    }
+
+    // If all methods fail, return an error with guidance
+    Err(anyhow::anyhow!(
+      "Could not get process list. The container may not have 'ps' installed and Docker top API failed."
+    ))
   }
 }
 

@@ -37,21 +37,74 @@ pub struct Process {
 }
 
 impl Process {
-  /// Parse a line from `ps aux` output
-  /// Format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+  /// Parse a line from `ps aux` output or Docker top output
+  /// Standard ps aux Format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+  /// Also handles variations like: UID PID PPID C STIME TTY TIME CMD (ps -ef format)
   pub fn from_ps_aux_line(line: &str) -> Option<Self> {
     let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() < 11 {
+
+    // Need at least 2 parts (user/uid and pid)
+    if parts.len() < 2 {
+      return None;
+    }
+
+    // Try to detect the format based on column count and content
+    // Docker top with aux: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND (11+ columns)
+    // ps -ef format: UID PID PPID C STIME TTY TIME CMD (8+ columns)
+    // Minimal format: PID CMD (2+ columns)
+
+    let (user, pid, cpu, mem, command) = if parts.len() >= 11 {
+      // Full ps aux format
+      let cmd = parts[10..].join(" ");
+      (
+        parts[0].to_string(),
+        parts[1].parse().unwrap_or(0),
+        parts[2].parse().unwrap_or(0.0),
+        parts[3].parse().unwrap_or(0.0),
+        cmd,
+      )
+    } else if parts.len() >= 8 {
+      // ps -ef format or similar - less columns, no CPU/MEM
+      let cmd = parts[7..].join(" ");
+      (
+        parts[0].to_string(),
+        parts[1].parse().unwrap_or(0),
+        0.0, // No CPU info in this format
+        0.0, // No MEM info in this format
+        cmd,
+      )
+    } else if parts.len() >= 4 {
+      // Minimal format with at least user, pid, and some command
+      let cmd = parts[3..].join(" ");
+      (
+        parts[0].to_string(),
+        parts[1].parse().unwrap_or(0),
+        0.0,
+        0.0,
+        cmd,
+      )
+    } else {
+      // Very minimal - just PID and command
+      let pid = parts[0].parse().ok().or_else(|| parts[1].parse().ok())?;
+      let cmd = if parts[0].parse::<u32>().is_ok() {
+        parts[1..].join(" ")
+      } else {
+        parts[2..].join(" ")
+      };
+      ("?".to_string(), pid, 0.0, 0.0, cmd)
+    };
+
+    // Skip if pid is 0 (parsing failed)
+    if pid == 0 {
       return None;
     }
 
     Some(Self {
-      user: parts[0].to_string(),
-      pid: parts[1].parse().unwrap_or(0),
-      cpu_percent: parts[2].parse().unwrap_or(0.0),
-      mem_percent: parts[3].parse().unwrap_or(0.0),
-      // parts[4..9] are VSZ, RSS, TTY, STAT, START, TIME - skipped
-      command: parts[10..].join(" "),
+      user,
+      pid,
+      cpu_percent: cpu,
+      mem_percent: mem,
+      command,
     })
   }
 }
