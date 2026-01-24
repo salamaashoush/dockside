@@ -1761,6 +1761,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "gpui-component-assets",
+ "gtk",
  "hex",
  "http-body-util",
  "image",
