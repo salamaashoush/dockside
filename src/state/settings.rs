@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::platform::get_config_dir;
+
 /// Available themes (matching themes in themes/ directory JSON files)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ThemeName {
@@ -264,9 +266,12 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+  /// Get the platform-specific settings file path
+  /// - macOS: `~/Library/Application Support/dockside/settings.json`
+  /// - Linux: `~/.config/dockside/settings.json` (XDG_CONFIG_HOME)
+  /// - Windows: `%APPDATA%/dockside/settings.json`
   fn config_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".config").join("docker-ui").join("settings.json")
+    get_config_dir().join("settings.json")
   }
 
   pub fn load() -> Self {
