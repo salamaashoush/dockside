@@ -5,6 +5,7 @@ mod docker;
 mod keybindings;
 mod kubernetes;
 mod menus;
+mod platform;
 mod services;
 mod state;
 mod terminal;
@@ -25,10 +26,30 @@ use gpui_component::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use platform::Platform;
 use state::{AppSettings, CurrentView};
 use tray::{AppTray, menu_ids};
 
 pub use assets::Assets;
+
+/// Get platform-specific titlebar options
+fn get_titlebar_options() -> TitlebarOptions {
+    let platform = Platform::detect();
+
+    match platform {
+        Platform::MacOS => TitlebarOptions {
+            title: Some("Dockside".into()),
+            appears_transparent: true,
+            traffic_light_position: Some(gpui::point(px(9.), px(9.))),
+        },
+        // Linux and Windows don't have traffic lights
+        Platform::Linux | Platform::WindowsWsl2 | Platform::Windows => TitlebarOptions {
+            title: Some("Dockside".into()),
+            appears_transparent: false,
+            traffic_light_position: None,
+        },
+    }
+}
 
 /// Open the main application window
 fn open_main_window(cx: &mut App) -> WindowHandle<Root> {
@@ -38,11 +59,7 @@ fn open_main_window(cx: &mut App) -> WindowHandle<Root> {
     .open_window(
       WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions {
-          title: Some("Dockside".into()),
-          appears_transparent: true,
-          traffic_light_position: Some(gpui::point(px(9.), px(9.))),
-        }),
+        titlebar: Some(get_titlebar_options()),
         ..Default::default()
       },
       |window, cx| {
@@ -124,7 +141,8 @@ fn main() {
 
   let app = gpui::Application::new().with_assets(Assets);
 
-  // Handle dock icon click when no windows are open
+  // Handle dock icon click when no windows are open (macOS-specific)
+  #[cfg(target_os = "macos")]
   app.on_reopen(|cx| {
     if cx.windows().is_empty() {
       open_main_window(cx);
