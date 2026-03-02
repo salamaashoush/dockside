@@ -1,4 +1,4 @@
-# Deckhand
+# Dockside
 
 A native macOS desktop application for managing Docker containers, images, volumes, networks, and Kubernetes resources via Colima.
 
@@ -24,30 +24,30 @@ Built with [GPUI](https://gpui.rs) for a fast, native experience.
 ### Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/salamaashoush/deckhand/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/install.sh | bash
 ```
 
-This will install Deckhand and optionally set up Docker and Colima if not already installed.
+This will install Dockside and optionally set up Docker and Colima if not already installed.
 
 ### Manual Installation
 
-Download the latest release from the [Releases page](https://github.com/salamaashoush/deckhand/releases).
+Download the latest release from the [Releases page](https://github.com/salamaashoush/dockside/releases).
 
 **macOS App Bundle:**
-1. Download `Deckhand-vX.X.X.app.zip`
+1. Download `dockside-vX.X.X.app.zip`
 2. Extract and move to `/Applications`
 
 **CLI Binary:**
-1. Download `deckhand-vX.X.X-aarch64-apple-darwin.tar.gz` (Apple Silicon) or `deckhand-vX.X.X-x86_64-apple-darwin.tar.gz` (Intel)
-2. Extract: `tar -xzf deckhand-*.tar.gz`
-3. Move to PATH: `mv deckhand ~/.local/bin/`
+1. Download `dockside-vX.X.X-aarch64-apple-darwin.tar.gz` (Apple Silicon) or `dockside-vX.X.X-x86_64-apple-darwin.tar.gz` (Intel)
+2. Extract: `tar -xzf dockside-*.tar.gz`
+3. Move to PATH: `mv dockside ~/.local/bin/`
 
 ### Build from Source
 
 ```bash
 # Clone the repo
-git clone https://github.com/salamaashoush/deckhand
-cd deckhand
+git clone https://github.com/salamaashoush/dockside
+cd dockside
 
 # Install dependencies
 just install-deps
@@ -66,7 +66,7 @@ just bundle
 
 ### Starting Colima
 
-Before using Deckhand, start Colima:
+Before using Dockside, start Colima:
 
 ```bash
 # Standard Docker runtime
@@ -83,17 +83,17 @@ just start-colima      # Standard
 just start-colima-k8s  # With Kubernetes
 ```
 
-### Running Deckhand
+### Running Dockside
 
 ```bash
 # Run from source
 just run
 
 # Or run installed binary
-deckhand
+dockside
 
 # Or open the app bundle
-open /Applications/Deckhand.app
+open /Applications/dockside.app
 ```
 
 ## Development
@@ -152,7 +152,7 @@ just release-all patch       # Full release workflow
 ## Project Structure
 
 ```
-deckhand/
+dockside/
 ├── src/
 │   ├── main.rs           # Entry point
 │   ├── app.rs            # Main application
