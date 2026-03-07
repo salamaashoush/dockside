@@ -7,6 +7,7 @@ use gpui_component::{
   label::Label,
   scroll::ScrollableElement,
   select::{Select, SelectItem, SelectState},
+  switch::Switch,
   theme::{ActiveTheme, Theme, ThemeRegistry},
   v_flex,
 };
@@ -351,12 +352,56 @@ impl SettingsView {
     let colors = cx.theme().colors;
     let cache_size = self.cache_size.clone();
     let is_pruning = self.is_pruning;
+    let colima_enabled = self.settings_state.read(cx).settings.colima_enabled;
 
     v_flex()
       .w_full()
       .gap(px(4.))
-      // Cache row
+      // Enable Colima toggle
       .child(
+        h_flex()
+          .w_full()
+          .py(px(12.))
+          .justify_between()
+          .items_center()
+          .gap(px(16.))
+          .border_b_1()
+          .border_color(colors.border.opacity(0.5))
+          .child(
+            v_flex()
+              .flex_1()
+              .gap(px(2.))
+              .child(Label::new("Enable Colima").text_color(colors.foreground))
+              .child(
+                div()
+                  .text_xs()
+                  .text_color(colors.muted_foreground)
+                  .child("Manage Docker VMs with Colima (macOS/Linux)"),
+              ),
+          )
+          .child(
+            Switch::new("colima-enabled")
+              .checked(colima_enabled)
+              .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                if *checked {
+                  // Check if Colima is installed before enabling
+                  if !crate::utils::is_colima_installed() {
+                    // Show installation dialog
+                    this.show_colima_install_dialog(window, cx);
+                    return;
+                  }
+                }
+                this.settings_state.update(cx, |state, cx| {
+                  state.settings.colima_enabled = *checked;
+                  let _ = state.settings.save();
+                  cx.emit(SettingsChanged::SettingsUpdated);
+                });
+                cx.notify();
+              })),
+          ),
+      )
+      // Cache row (only show when Colima is enabled)
+      .when(colima_enabled, |el| el.child(
         h_flex()
           .w_full()
           .py(px(12.))
@@ -395,9 +440,9 @@ impl SettingsView {
                 })),
             ),
           ),
-      )
-      // Template row
-      .child(
+      ))
+      // Template row (only show when Colima is enabled)
+      .when(colima_enabled, |el| el.child(
         h_flex()
           .w_full()
           .py(px(12.))
@@ -428,7 +473,7 @@ impl SettingsView {
                 this.open_template_editor(window, cx);
               })),
           ),
-      )
+      ))
   }
 
   fn prune_cache(&mut self, cx: &mut Context<'_, Self>) {
@@ -513,6 +558,97 @@ impl SettingsView {
                 window.close_dialog(cx);
               }),
           ]
+        })
+    });
+  }
+
+  #[allow(clippy::unused_self)]
+  fn show_colima_install_dialog(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    use crate::platform::Platform;
+
+    let platform = Platform::detect();
+
+    let (install_cmd, install_description) = match platform {
+      Platform::MacOS => (
+        "brew install colima docker",
+        "Install Colima and Docker CLI using Homebrew. If you don't have Homebrew, visit https://brew.sh first.",
+      ),
+      Platform::Linux | Platform::WindowsWsl2 => (
+        "curl -fsSL https://github.com/abiosoft/colima/releases/latest/download/colima-Linux-x86_64 -o /usr/local/bin/colima && chmod +x /usr/local/bin/colima",
+        "Download Colima from GitHub releases. You may also install via package managers like apt, dnf, or pacman depending on your distribution.",
+      ),
+      Platform::Windows => (
+        "wsl --install",
+        "Colima is not supported on native Windows. Install WSL2, then run Dockside from within your WSL2 distribution where you can install Colima.",
+      ),
+    };
+
+    let install_cmd_for_copy = install_cmd.to_string();
+
+    window.open_dialog(cx, move |dialog, _window, cx| {
+      let colors = cx.theme().colors;
+      let cmd_for_button = install_cmd_for_copy.clone();
+      let has_command = !install_cmd_for_copy.is_empty();
+
+      dialog
+        .title("Colima Not Installed")
+        .width(px(550.))
+        .child(
+          v_flex()
+            .gap(px(16.))
+            .child(
+              div()
+                .text_sm()
+                .text_color(colors.foreground)
+                .child("Colima is not installed on your system. Colima is required to manage Docker VMs."),
+            )
+            .child(
+              div()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child(install_description),
+            )
+            .when(has_command, |el| {
+              el.child(
+                div()
+                  .w_full()
+                  .p(px(12.))
+                  .rounded(px(6.))
+                  .bg(colors.secondary)
+                  .border_1()
+                  .border_color(colors.border)
+                  .child(
+                    div()
+                      .text_sm()
+                      .font_family("monospace")
+                      .text_color(colors.foreground)
+                      .child(install_cmd_for_copy.clone()),
+                  ),
+              )
+            }),
+        )
+        .footer(move |_, _, _, _| {
+          let cmd = cmd_for_button.clone();
+          let mut buttons = vec![
+            Button::new("close-dialog")
+              .label("Close")
+              .ghost()
+              .on_click(|_, window, cx| {
+                window.close_dialog(cx);
+              }),
+          ];
+          if !cmd.is_empty() {
+            buttons.push(
+              Button::new("copy-command")
+                .label("Copy Command")
+                .primary()
+                .on_click(move |_, window, cx| {
+                  cx.write_to_clipboard(gpui::ClipboardItem::new_string(cmd.clone()));
+                  window.close_dialog(cx);
+                }),
+            );
+          }
+          buttons
         })
     });
   }

@@ -2,6 +2,7 @@
 
 use gpui::App;
 
+use crate::colima::MachineId;
 use crate::state::{
   ContainerDetailTab, CurrentView, DeploymentDetailTab, MachineDetailTab, PodDetailTab, ServiceDetailTab, StateChanged,
   docker_state,
@@ -64,23 +65,23 @@ pub fn open_container_files(id: String, cx: &mut App) {
 
 // ==================== Machine Tab Navigation ====================
 
-/// Open a machine's terminal tab
-pub fn open_machine_terminal(name: String, cx: &mut App) {
+/// Open a machine's terminal tab (Colima VMs only - Host doesn't support terminal)
+pub fn open_machine_terminal(machine_id: MachineId, cx: &mut App) {
   let state = docker_state(cx);
   state.update(cx, |_state, cx| {
     cx.emit(StateChanged::MachineTabRequest {
-      machine_name: name,
+      machine_id,
       tab: MachineDetailTab::Terminal,
     });
   });
 }
 
-/// Open a machine's files tab
-pub fn open_machine_files(name: String, cx: &mut App) {
+/// Open a machine's files tab (Colima VMs only - Host doesn't support file browsing)
+pub fn open_machine_files(machine_id: MachineId, cx: &mut App) {
   let state = docker_state(cx);
   state.update(cx, |_state, cx| {
     cx.emit(StateChanged::MachineTabRequest {
-      machine_name: name,
+      machine_id,
       tab: MachineDetailTab::Files,
     });
   });

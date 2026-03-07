@@ -226,6 +226,9 @@ pub struct AppSettings {
   pub docker_socket: String,
   /// Default Colima profile name
   pub default_colima_profile: String,
+  /// Enable Colima VM support (default: true on macOS, false on Linux)
+  #[serde(default = "default_colima_enabled")]
+  pub colima_enabled: bool,
   /// Refresh interval for containers (in seconds)
   pub container_refresh_interval: u64,
   /// Refresh interval for stats (in seconds)
@@ -246,12 +249,20 @@ pub struct AppSettings {
   pub external_editor: ExternalEditor,
 }
 
+/// Default value for colima_enabled based on platform
+fn default_colima_enabled() -> bool {
+  // Enable Colima by default on macOS (where it's the primary way to run Docker)
+  // Disable by default on Linux (where native Docker is preferred)
+  cfg!(target_os = "macos")
+}
+
 impl Default for AppSettings {
   fn default() -> Self {
     Self {
       theme: ThemeName::TokyoNight,
       docker_socket: String::new(),
       default_colima_profile: "default".to_string(),
+      colima_enabled: default_colima_enabled(),
       container_refresh_interval: 5,
       stats_refresh_interval: 2,
       max_log_lines: 1000,
@@ -427,6 +438,7 @@ mod tests {
       theme: ThemeName::GruvboxDark,
       docker_socket: "/custom/docker.sock".to_string(),
       default_colima_profile: "dev".to_string(),
+      colima_enabled: true,
       container_refresh_interval: 10,
       stats_refresh_interval: 5,
       max_log_lines: 5000,
@@ -488,6 +500,39 @@ mod tests {
       let name = theme.display_name();
       assert!(!name.is_empty(), "Theme {theme:?} should have a display name");
     }
+  }
+
+  #[test]
+  fn test_colima_enabled_default() {
+    let settings = AppSettings::default();
+    // On macOS, colima should be enabled by default
+    // On Linux, it should be disabled by default
+    #[cfg(target_os = "macos")]
+    assert!(settings.colima_enabled);
+    #[cfg(target_os = "linux")]
+    assert!(!settings.colima_enabled);
+  }
+
+  #[test]
+  fn test_colima_enabled_deserialization() {
+    // Test that old settings files without colima_enabled still work
+    let json = r#"{
+      "theme": "TokyoNight",
+      "docker_socket": "",
+      "default_colima_profile": "default",
+      "container_refresh_interval": 5,
+      "stats_refresh_interval": 2,
+      "max_log_lines": 1000,
+      "terminal_font_size": 14.0,
+      "terminal_line_height": 1.4,
+      "terminal_cursor_style": "Block",
+      "terminal_cursor_blink": true,
+      "terminal_scrollback_lines": 10000,
+      "external_editor": "VSCode"
+    }"#;
+    let settings: AppSettings = serde_json::from_str(json).expect("Failed to deserialize");
+    // Should use default value when field is missing
+    assert_eq!(settings.colima_enabled, default_colima_enabled());
   }
 
   #[test]

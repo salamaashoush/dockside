@@ -55,7 +55,7 @@ impl ColimaVersionInfo {
 }
 
 use crate::assets::AppIcon;
-use crate::colima::ColimaVm;
+use crate::colima::{ColimaVm, Machine};
 use crate::state::{MachineLogType, MachineTabState};
 use crate::terminal::TerminalView;
 use crate::ui::components::{FileExplorer, FileExplorerConfig, FileExplorerState, ProcessView};
@@ -70,7 +70,7 @@ type CopyCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type OpenInEditorCallback = Rc<dyn Fn(&(String, bool), &mut Window, &mut App) + 'static>;
 
 pub struct MachineDetail {
-  machine: Option<ColimaVm>,
+  machine: Option<Machine>,
   active_tab: MachineDetailTab,
   machine_state: Option<MachineTabState>,
   terminal_view: Option<Entity<TerminalView>>,
@@ -110,7 +110,7 @@ impl MachineDetail {
     }
   }
 
-  pub fn machine(mut self, machine: Option<ColimaVm>) -> Self {
+  pub fn machine(mut self, machine: Option<Machine>) -> Self {
     self.machine = machine;
     self
   }
@@ -243,7 +243,60 @@ impl MachineDetail {
       )
   }
 
-  fn render_info_tab(&self, machine: &ColimaVm, cx: &App) -> gpui::Div {
+  fn render_info_tab(&self, machine: &Machine, cx: &App) -> gpui::Div {
+    // Dispatch to appropriate render method based on machine type
+    match machine {
+      Machine::Host(host) => self.render_host_info_tab(host, cx),
+      Machine::Colima(vm) => self.render_colima_info_tab(vm, cx),
+    }
+  }
+
+  fn render_host_info_tab(&self, host: &crate::docker::DockerHostInfo, cx: &App) -> gpui::Div {
+    let _colors = &cx.theme().colors;
+
+    let basic_info = vec![
+      ("Name", host.name.clone()),
+      ("Type", "Native Docker Host".to_string()),
+      ("Status", "Running".to_string()),
+      ("Docker Socket", host.docker_socket.clone()),
+    ];
+
+    let system_info = vec![
+      ("Operating System", host.os.clone()),
+      ("Kernel", host.kernel.clone()),
+      ("Architecture", host.arch.clone()),
+      ("CPUs", host.cpus.to_string()),
+      ("Memory", host.display_memory()),
+    ];
+
+    let docker_info = vec![
+      ("Docker Version", host.docker_version.clone()),
+      ("API Version", host.api_version.clone()),
+      ("Storage Driver", host.storage_driver.clone()),
+      ("Docker Root", host.docker_root.clone()),
+      ("Runtime", host.runtime.clone()),
+    ];
+
+    let container_info = vec![
+      ("Total Containers", host.containers_total.to_string()),
+      ("Running", host.containers_running.to_string()),
+      ("Paused", host.containers_paused.to_string()),
+      ("Stopped", host.containers_stopped.to_string()),
+      ("Images", host.images.to_string()),
+    ];
+
+    v_flex()
+      .flex_1()
+      .w_full()
+      .p(px(16.))
+      .gap(px(12.))
+      .child(Self::render_section(Some("Host"), basic_info, cx))
+      .child(Self::render_section(Some("System"), system_info, cx))
+      .child(Self::render_section(Some("Docker"), docker_info, cx))
+      .child(Self::render_section(Some("Resources"), container_info, cx))
+  }
+
+  fn render_colima_info_tab(&self, machine: &ColimaVm, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
     let status_text = machine.status.to_string();
     let domain = format!("{}.local", machine.name);
@@ -363,9 +416,30 @@ impl MachineDetail {
     container
   }
 
-  fn render_config_tab(&self, machine: &ColimaVm, cx: &App) -> gpui::Div {
+  fn render_config_tab(&self, machine: &Machine, cx: &App) -> gpui::Div {
+    // Config tab is only available for Colima machines
+    let vm = match machine {
+      Machine::Colima(vm) => vm,
+      Machine::Host(_) => {
+        return v_flex()
+          .flex_1()
+          .w_full()
+          .p(px(16.))
+          .items_center()
+          .justify_center()
+          .child(
+            div()
+              .text_sm()
+              .text_color(cx.theme().colors.muted_foreground)
+              .child("Host configuration is managed by the system."),
+          )
+      }
+    };
+
     let config = self.machine_state.as_ref().and_then(|s| s.config.as_ref());
     let ssh_config = self.machine_state.as_ref().and_then(|s| s.ssh_config.as_ref());
+
+    let machine = vm;
 
     let mut container = v_flex().flex_1().w_full().p(px(16.)).gap(px(16.));
 
@@ -1255,6 +1329,13 @@ impl MachineDetail {
 
     let on_tab_change = self.on_tab_change.clone();
 
+    // Determine which tabs to show based on machine type
+    let tabs: &[MachineDetailTab] = if machine.is_host() {
+      &MachineDetailTab::HOST_TABS
+    } else {
+      &MachineDetailTab::ALL
+    };
+
     // Toolbar with just tabs - no action buttons
     let toolbar = h_flex()
       .w_full()
@@ -1268,7 +1349,7 @@ impl MachineDetail {
         TabBar::new("machine-tabs")
           .flex_1()
           .py(px(0.))
-          .children(MachineDetailTab::ALL.iter().map(|tab| {
+          .children(tabs.iter().map(|tab| {
             let on_tab_change = on_tab_change.clone();
             let tab_variant = *tab;
             Tab::new()

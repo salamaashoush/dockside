@@ -16,18 +16,21 @@ use super::docker_events::DockerEventWatcher;
 use super::kubernetes::KubernetesWatcher;
 use super::machines::MachineWatcher;
 use crate::docker::DockerClient;
+use crate::state::settings_state;
 
 /// Manages all resource watchers
 pub struct WatcherManager {
   docker_client: Arc<RwLock<Option<DockerClient>>>,
   control: WatcherControl,
+  colima_enabled: bool,
 }
 
 impl WatcherManager {
-  pub fn new(docker_client: Arc<RwLock<Option<DockerClient>>>) -> Self {
+  pub fn new(docker_client: Arc<RwLock<Option<DockerClient>>>, colima_enabled: bool) -> Self {
     Self {
       docker_client,
       control: WatcherControl::new(),
+      colima_enabled,
     }
   }
 
@@ -90,21 +93,24 @@ impl WatcherManager {
     .detach();
 
     // Spawn Colima machine watcher (polls every 10 seconds - conservative to avoid overhead)
-    let machine_tx = debounce_tx;
-    let machine_control = control;
-    crate::services::Tokio::spawn(cx, async move {
-      let watcher = MachineWatcher::new(Duration::from_secs(10));
+    // Only if Colima is enabled in settings
+    if self.colima_enabled {
+      let machine_tx = debounce_tx;
+      let machine_control = control;
+      crate::services::Tokio::spawn(cx, async move {
+        let watcher = MachineWatcher::new(Duration::from_secs(10));
 
-      watcher
-        .watch(machine_control, |resource_type| {
-          tracing::debug!("Machine change detected");
-          machine_tx.send(resource_type);
-        })
-        .await;
+        watcher
+          .watch(machine_control, |resource_type| {
+            tracing::debug!("Machine change detected");
+            machine_tx.send(resource_type);
+          })
+          .await;
 
-      Ok::<(), anyhow::Error>(())
-    })
-    .detach();
+        Ok::<(), anyhow::Error>(())
+      })
+      .detach();
+    }
   }
 
   /// Stop all watchers gracefully
@@ -152,7 +158,8 @@ impl Global for GlobalWatcherManager {}
 
 /// Start watchers and store globally
 pub fn start_watchers(docker_client: Arc<RwLock<Option<DockerClient>>>, cx: &mut App) {
-  let manager = WatcherManager::new(docker_client);
+  let colima_enabled = settings_state(cx).read(cx).settings.colima_enabled;
+  let manager = WatcherManager::new(docker_client, colima_enabled);
   manager.start(cx);
   cx.set_global(GlobalWatcherManager(manager));
 }

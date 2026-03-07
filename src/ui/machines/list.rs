@@ -12,14 +12,14 @@ use gpui_component::{
 };
 
 use crate::assets::AppIcon;
-use crate::colima::ColimaVm;
+use crate::colima::{Machine, MachineId};
 use crate::services;
-use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
+use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state, settings_state};
 use crate::ui::components::{render_error, render_loading};
 
 /// Machine list events emitted to parent
 pub enum MachineListEvent {
-  Selected(ColimaVm),
+  Selected(Machine),
   NewMachine,
 }
 
@@ -30,11 +30,11 @@ pub struct MachineListDelegate {
 }
 
 impl MachineListDelegate {
-  fn machines<'a>(&self, cx: &'a App) -> &'a Vec<ColimaVm> {
-    &self.docker_state.read(cx).colima_vms
+  fn machines<'a>(&self, cx: &'a App) -> &'a Vec<Machine> {
+    &self.docker_state.read(cx).machines
   }
 
-  fn filtered_machines(&self, cx: &App) -> Vec<ColimaVm> {
+  fn filtered_machines(&self, cx: &App) -> Vec<Machine> {
     let machines = self.machines(cx);
     if self.search_query.is_empty() {
       return machines.clone();
@@ -44,9 +44,9 @@ impl MachineListDelegate {
     machines
       .iter()
       .filter(|m| {
-        m.name.to_lowercase().contains(&query)
-          || m.arch.to_string().to_lowercase().contains(&query)
-          || m.status.to_string().to_lowercase().contains(&query)
+        m.name().to_lowercase().contains(&query)
+          || m.arch().to_lowercase().contains(&query)
+          || m.status_display().to_lowercase().contains(&query)
       })
       .cloned()
       .collect()
@@ -76,9 +76,10 @@ impl ListDelegate for MachineListDelegate {
 
     // Use global selection as single source of truth
     let global_selection = &self.docker_state.read(cx).selection;
-    let is_selected = matches!(global_selection, Selection::Machine(name) if *name == machine.name);
-    let is_running = machine.status.is_running();
-    let machine_name = machine.name.clone();
+    let machine_id = machine.id();
+    let is_selected = matches!(global_selection, Selection::Machine(id) if *id == machine_id);
+    let is_running = machine.is_running();
+    let machine_name = machine.name().to_string();
 
     let icon_bg = if is_running {
       colors.primary
@@ -86,11 +87,19 @@ impl ListDelegate for MachineListDelegate {
       colors.muted_foreground
     };
 
-    let subtitle = format!("latest, {}", machine.arch);
+    // Different subtitle for Host vs Colima
+    let subtitle = format!("{}, {}", machine.machine_type(), machine.arch());
     let status_color = if is_running {
       colors.success
     } else {
       colors.muted_foreground
+    };
+
+    // Different icon for Host vs Colima
+    let icon = if machine.is_host() {
+      AppIcon::Container // Use Container icon for Host Docker
+    } else {
+      AppIcon::Machine
     };
 
     let item_content = h_flex()
@@ -106,7 +115,7 @@ impl ListDelegate for MachineListDelegate {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(Icon::new(AppIcon::Machine).text_color(colors.background)),
+                    .child(Icon::new(icon).text_color(colors.background)),
             )
             .child(
                 v_flex()
@@ -119,7 +128,7 @@ impl ListDelegate for MachineListDelegate {
                             .w_full()
                             .overflow_hidden()
                             .text_ellipsis()
-                            .child(Label::new(machine.name.clone())),
+                            .child(Label::new(machine_name.clone())),
                     )
                     .child(
                         div()
@@ -140,10 +149,11 @@ impl ListDelegate for MachineListDelegate {
                     .bg(status_color),
             );
 
-    // Three-dot menu button
+    // Three-dot menu button - different for Host vs Colima
     let name = machine_name.clone();
     let running = is_running;
-    let has_k8s = machine.kubernetes;
+    let is_host_machine = machine.is_host();
+    let has_k8s = machine.as_colima().is_some_and(|vm| vm.kubernetes);
     let row = ix.row;
 
     let item = ListItem::new(ix)
@@ -168,7 +178,42 @@ impl ListDelegate for MachineListDelegate {
                 let mut menu = menu;
                 let n = n.clone();
 
-                if running {
+                if is_host_machine {
+                  // Host machine menu - limited actions
+                  menu = menu
+                    .item(
+                      PopupMenuItem::new("Set as Active")
+                        .icon(IconName::CircleCheck)
+                        .on_click(move |_, _, cx| {
+                          services::switch_runtime(MachineId::Host, cx);
+                        }),
+                    )
+                    .item(
+                      PopupMenuItem::new("Configure")
+                        .icon(Icon::new(AppIcon::Edit))
+                        .on_click(move |_, _, cx| {
+                          docker_state(cx).update(cx, |_, cx| {
+                            cx.emit(StateChanged::ConfigureHostRequest);
+                          });
+                        }),
+                    )
+                    .separator()
+                    .item(
+                      PopupMenuItem::new("Restart Docker")
+                        .icon(Icon::new(AppIcon::Restart))
+                        .on_click(move |_, _, cx| {
+                          services::restart_docker_daemon(cx);
+                        }),
+                    )
+                    .item(
+                      PopupMenuItem::new("System Prune")
+                        .icon(Icon::new(AppIcon::Trash))
+                        .on_click(move |_, _, cx| {
+                          services::docker_system_prune(false, cx);
+                        }),
+                    );
+                } else if running {
+                  // Colima VM running menu
                   menu = menu
                     .item(
                       PopupMenuItem::new("Set as Default")
@@ -214,14 +259,14 @@ impl ListDelegate for MachineListDelegate {
                         .on_click({
                           let n = n.clone();
                           move |_, _, cx| {
-                            services::open_machine_terminal(n.clone(), cx);
+                            services::open_machine_terminal(MachineId::Colima(n.clone()), cx);
                           }
                         }),
                     )
                     .item(PopupMenuItem::new("Files").icon(Icon::new(AppIcon::Files)).on_click({
                       let n = n.clone();
                       move |_, _, cx| {
-                        services::open_machine_files(n.clone(), cx);
+                        services::open_machine_files(MachineId::Colima(n.clone()), cx);
                       }
                     }));
 
@@ -272,33 +317,53 @@ impl ListDelegate for MachineListDelegate {
                         }),
                     );
                   }
+
+                  menu = menu
+                    .separator()
+                    .item(PopupMenuItem::new("Edit").icon(Icon::new(AppIcon::Edit)).on_click({
+                      let n = n.clone();
+                      move |_, _, cx| {
+                        docker_state(cx).update(cx, |_, cx| {
+                          cx.emit(StateChanged::EditMachineRequest {
+                            machine_id: MachineId::Colima(n.clone()),
+                          });
+                        });
+                      }
+                    }))
+                    .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
+                      let n = n.clone();
+                      move |_, _, cx| {
+                        services::delete_machine(n.clone(), cx);
+                      }
+                    }));
                 } else {
+                  // Colima VM stopped menu
                   menu = menu.item(PopupMenuItem::new("Start").icon(Icon::new(AppIcon::Play)).on_click({
                     let n = n.clone();
                     move |_, _, cx| {
                       services::start_machine(n.clone(), cx);
                     }
                   }));
-                }
 
-                menu = menu
-                  .separator()
-                  .item(PopupMenuItem::new("Edit").icon(Icon::new(AppIcon::Edit)).on_click({
-                    let n = n.clone();
-                    move |_, _, cx| {
-                      docker_state(cx).update(cx, |_, cx| {
-                        cx.emit(StateChanged::EditMachineRequest {
-                          machine_name: n.clone(),
+                  menu = menu
+                    .separator()
+                    .item(PopupMenuItem::new("Edit").icon(Icon::new(AppIcon::Edit)).on_click({
+                      let n = n.clone();
+                      move |_, _, cx| {
+                        docker_state(cx).update(cx, |_, cx| {
+                          cx.emit(StateChanged::EditMachineRequest {
+                            machine_id: MachineId::Colima(n.clone()),
+                          });
                         });
-                      });
-                    }
-                  }))
-                  .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
-                    let n = n.clone();
-                    move |_, _, cx| {
-                      services::delete_machine(n.clone(), cx);
-                    }
-                  }));
+                      }
+                    }))
+                    .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
+                      let n = n.clone();
+                      move |_, _, cx| {
+                        services::delete_machine(n.clone(), cx);
+                      }
+                    }));
+                }
 
                 menu
               }),
@@ -492,10 +557,11 @@ impl gpui::EventEmitter<MachineListEvent> for MachineList {}
 impl Render for MachineList {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let state = self.docker_state.read(cx);
-    let total_count = state.colima_vms.len();
+    let total_count = state.machines.len();
     let machines_state = state.machines_state.clone();
-    let running_count = state.colima_vms.iter().filter(|m| m.status.is_running()).count();
+    let running_count = state.machines.iter().filter(|m| m.is_running()).count();
     let colors = cx.theme().colors;
+    let colima_enabled = settings_state(cx).read(cx).settings.colima_enabled;
 
     // Get filtered count
     let filtered_count = self.list_state.read(cx).delegate().filtered_machines(cx).len();
@@ -553,47 +619,52 @@ impl Render for MachineList {
                 this.toggle_search(window, cx);
               })),
           )
-          .child(
-            Button::new("add")
-              .icon(Icon::new(AppIcon::Plus))
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(MachineListEvent::NewMachine);
-              })),
-          )
-          // General Colima actions dropdown
-          .child(
-            Button::new("colima-actions")
-              .icon(Icon::new(IconName::Ellipsis))
-              .ghost()
-              .compact()
-              .dropdown_menu(|menu, _window, _cx| {
-                menu
-                  .item(
-                    PopupMenuItem::new("Update All Runtimes")
-                      .icon(Icon::new(AppIcon::Refresh))
-                      .on_click(|_, _, cx| {
-                        services::update_all_machines(cx);
-                      }),
-                  )
-                  .item(
-                    PopupMenuItem::new("Prune Cache")
-                      .icon(Icon::new(AppIcon::Trash))
-                      .on_click(|_, _, cx| {
-                        services::prune_cache(false, cx);
-                      }),
-                  )
-                  .separator()
-                  .item(
-                    PopupMenuItem::new("Refresh Machines")
-                      .icon(Icon::new(AppIcon::Refresh))
-                      .on_click(|_, _, cx| {
-                        services::refresh_machines(cx);
-                      }),
-                  )
-              }),
-          ),
+          // Add Machine button - only show when Colima is enabled
+          .when(colima_enabled, |el| {
+            el.child(
+              Button::new("add")
+                .icon(Icon::new(AppIcon::Plus))
+                .ghost()
+                .compact()
+                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                  cx.emit(MachineListEvent::NewMachine);
+                })),
+            )
+          })
+          // General Colima actions dropdown - only show when Colima is enabled
+          .when(colima_enabled, |el| {
+            el.child(
+              Button::new("colima-actions")
+                .icon(Icon::new(IconName::Ellipsis))
+                .ghost()
+                .compact()
+                .dropdown_menu(|menu, _window, _cx| {
+                  menu
+                    .item(
+                      PopupMenuItem::new("Update All Runtimes")
+                        .icon(Icon::new(AppIcon::Refresh))
+                        .on_click(|_, _, cx| {
+                          services::update_all_machines(cx);
+                        }),
+                    )
+                    .item(
+                      PopupMenuItem::new("Prune Cache")
+                        .icon(Icon::new(AppIcon::Trash))
+                        .on_click(|_, _, cx| {
+                          services::prune_cache(false, cx);
+                        }),
+                    )
+                    .separator()
+                    .item(
+                      PopupMenuItem::new("Refresh Machines")
+                        .icon(Icon::new(AppIcon::Refresh))
+                        .on_click(|_, _, cx| {
+                          services::refresh_machines(cx);
+                        }),
+                    )
+                }),
+            )
+          }),
       );
 
     // Search bar

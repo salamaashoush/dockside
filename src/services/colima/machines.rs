@@ -66,7 +66,7 @@ pub fn create_machine(profile: String, config: ColimaConfig, cx: &mut App) {
     cx.update(|cx| match result {
       Ok(vms) => {
         state.update(cx, |state, cx| {
-          state.set_machines(vms);
+          state.set_colima_vms(vms);
           cx.emit(StateChanged::MachinesUpdated);
         });
         complete_task(cx, task_id);
@@ -204,7 +204,7 @@ pub fn edit_machine(profile: String, config: ColimaConfig, cx: &mut App) {
 
     cx.update(|cx| {
       state.update(cx, |state, cx| {
-        state.set_machines(vms);
+        state.set_colima_vms(vms);
         cx.emit(StateChanged::MachinesUpdated);
       });
       complete_task(cx, task_id);
@@ -267,7 +267,7 @@ pub fn start_machine(name: String, cx: &mut App) {
     cx.update(|cx| match result {
       Ok((vms, has_k8s)) => {
         state.update(cx, |state, cx| {
-          state.set_machines(vms);
+          state.set_colima_vms(vms);
           cx.emit(StateChanged::MachinesUpdated);
         });
         complete_task(cx, task_id);
@@ -319,7 +319,7 @@ pub fn stop_machine(name: String, cx: &mut App) {
     cx.update(|cx| match result {
       Ok(vms) => {
         state.update(cx, |state, cx| {
-          state.set_machines(vms);
+          state.set_colima_vms(vms);
           cx.emit(StateChanged::MachinesUpdated);
         });
         complete_task(cx, task_id);
@@ -382,7 +382,7 @@ pub fn restart_machine(name: String, cx: &mut App) {
     cx.update(|cx| match result {
       Ok((vms, has_k8s)) => {
         state.update(cx, |state, cx| {
-          state.set_machines(vms);
+          state.set_colima_vms(vms);
           cx.emit(StateChanged::MachinesUpdated);
         });
         complete_task(cx, task_id);
@@ -452,7 +452,7 @@ pub fn delete_machine(name: String, cx: &mut App) {
     cx.update(|cx| match result {
       Ok(vms) => {
         state.update(cx, |state, cx| {
-          state.set_machines(vms);
+          state.set_colima_vms(vms);
           cx.emit(StateChanged::MachinesUpdated);
         });
         complete_task(cx, task_id);
@@ -487,7 +487,7 @@ pub fn refresh_machines(cx: &mut App) {
     let vms = task.await;
     cx.update(|cx| {
       state.update(cx, |state, cx| {
-        state.set_machines(vms);
+        state.set_colima_vms(vms);
         cx.emit(StateChanged::MachinesUpdated);
       });
     })
@@ -626,10 +626,10 @@ pub fn update_all_machines(cx: &mut App) {
   let state = docker_state(cx);
   let disp = dispatcher(cx);
 
-  // Get list of running machines
-  let machines = state.read(cx).colima_vms.clone();
-  let running_machines: Vec<_> = machines
-    .iter()
+  // Get list of running Colima machines
+  let running_machines: Vec<_> = state
+    .read(cx)
+    .colima_vms()
     .filter(|m| m.status.is_running())
     .map(|m| m.name.clone())
     .collect();

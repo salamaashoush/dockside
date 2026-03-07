@@ -21,6 +21,7 @@ use crate::keybindings::{
 
 use crate::assets::AppIcon;
 use crate::services::{DispatcherEvent, dispatcher, task_manager};
+use crate::colima::MachineId;
 use crate::state::{CurrentView, DockerState, Selection, StateChanged, docker_state};
 use crate::ui::activity::ActivityMonitorView;
 use crate::ui::command_palette::{CommandPalette, CommandPaletteEvent, PaletteAction};
@@ -497,11 +498,18 @@ impl DocksideApp {
     let state = self.docker_state.read(cx);
     let current_view = state.current_view;
 
+    // Get active machine name for the Docker section header
+    let docker_header = if let Some(active) = &state.active_machine {
+      format!("Docker ({})", active.name())
+    } else {
+      "Docker".to_string()
+    };
+
     Sidebar::left()
             .collapsible(false)
             .pt(px(52.)) // Space for traffic lights
             .child(
-                SidebarGroup::new("Docker").child(
+                SidebarGroup::new(docker_header).child(
                     SidebarMenu::new()
                         .child(
                             SidebarMenuItem::new("Containers")
@@ -968,8 +976,14 @@ impl Render for DocksideApp {
           Selection::Container(container) => {
             crate::services::start_container(container.id, cx);
           }
-          Selection::Machine(name) => {
+          Selection::Machine(MachineId::Colima(name)) => {
             crate::services::start_machine(name, cx);
+          }
+          Selection::Machine(MachineId::Host) => {
+            window.push_notification(
+              (NotificationType::Info, SharedString::from("Host Docker is managed by the system.")),
+              cx,
+            );
           }
           Selection::None => {
             window.push_notification(
@@ -991,8 +1005,14 @@ impl Render for DocksideApp {
           Selection::Container(container) => {
             crate::services::stop_container(container.id, cx);
           }
-          Selection::Machine(name) => {
+          Selection::Machine(MachineId::Colima(name)) => {
             crate::services::stop_machine(name, cx);
+          }
+          Selection::Machine(MachineId::Host) => {
+            window.push_notification(
+              (NotificationType::Info, SharedString::from("Host Docker is managed by the system.")),
+              cx,
+            );
           }
           Selection::None => {
             window.push_notification(
@@ -1014,8 +1034,14 @@ impl Render for DocksideApp {
           Selection::Container(container) => {
             crate::services::restart_container(container.id, cx);
           }
-          Selection::Machine(name) => {
+          Selection::Machine(MachineId::Colima(name)) => {
             crate::services::restart_machine(name, cx);
+          }
+          Selection::Machine(MachineId::Host) => {
+            window.push_notification(
+              (NotificationType::Info, SharedString::from("Host Docker is managed by the system.")),
+              cx,
+            );
           }
           Selection::Pod { name, namespace } => {
             crate::services::restart_pod(name, namespace, cx);
@@ -1061,8 +1087,14 @@ impl Render for DocksideApp {
           Selection::Service { name, namespace } => {
             crate::services::delete_service(name, namespace, cx);
           }
-          Selection::Machine(name) => {
+          Selection::Machine(MachineId::Colima(name)) => {
             crate::services::delete_machine(name, cx);
+          }
+          Selection::Machine(MachineId::Host) => {
+            window.push_notification(
+              (NotificationType::Info, SharedString::from("Cannot delete Host machine.")),
+              cx,
+            );
           }
           Selection::None => {
             window.push_notification(

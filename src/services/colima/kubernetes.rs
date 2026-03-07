@@ -347,7 +347,7 @@ pub fn enable_kubernetes(name: String, cx: &mut App) {
 
     cx.update(|cx| {
       state.update(cx, |state, cx| {
-        state.set_machines(vms);
+        state.set_colima_vms(vms);
         cx.emit(StateChanged::MachinesUpdated);
       });
       complete_task(cx, task_id);

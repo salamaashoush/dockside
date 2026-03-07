@@ -62,6 +62,17 @@ fn create_cmd(path: PathBuf) -> Command {
     cmd
 }
 
+/// Check if colima is installed
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub fn is_colima_installed() -> bool {
+    find_binary("colima").is_some()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn is_colima_installed() -> bool {
+    false
+}
+
 /// Create a Command for colima, finding the binary in common paths
 /// Only available on macOS and Linux (including WSL2)
 #[cfg(any(target_os = "macos", target_os = "linux"))]
