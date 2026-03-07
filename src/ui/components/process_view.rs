@@ -125,6 +125,8 @@ pub enum ProcessSource {
   ColimaVm { profile: Option<String> },
   /// Docker container processes via docker exec ps aux
   DockerContainer { container_id: String },
+  /// Host system processes (native Docker on Linux)
+  Host,
 }
 
 /// Column to sort by
@@ -188,6 +190,28 @@ fn kill_process_async(source: ProcessSource, pid: u32, signal: &str, cx: &mut Ap
           })
           .await
       }
+      ProcessSource::Host => {
+        // Kill process on local system (requires sudo for processes owned by other users)
+        tracing::debug!("Killing local process {pid} with signal {signal_num}");
+        cx.background_executor()
+          .spawn(async move {
+            std::process::Command::new("kill")
+              .args([&format!("-{signal_num}"), &pid.to_string()])
+              .output()
+              .map_err(|e| anyhow::anyhow!("Failed to run kill: {}", e))
+              .and_then(|output| {
+                if output.status.success() {
+                  Ok(String::new())
+                } else {
+                  Err(anyhow::anyhow!(
+                    "kill command failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                  ))
+                }
+              })
+          })
+          .await
+      }
     };
 
     match &result {
@@ -241,6 +265,10 @@ impl ProcessView {
 
   pub fn for_container(container_id: String, window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     Self::new(ProcessSource::DockerContainer { container_id }, window, cx)
+  }
+
+  pub fn for_host(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+    Self::new(ProcessSource::Host, window, cx)
   }
 
   fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -318,6 +346,28 @@ impl ProcessView {
                   None => Err(anyhow::anyhow!("Docker client not connected")),
                 }
               })
+            })
+            .await
+            .map(|output| parse_ps_aux(&output))
+        }
+        ProcessSource::Host => {
+          // Run ps aux on local system
+          cx.background_executor()
+            .spawn(async move {
+              std::process::Command::new("ps")
+                .args(["aux"])
+                .output()
+                .map_err(|e| anyhow::anyhow!("Failed to run ps: {}", e))
+                .and_then(|output| {
+                  if output.status.success() {
+                    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+                  } else {
+                    Err(anyhow::anyhow!(
+                      "ps command failed: {}",
+                      String::from_utf8_lossy(&output.stderr)
+                    ))
+                  }
+                })
             })
             .await
             .map(|output| parse_ps_aux(&output))

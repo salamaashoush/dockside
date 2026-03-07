@@ -1,6 +1,6 @@
 use gpui::{App, AppContext, Entity, EventEmitter, Global};
 
-use crate::colima::ColimaVm;
+use crate::colima::{ColimaVm, Machine, MachineId};
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
 use crate::kubernetes::{DeploymentInfo, PodInfo, ServiceInfo};
 
@@ -23,6 +23,7 @@ pub enum MachineDetailTab {
 }
 
 impl MachineDetailTab {
+  /// All tabs for Colima VMs
   pub const ALL: [MachineDetailTab; 7] = [
     MachineDetailTab::Info,
     MachineDetailTab::Config,
@@ -31,6 +32,12 @@ impl MachineDetailTab {
     MachineDetailTab::Logs,
     MachineDetailTab::Terminal,
     MachineDetailTab::Files,
+  ];
+
+  /// Tabs available for Host Docker (no SSH access)
+  pub const HOST_TABS: [MachineDetailTab; 2] = [
+    MachineDetailTab::Info,
+    MachineDetailTab::Stats,
   ];
 
   pub fn label(self) -> &'static str {
@@ -43,6 +50,11 @@ impl MachineDetailTab {
       MachineDetailTab::Terminal => "Terminal",
       MachineDetailTab::Files => "Files",
     }
+  }
+
+  /// Check if this tab is supported for Host machines
+  pub fn is_host_supported(self) -> bool {
+    matches!(self, MachineDetailTab::Info | MachineDetailTab::Stats)
   }
 }
 
@@ -156,7 +168,7 @@ pub enum Selection {
     name: String,
     namespace: String,
   },
-  Machine(String), // Machine name
+  Machine(MachineId), // Machine identifier (Host or Colima VM)
 }
 
 /// Image inspect data for detailed view
@@ -212,12 +224,16 @@ pub enum StateChanged {
   },
   /// Request to open a machine with a specific tab
   MachineTabRequest {
-    machine_name: String,
+    machine_id: MachineId,
     tab: MachineDetailTab,
   },
   /// Request to open edit dialog for a machine
   EditMachineRequest {
-    machine_name: String,
+    machine_id: MachineId,
+  },
+  /// Runtime switched to a different machine
+  RuntimeSwitched {
+    machine_id: MachineId,
   },
   /// Request to open a container with a specific tab
   ContainerTabRequest {
@@ -277,6 +293,8 @@ pub enum StateChanged {
     namespace: String,
     current_replicas: i32,
   },
+  /// Request to open Host Docker configuration dialog
+  ConfigureHostRequest,
 }
 
 /// Represents the load state of a resource
@@ -291,8 +309,13 @@ pub enum LoadState {
 
 /// Global docker state - all views subscribe to this
 pub struct DockerState {
+  // Machine Data (Host + Colima VMs)
+  /// All available machines (native Docker host and/or Colima VMs)
+  pub machines: Vec<Machine>,
+  /// Currently active machine for Docker operations
+  pub active_machine: Option<MachineId>,
+
   // Docker Data
-  pub colima_vms: Vec<ColimaVm>,
   pub containers: Vec<ContainerInfo>,
   pub images: Vec<ImageInfo>,
   pub volumes: Vec<VolumeInfo>,
@@ -331,7 +354,8 @@ pub struct DockerState {
 impl DockerState {
   pub fn new() -> Self {
     Self {
-      colima_vms: Vec::new(),
+      machines: Vec::new(),
+      active_machine: None,
       containers: Vec::new(),
       images: Vec::new(),
       volumes: Vec::new(),
@@ -365,9 +389,63 @@ impl DockerState {
   }
 
   // Machines
-  pub fn set_machines(&mut self, vms: Vec<ColimaVm>) {
-    self.colima_vms = vms;
+
+  /// Set all machines (used during init with Host + Colima VMs)
+  pub fn set_machines(&mut self, machines: Vec<Machine>) {
+    self.machines = machines;
     self.machines_state = LoadState::Loaded;
+  }
+
+  /// Update only Colima VMs while preserving the Host machine
+  /// This should be used when refreshing Colima VM list to avoid losing the Host
+  pub fn set_colima_vms(&mut self, vms: Vec<ColimaVm>) {
+    // Keep existing host machine
+    let host = self.machines.iter().find(|m| m.is_host()).cloned();
+
+    // Replace with new Colima VMs
+    self.machines = vms.into_iter().map(Machine::Colima).collect();
+
+    // Re-add host at beginning if it existed
+    if let Some(h) = host {
+      self.machines.insert(0, h);
+    }
+
+    self.machines_state = LoadState::Loaded;
+  }
+
+  /// Get only Colima VMs (for Colima-specific operations)
+  pub fn colima_vms(&self) -> impl Iterator<Item = &ColimaVm> {
+    self.machines.iter().filter_map(|m| m.as_colima())
+  }
+
+  /// Get the host machine if present
+  pub fn host(&self) -> Option<&crate::docker::DockerHostInfo> {
+    self.machines.iter().find_map(|m| m.as_host())
+  }
+
+  /// Find a machine by its ID
+  pub fn get_machine(&self, id: &MachineId) -> Option<&Machine> {
+    self.machines.iter().find(|m| m.id() == *id)
+  }
+
+  /// Find a machine by name (convenience method)
+  pub fn get_machine_by_name(&self, name: &str) -> Option<&Machine> {
+    self.machines.iter().find(|m| m.name() == name)
+  }
+
+  /// Get the currently active machine
+  pub fn active(&self) -> Option<&Machine> {
+    self.active_machine.as_ref().and_then(|id| self.get_machine(id))
+  }
+
+  /// Set the active machine
+  pub fn set_active(&mut self, id: MachineId) {
+    self.active_machine = Some(id);
+  }
+
+  /// Clear the active machine
+  pub fn clear_active(&mut self) {
+    self.active_machine = None;
   }
 
   // Containers
@@ -522,7 +600,8 @@ mod tests {
     assert!(state.images.is_empty());
     assert!(state.volumes.is_empty());
     assert!(state.networks.is_empty());
-    assert!(state.colima_vms.is_empty());
+    assert!(state.machines.is_empty());
+    assert!(state.active_machine.is_none());
     assert!(matches!(state.selection, Selection::None));
     assert!(state.is_loading);
     assert!(!state.k8s_available);
@@ -561,9 +640,13 @@ mod tests {
     state.set_selection(Selection::Network("network-123".to_string()));
     assert!(matches!(state.selection, Selection::Network(_)));
 
-    // Set machine selection
-    state.set_selection(Selection::Machine("default".to_string()));
-    assert!(matches!(state.selection, Selection::Machine(_)));
+    // Set machine selection (Host)
+    state.set_selection(Selection::Machine(MachineId::Host));
+    assert!(matches!(state.selection, Selection::Machine(MachineId::Host)));
+
+    // Set machine selection (Colima)
+    state.set_selection(Selection::Machine(MachineId::Colima("default".to_string())));
+    assert!(matches!(state.selection, Selection::Machine(MachineId::Colima(_))));
 
     // Set pod selection
     state.set_selection(Selection::Pod {

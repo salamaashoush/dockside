@@ -20,7 +20,6 @@ use gpui_component::{
 };
 
 use crate::assets::AppIcon;
-
 use crate::state::{CurrentView, DockerState, Selection, StateChanged, docker_state};
 use crate::ui::components::spinning_loader_circle;
 
@@ -313,16 +312,16 @@ impl GlobalSearch {
       }
     }
 
-    // Search machines
-    for machine in &state.colima_vms {
-      if query.is_empty() || machine.name.to_lowercase().contains(&query_lower) {
+    // Search machines (Host + Colima VMs)
+    for machine in &state.machines {
+      if query.is_empty() || machine.name().to_lowercase().contains(&query_lower) {
         #[allow(clippy::cast_possible_wrap)]
-        let memory_size = format_size(machine.memory as i64);
+        let memory_size = format_size(machine.memory() as i64);
         results.push(SearchResult {
           result_type: SearchResultType::Machine,
-          name: machine.name.clone(),
-          subtitle: format!("{:?} - {} CPU, {memory_size} memory", machine.status, machine.cpus),
-          selection: Selection::Machine(machine.name.clone()),
+          name: machine.name().to_string(),
+          subtitle: format!("{} - {} CPU, {memory_size} memory", machine.status_display(), machine.cpus()),
+          selection: Selection::Machine(machine.id()),
         });
       }
     }
@@ -805,7 +804,7 @@ mod tests {
       result_type: SearchResultType::Container,
       name: "my-nginx".to_string(),
       subtitle: "nginx:latest - running".to_string(),
-      selection: Selection::Machine("test".to_string()),
+      selection: Selection::Machine(MachineId::Colima("test".to_string())),
     };
     assert_eq!(result.name, "my-nginx");
     assert_eq!(result.subtitle, "nginx:latest - running");

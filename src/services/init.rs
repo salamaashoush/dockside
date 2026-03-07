@@ -4,6 +4,7 @@ use gpui::App;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use crate::colima::ColimaClient;
+use crate::colima::Machine;
 use crate::docker::DockerClient;
 use crate::platform::{DockerRuntime, Platform};
 use crate::services::Tokio;
@@ -20,12 +21,13 @@ pub fn load_initial_data(cx: &mut App) {
     let settings = settings_state(cx).read(cx).settings.clone();
     let custom_socket = settings.docker_socket.clone();
     let colima_profile = settings.default_colima_profile.clone();
+    let colima_enabled = settings.colima_enabled;
 
-    // First, get colima VMs (if supported) and determine the Docker runtime
+    // First, get colima VMs (if supported and enabled) and determine the Docker runtime
     let colima_task = cx.background_executor().spawn(async move {
-        // Get Colima VMs only on platforms that support it
+        // Get Colima VMs only on platforms that support it AND if enabled in settings
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        let vms = if platform.supports_colima() {
+        let vms = if colima_enabled && platform.supports_colima() {
             ColimaClient::list().unwrap_or_default()
         } else {
             Vec::new()
@@ -56,15 +58,19 @@ pub fn load_initial_data(cx: &mut App) {
                     }
                 }
                 Platform::Linux | Platform::WindowsWsl2 => {
-                    // Try native Docker first, then Colima
+                    // Try native Docker first, then Colima if enabled
                     let native = DockerRuntime::native_default();
                     if native.is_available() {
                         native
-                    } else {
-                        // Fall back to Colima if native isn't available
+                    } else if colima_enabled {
+                        // Fall back to Colima if native isn't available and Colima is enabled
                         DockerRuntime::Colima {
                             profile: colima_profile,
                         }
+                    } else {
+                        // Native Docker not available and Colima disabled - return native anyway
+                        // (will fail to connect, but user can configure)
+                        native
                     }
                 }
                 Platform::Windows => {
@@ -101,24 +107,42 @@ pub fn load_initial_data(cx: &mut App) {
             let guard = client_handle.read().await;
             let docker = guard.as_ref().unwrap();
 
+            // Try to get host info for native Docker on Linux
+            // On macOS, Docker runs inside Colima VMs, not natively
+            let host_machine: Option<Machine> = if cfg!(target_os = "linux") {
+                docker.get_system_info().await.ok().map(Machine::Host)
+            } else {
+                None
+            };
+
             let containers = docker.list_containers(true).await.unwrap_or_default();
             let images = docker.list_images(false).await.unwrap_or_default();
             let volumes = docker.list_volumes().await.unwrap_or_default();
             let networks = docker.list_networks().await.unwrap_or_default();
 
-            (vms, containers, images, volumes, networks)
+            // Build machines list: Host first (if present), then Colima VMs
+            let mut machines: Vec<Machine> = Vec::new();
+            if let Some(host) = host_machine {
+                machines.push(host);
+            }
+            machines.extend(vms.into_iter().map(Machine::Colima));
+
+            (machines, containers, images, volumes, networks)
         } else {
-            (vms, vec![], vec![], vec![], vec![])
+            // No Docker connection - just return Colima VMs without host
+            let machines: Vec<Machine> = vms.into_iter().map(Machine::Colima).collect();
+            (machines, vec![], vec![], vec![], vec![])
         }
     });
 
     cx.spawn(async move |cx| {
         let result = tokio_task.await;
-        let (vms, containers, images, volumes, networks) = result.unwrap_or_default();
+        let (machines, containers, images, volumes, networks) = result.unwrap_or_default();
 
         cx.update(|cx| {
             state.update(cx, |state, cx| {
-                state.set_machines(vms);
+                // Set machines directly (includes Host + Colima VMs)
+                state.set_machines(machines);
                 state.set_containers(containers);
                 state.set_images(images);
                 state.set_volumes(volumes);

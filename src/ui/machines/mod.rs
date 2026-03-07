@@ -1,4 +1,5 @@
 mod detail;
+mod host_dialog;
 mod list;
 pub mod machine_dialog;
 mod view;

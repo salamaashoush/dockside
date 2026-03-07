@@ -344,15 +344,13 @@ impl DeploymentList {
 
     // Check if there's a running VM without K8s that we can enable K8s on
     let running_vm_without_k8s = state
-      .colima_vms
-      .iter()
+      .colima_vms()
       .find(|vm| vm.status.is_running() && !vm.kubernetes)
       .map(|vm| vm.name.clone());
 
     // Check if there's a running VM WITH K8s enabled (but API not responding)
     let running_vm_with_k8s = state
-      .colima_vms
-      .iter()
+      .colima_vms()
       .find(|vm| vm.status.is_running() && vm.kubernetes)
       .map(|vm| vm.name.clone());
 

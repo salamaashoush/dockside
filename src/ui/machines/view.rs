@@ -6,7 +6,7 @@ use gpui_component::{
   theme::ActiveTheme,
 };
 
-use crate::colima::ColimaVm;
+use crate::colima::{ColimaVm, Machine, MachineId};
 use crate::services;
 use crate::state::{DockerState, MachineTabState, Selection, StateChanged, docker_state};
 use crate::terminal::TerminalView;
@@ -14,6 +14,7 @@ use crate::ui::components::ProcessView;
 use crate::ui::dialogs;
 
 use super::detail::{MachineDetail, MachineDetailTab};
+use super::host_dialog::HostDialog;
 use super::list::{MachineList, MachineListEvent};
 use super::machine_dialog::MachineDialog;
 
@@ -33,10 +34,10 @@ pub struct MachinesView {
 
 impl MachinesView {
   /// Get the currently selected machine from global state
-  fn selected_machine(&self, cx: &App) -> Option<ColimaVm> {
+  fn selected_machine(&self, cx: &App) -> Option<Machine> {
     let state = self.docker_state.read(cx);
-    if let Selection::Machine(ref name) = state.selection {
-      state.colima_vms.iter().find(|vm| vm.name == *name).cloned()
+    if let Selection::Machine(ref id) = state.selection {
+      state.get_machine(id).cloned()
     } else {
       None
     }
@@ -71,16 +72,16 @@ impl MachinesView {
         match event {
           StateChanged::MachinesUpdated => {
             // If selected machine was deleted, clear selection
-            let selected_name = {
-              if let Selection::Machine(ref name) = this.docker_state.read(cx).selection {
-                Some(name.clone())
+            let selected_id = {
+              if let Selection::Machine(ref id) = this.docker_state.read(cx).selection {
+                Some(id.clone())
               } else {
                 None
               }
             };
 
-            if let Some(name) = selected_name {
-              let machine_exists = state.read(cx).colima_vms.iter().any(|vm| vm.name == name);
+            if let Some(id) = selected_id {
+              let machine_exists = state.read(cx).get_machine(&id).is_some();
               if !machine_exists {
                 this.docker_state.update(cx, |s, _| {
                   s.set_selection(Selection::None);
@@ -91,25 +92,37 @@ impl MachinesView {
             }
             cx.notify();
           }
-          StateChanged::MachineTabRequest { machine_name, tab } => {
+          StateChanged::MachineTabRequest { machine_id, tab } => {
             // Find the machine and select it with the specified tab
             let machine = {
               let state = state.read(cx);
-              state.colima_vms.iter().find(|vm| vm.name == *machine_name).cloned()
+              state.get_machine(machine_id).cloned()
             };
             if let Some(machine) = machine {
               this.on_select_machine(&machine, window, cx);
               this.on_tab_change(*tab, window, cx);
             }
           }
-          StateChanged::EditMachineRequest { machine_name } => {
-            // Find the machine and show edit dialog
-            let machine = {
+          StateChanged::EditMachineRequest { machine_id } => {
+            // Find the machine and show edit dialog (only for Colima VMs)
+            if let MachineId::Colima(name) = machine_id {
+              let machine = {
+                let state = state.read(cx);
+                state.colima_vms().find(|vm| vm.name == *name).cloned()
+              };
+              if let Some(machine) = machine {
+                Self::show_edit_dialog(&machine, window, cx);
+              }
+            }
+          }
+          StateChanged::ConfigureHostRequest => {
+            // Show Host Docker configuration dialog
+            let host_info = {
               let state = state.read(cx);
-              state.colima_vms.iter().find(|vm| vm.name == *machine_name).cloned()
+              state.host().cloned()
             };
-            if let Some(machine) = machine {
-              Self::show_edit_dialog(&machine, window, cx);
+            if let Some(info) = host_info {
+              Self::show_host_dialog(info, window, cx);
             }
           }
           _ => {}
@@ -134,6 +147,17 @@ impl MachinesView {
 
   fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
     dialogs::open_create_machine_dialog(window, cx);
+  }
+
+  fn show_host_dialog(host_info: crate::docker::DockerHostInfo, window: &mut Window, cx: &mut Context<'_, Self>) {
+    let dialog_entity = cx.new(|cx| HostDialog::new(host_info, window, cx));
+
+    window.open_dialog(cx, move |dialog, _window, _cx| {
+      dialog
+        .title("Docker Host Settings")
+        .width(px(650.))
+        .child(dialog_entity.clone())
+    });
   }
 
   fn show_edit_dialog(machine: &ColimaVm, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -170,10 +194,10 @@ impl MachinesView {
     });
   }
 
-  fn on_select_machine(&mut self, machine: &ColimaVm, window: &mut Window, cx: &mut Context<'_, Self>) {
+  fn on_select_machine(&mut self, machine: &Machine, window: &mut Window, cx: &mut Context<'_, Self>) {
     // Update global selection (single source of truth)
     self.docker_state.update(cx, |state, _cx| {
-      state.set_selection(Selection::Machine(machine.name.clone()));
+      state.set_selection(Selection::Machine(machine.id()));
     });
 
     // Reset view-specific state but keep active_tab
@@ -204,11 +228,13 @@ impl MachinesView {
         .soft_wrap(false)
     }));
 
-    // Load OS info, logs, files for the selected machine
-    self.load_machine_data(&machine.name, cx);
+    // Load data for Colima machines only (Host doesn't need SSH-based loading)
+    if let Some(colima_vm) = machine.as_colima() {
+      self.load_machine_data(&colima_vm.name, cx);
+    }
 
-    // If on Files tab, load the file list for the new machine
-    if self.active_tab == MachineDetailTab::Files {
+    // If on Files tab, load the file list for the new machine (Colima only)
+    if self.active_tab == MachineDetailTab::Files && machine.is_colima() {
       self.on_navigate_path("/", cx);
     }
 
@@ -218,28 +244,30 @@ impl MachinesView {
   fn on_tab_change(&mut self, tab: MachineDetailTab, window: &mut Window, cx: &mut Context<'_, Self>) {
     self.active_tab = tab;
 
-    // If switching to terminal tab, create terminal view
+    // If switching to terminal tab, create terminal view (Colima only)
     if tab == MachineDetailTab::Terminal
       && self.terminal_view.is_none()
       && let Some(machine) = self.selected_machine(cx)
+      && machine.is_colima()
     {
-      let profile = if machine.name == "default" {
+      let profile = if machine.name() == "default" {
         None
       } else {
-        Some(machine.name.clone())
+        Some(machine.name().to_string())
       };
       self.terminal_view = Some(cx.new(|cx| TerminalView::for_colima(profile, window, cx)));
     }
 
-    // If switching to processes tab, create process view
+    // If switching to processes tab, create process view (Colima only)
     if tab == MachineDetailTab::Processes
       && self.process_view.is_none()
       && let Some(machine) = self.selected_machine(cx)
+      && machine.is_colima()
     {
-      let profile = if machine.name == "default" {
+      let profile = if machine.name() == "default" {
         None
       } else {
-        Some(machine.name.clone())
+        Some(machine.name().to_string())
       };
       self.process_view = Some(cx.new(|cx| ProcessView::for_colima(profile, window, cx)));
     }
@@ -368,7 +396,7 @@ impl MachinesView {
     if let Some(machine) = self.selected_machine(cx) {
       self.machine_tab_state.logs_loading = true;
       self.machine_tab_state.log_type = log_type;
-      let machine_name = machine.name.clone();
+      let machine_name = machine.name().to_string();
 
       cx.spawn(async move |this, cx| {
         let logs = cx
@@ -405,7 +433,7 @@ impl MachinesView {
     if let Some(machine) = self.selected_machine(cx) {
       self.machine_tab_state.file_content_loading = true;
       self.machine_tab_state.selected_file = Some(path.to_string());
-      let machine_name = machine.name.clone();
+      let machine_name = machine.name().to_string();
       let file_path = path.to_string();
 
       cx.spawn(async move |this, cx| {
@@ -437,7 +465,7 @@ impl MachinesView {
   fn on_navigate_path(&mut self, path: &str, cx: &mut Context<'_, Self>) {
     if let Some(machine) = self.selected_machine(cx) {
       self.machine_tab_state.files_loading = true;
-      let machine_name = machine.name.clone();
+      let machine_name = machine.name().to_string();
       let path = path.to_string();
 
       cx.spawn(async move |this, cx| {
@@ -504,7 +532,7 @@ impl MachinesView {
 
   fn on_symlink_follow(&mut self, path: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
     if let Some(machine) = self.selected_machine(cx) {
-      let machine_name = machine.name.clone();
+      let machine_name = machine.name().to_string();
       let path = path.to_string();
 
       // Create file content editor in case symlink points to a file
@@ -548,7 +576,7 @@ impl MachinesView {
 
               // Load files for the new path
               if let Some(machine) = this.selected_machine(cx) {
-                let machine_name = machine.name.clone();
+                let machine_name = machine.name().to_string();
                 let path = target;
 
                 cx.spawn(async move |this, cx| {
@@ -582,7 +610,7 @@ impl MachinesView {
 
               // Load file content
               if let Some(machine) = this.selected_machine(cx) {
-                let machine_name = machine.name.clone();
+                let machine_name = machine.name().to_string();
                 let file_path = target.clone();
 
                 cx.spawn(async move |this, cx| {
@@ -620,7 +648,7 @@ impl MachinesView {
   fn on_open_in_editor(&mut self, data: &(String, bool), _window: &mut Window, cx: &mut Context<'_, Self>) {
     let (path, _is_dir) = data;
     if let Some(machine) = self.selected_machine(cx) {
-      services::open_machine_in_editor(&machine.name, path, cx);
+      services::open_machine_in_editor(&machine.name(), path, cx);
     }
   }
 }
