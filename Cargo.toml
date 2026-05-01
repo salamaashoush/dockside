@@ -2,7 +2,7 @@
 name = "dockside"
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.93"
 description = "A native desktop application for managing Docker containers, images, volumes, networks, and Kubernetes resources via Colima"
 license = "MIT"
 repository = "https://github.com/salamaashoush/dockside"
@@ -40,7 +40,6 @@ tracing-subscriber = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 bytesize = "2.3"
 parking_lot = "0.12"
-alacritty_terminal = "0.25"
 regex = "1"
 polling = "3"
 rust-embed = "8"
@@ -52,6 +51,13 @@ hex = "0.4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+
+# Terminal emulator backend: libghostty (terminal core only) + portable-pty for the PTY layer.
+# Linked statically via vendored Zig build. Linux + macOS only — Windows shows an unsupported
+# placeholder in the UI and skips this dependency entirely.
+[target.'cfg(unix)'.dependencies]
+libghostty-vt = { version = "0.1.1", default-features = false }
+portable-pty = "0.9"
 
 [dev-dependencies]
 criterion = "0.8"

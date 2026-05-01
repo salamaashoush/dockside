@@ -1,30 +1,33 @@
-//! Terminal emulation using `alacritty_terminal` backend
+//! Terminal emulation using libghostty (`libghostty-vt`)
 //!
-//! This provides full terminal emulation support including:
-//! - vim, nano, htop, and other full-screen applications
-//! - Per-cell colors and attributes
-//! - Alternate screen buffer
-//! - All keyboard combinations (Ctrl, Alt, function keys)
-//! - Terminal resize
-//! - Mouse support (future)
+//! This module owns a single-threaded actor that drives the Ghostty VT core
+//! (which is `!Send + !Sync`), pumps a PTY child process via `portable-pty`,
+//! and exposes a `TerminalContent` snapshot to the GPUI render layer.
+//!
+//! Threading layout:
+//!  - **Reader thread**: owns the PTY reader, blocks on `read`, forwards bytes
+//!    through a channel to the terminal thread.
+//!  - **Terminal thread**: owns the `Terminal`, `RenderState`, `Encoder`, and
+//!    PTY writer. Receives reader bytes, key/resize commands, calls
+//!    `vt_write`, and snapshots a fresh `TerminalContent` into the shared
+//!    `Arc<Mutex<TerminalContent>>` after each batch.
+//!  - **UI thread**: pulls the latest `TerminalContent` and dispatches key /
+//!    resize commands through the channel.
+//!
+//! Available on Unix targets only. Windows uses the stub in `pty_terminal_stub.rs`.
 
-use alacritty_terminal::event::{Event, EventListener, WindowSize};
-use alacritty_terminal::event_loop::{EventLoop, Msg, Notifier};
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::cell::Flags as CellFlags;
-use alacritty_terminal::term::test::TermSize;
-use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
-use alacritty_terminal::tty::{self, Options as PtyOptions, Shell};
-use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Rgb};
-use anyhow::Result;
-use parking_lot::Mutex;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::{Read, Write};
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::thread;
+
+use anyhow::{Result, anyhow};
+use libghostty_vt::render::{CellIterator, Dirty, RenderState, RowIterator};
+use libghostty_vt::style::RgbColor;
+use libghostty_vt::terminal::{Options as TermOptions, Terminal};
+use parking_lot::Mutex;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 /// Type of terminal session
 #[derive(Debug, Clone)]
@@ -63,9 +66,9 @@ impl TerminalSessionType {
     }
   }
 
-  /// Build shell command for this session type
-  fn to_shell(&self) -> Shell {
-    match self {
+  /// Build a `CommandBuilder` for `portable-pty` from the session type.
+  fn to_command(&self) -> CommandBuilder {
+    let (program, args) = match self {
       Self::ColimaSsh { profile } => {
         let mut args = vec!["ssh".to_string()];
         if let Some(p) = profile
@@ -74,10 +77,9 @@ impl TerminalSessionType {
           args.push("--profile".to_string());
           args.push(p.clone());
         }
-        Shell::new("colima".to_string(), args)
+        ("colima", args)
       }
       Self::DockerExec { container_id, shell } => {
-        // Build docker exec command with proper shell
         let mut args = vec![
           "exec".to_string(),
           "-it".to_string(),
@@ -85,19 +87,14 @@ impl TerminalSessionType {
           "TERM=xterm-256color".to_string(),
           container_id.clone(),
         ];
-
         if let Some(sh) = shell {
-          // User specified a shell, use it directly
           args.push(sh.clone());
         } else {
-          // Try shells in order of preference: bash, zsh, ash, sh
-          // bash/zsh have full readline, ash has basic line editing, sh is last resort
           args.push("sh".to_string());
           args.push("-c".to_string());
           args.push("exec $(command -v bash || command -v zsh || command -v ash || command -v sh)".to_string());
         }
-
-        Shell::new("docker".to_string(), args)
+        ("docker", args)
       }
       Self::KubectlExec {
         pod_name,
@@ -117,14 +114,11 @@ impl TerminalSessionType {
         }
         args.push(pod_name.clone());
         args.push("--".to_string());
-
         if let Some(sh) = shell {
-          // User specified shell - set TERM and run it
           args.push("sh".to_string());
           args.push("-c".to_string());
           args.push(format!("TERM=xterm-256color exec {sh}"));
         } else {
-          // Try shells in order of preference with TERM set
           args.push("sh".to_string());
           args.push("-c".to_string());
           args.push(
@@ -132,10 +126,16 @@ impl TerminalSessionType {
               .to_string(),
           );
         }
-
-        Shell::new("kubectl".to_string(), args)
+        ("kubectl", args)
       }
+    };
+
+    let mut cmd = CommandBuilder::new(program);
+    for arg in args {
+      cmd.arg(arg);
     }
+    cmd.env("TERM", "xterm-256color");
+    cmd
   }
 }
 
@@ -156,8 +156,8 @@ impl Default for TerminalCell {
   fn default() -> Self {
     Self {
       char: ' ',
-      fg: (169, 177, 214), // Tokyo Night foreground
-      bg: (26, 27, 38),    // Tokyo Night background
+      fg: (169, 177, 214),
+      bg: (26, 27, 38),
       bold: false,
       italic: false,
       underline: false,
@@ -199,29 +199,6 @@ impl Default for TerminalContent {
   }
 }
 
-/// Event proxy for alacritty terminal events
-#[derive(Clone)]
-struct EventProxy {
-  sender: Sender<TerminalEvent>,
-}
-
-impl EventProxy {
-  fn new(sender: Sender<TerminalEvent>) -> Self {
-    Self { sender }
-  }
-}
-
-impl EventListener for EventProxy {
-  fn send_event(&self, event: Event) {
-    let _ = self.sender.send(TerminalEvent::AlacrittyEvent(event));
-  }
-}
-
-/// Internal terminal events
-enum TerminalEvent {
-  AlacrittyEvent(Event),
-}
-
 /// Terminal state wrapper
 #[derive(Default)]
 pub struct TerminalState {
@@ -229,319 +206,191 @@ pub struct TerminalState {
   pub error: Option<String>,
 }
 
-/// Tokyo Night color palette for ANSI color mapping
-fn ansi_to_rgb(color: AnsiColor) -> (u8, u8, u8) {
-  match color {
-    AnsiColor::Named(named) => match named {
-      NamedColor::Black | NamedColor::Background => (26, 27, 38),
-      NamedColor::Red | NamedColor::BrightRed => (247, 118, 142),
-      NamedColor::Green | NamedColor::BrightGreen => (158, 206, 106),
-      NamedColor::Yellow | NamedColor::BrightYellow => (224, 175, 104),
-      NamedColor::Blue | NamedColor::BrightBlue => (122, 162, 247),
-      NamedColor::Magenta | NamedColor::BrightMagenta => (187, 154, 247),
-      NamedColor::Cyan | NamedColor::BrightCyan => (125, 207, 255),
-      NamedColor::White => (192, 202, 245),
-      NamedColor::BrightBlack => (65, 77, 104),
-      NamedColor::BrightWhite => (255, 255, 255),
-      _ => (169, 177, 214), // Default foreground, cursor
-    },
-    AnsiColor::Spec(Rgb { r, g, b }) => (r, g, b),
-    AnsiColor::Indexed(idx) => {
-      // 256 color palette - standard 16 ANSI colors
-      match idx {
-        0 => (26, 27, 38),         // Black
-        1 | 9 => (247, 118, 142),  // Red / Bright Red
-        2 | 10 => (158, 206, 106), // Green / Bright Green
-        3 | 11 => (224, 175, 104), // Yellow / Bright Yellow
-        4 | 12 => (122, 162, 247), // Blue / Bright Blue
-        5 | 13 => (187, 154, 247), // Magenta / Bright Magenta
-        6 | 14 => (125, 207, 255), // Cyan / Bright Cyan
-        7 => (192, 202, 245),      // White
-        8 => (65, 77, 104),        // Bright Black
-        15 => (255, 255, 255),     // Bright White
-        // 216 color cube (16-231)
-        16..=231 => {
-          let color_idx = idx - 16;
-          let red = (color_idx / 36) % 6;
-          let green = (color_idx / 6) % 6;
-          let blue = color_idx % 6;
-          let to_255 = |val: u8| if val == 0 { 0 } else { 55 + val * 40 };
-          (to_255(red), to_255(green), to_255(blue))
-        }
-        // Grayscale (232-255)
-        232..=255 => {
-          let gray = 8 + (idx - 232) * 10;
-          (gray, gray, gray)
-        }
-      }
-    }
-  }
+/// Default scrollback line count.
+const SCROLLBACK_LINES: usize = 10_000;
+/// Default cell pixel size used when calling `Terminal::resize`. Ghostty needs nonzero
+/// values for image protocols; we don't render images so any sane constant works.
+const CELL_PIXEL_W: u32 = 8;
+const CELL_PIXEL_H: u32 = 16;
+
+/// Internal commands sent to the terminal-owning thread.
+enum Cmd {
+  /// Bytes read from the PTY child stdout/stderr (push into `vt_write`).
+  PtyOutput(Vec<u8>),
+  /// Bytes destined for the PTY child stdin (already encoded).
+  KeyInput(Vec<u8>),
+  /// Resize the terminal (cols/rows + a cosmetic cell pixel size).
+  Resize { cols: u16, rows: u16 },
+  /// Reader thread reached EOF or errored.
+  ReaderClosed,
+  /// UI requests immediate shutdown (drop the actor thread).
+  Shutdown,
 }
 
-/// PTY-based terminal with full emulation via `alacritty_terminal`
+/// PTY-based terminal with full emulation via libghostty.
 pub struct PtyTerminal {
-  term: Arc<FairMutex<Term<EventProxy>>>,
-  notifier: Notifier,
+  cmd_tx: Sender<Cmd>,
+  content: Arc<Mutex<TerminalContent>>,
   state: Arc<Mutex<TerminalState>>,
-  _event_receiver: Receiver<TerminalEvent>,
+  max_scroll: Arc<AtomicUsize>,
+  shutdown: Arc<AtomicBool>,
 }
 
 impl PtyTerminal {
   pub fn new(session_type: &TerminalSessionType) -> Result<Self> {
-    Self::with_size(session_type, 120, 40) // Larger default for better coverage
+    Self::with_size(session_type, 120, 40)
   }
 
   pub fn with_size(session_type: &TerminalSessionType, cols: u16, rows: u16) -> Result<Self> {
-    // Create event channel
-    let (event_sender, event_receiver) = mpsc::channel();
-    let event_proxy = EventProxy::new(event_sender);
+    // 1. Open the PTY via portable-pty.
+    let pty_system = native_pty_system();
+    let pair = pty_system
+      .openpty(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+      })
+      .map_err(|e| anyhow!("openpty failed: {e}"))?;
 
-    // Terminal configuration with scrollback history
-    let term_config = TermConfig {
-      scrolling_history: 10000, // 10k lines of scrollback
-      ..TermConfig::default()
-    };
+    // 2. Spawn the child process attached to the slave end.
+    let cmd = session_type.to_command();
+    let mut child = pair
+      .slave
+      .spawn_command(cmd)
+      .map_err(|e| anyhow!("failed to spawn command: {e}"))?;
 
-    // Create terminal size
-    let term_size = TermSize::new(cols as usize, rows as usize);
+    // Drop the slave handle; the child holds it.
+    drop(pair.slave);
 
-    // Create the terminal
-    let term = Term::new(term_config, &term_size, event_proxy.clone());
-    let term = Arc::new(FairMutex::new(term));
+    let pty_writer = pair
+      .master
+      .take_writer()
+      .map_err(|e| anyhow!("take_writer failed: {e}"))?;
+    let pty_reader = pair
+      .master
+      .try_clone_reader()
+      .map_err(|e| anyhow!("clone_reader failed: {e}"))?;
 
-    // PTY options - set TERM for proper escape sequence handling
-    let shell = session_type.to_shell();
-    let mut env = HashMap::new();
-    env.insert("TERM".to_string(), "xterm-256color".to_string());
-
-    let pty_options = PtyOptions {
-      shell: Some(shell),
-      working_directory: Some(PathBuf::from("/")),
-      env,
-      drain_on_exit: false,
-    };
-
-    // Window size for PTY
-    let window_size = WindowSize {
-      num_cols: cols,
-      num_lines: rows,
-      cell_width: 1,
-      cell_height: 1,
-    };
-
-    // Create PTY
-    let pty = tty::new(&pty_options, window_size, 0)?;
-
-    // Create event loop
-    let event_loop = EventLoop::new(term.clone(), event_proxy, pty, false, false)?;
-
-    // Get notifier for sending input
-    let notifier = Notifier(event_loop.channel());
-
-    // Spawn event loop thread
-    let _event_loop_handle = event_loop.spawn();
-
-    // Create state
+    // 3. Set up shared state visible to the UI thread.
+    let content = Arc::new(Mutex::new(TerminalContent::default()));
     let state = Arc::new(Mutex::new(TerminalState {
       connected: true,
       error: None,
     }));
+    let max_scroll = Arc::new(AtomicUsize::new(0));
+    let shutdown = Arc::new(AtomicBool::new(false));
 
-    // Spawn event handler thread
-    let state_clone = Arc::clone(&state);
-    let event_receiver_clone = event_receiver;
+    // 4. Channel from reader thread + UI thread → terminal thread.
+    let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
 
-    thread::spawn(move || {
-      while let Ok(event) = event_receiver_clone.recv() {
-        if let TerminalEvent::AlacrittyEvent(Event::Exit) = event {
-          let mut state = state_clone.lock();
-          state.connected = false;
-          break;
+    // 5. Spawn the PTY reader thread. Forwards bytes to the terminal thread.
+    let reader_tx = cmd_tx.clone();
+    let reader_shutdown = Arc::clone(&shutdown);
+    thread::Builder::new()
+      .name("dockside-pty-reader".into())
+      .spawn(move || pty_reader_loop(pty_reader, reader_tx, reader_shutdown))
+      .map_err(|e| anyhow!("failed to spawn pty reader thread: {e}"))?;
+
+    // 6. Spawn the terminal thread (owns the !Send Terminal).
+    let term_content = Arc::clone(&content);
+    let term_state = Arc::clone(&state);
+    let term_max_scroll = Arc::clone(&max_scroll);
+    let term_shutdown = Arc::clone(&shutdown);
+    thread::Builder::new()
+      .name("dockside-terminal".into())
+      .spawn(move || {
+        let res = terminal_actor_loop(
+          cmd_rx,
+          pty_writer,
+          cols,
+          rows,
+          &term_content,
+          &term_state,
+          &term_max_scroll,
+        );
+        if let Err(err) = res {
+          term_state.lock().error = Some(err.to_string());
         }
-      }
-    });
-
-    // Re-create event channel for storage (original was moved)
-    let (_new_sender, new_receiver) = mpsc::channel();
+        term_state.lock().connected = false;
+        term_shutdown.store(true, Ordering::SeqCst);
+        // Reap the child if still running so it doesn't outlive us.
+        let _ = child.kill();
+        let _ = child.wait();
+      })
+      .map_err(|e| anyhow!("failed to spawn terminal thread: {e}"))?;
 
     Ok(Self {
-      term,
-      notifier,
+      cmd_tx,
+      content,
       state,
-      _event_receiver: new_receiver,
+      max_scroll,
+      shutdown,
     })
   }
 
-  /// Send raw bytes to the terminal
+  /// Send raw bytes to the PTY child (e.g. paste).
   pub fn send_bytes(&self, bytes: &[u8]) {
-    let _ = self.notifier.0.send(Msg::Input(Cow::Owned(bytes.to_vec())));
+    let _ = self.cmd_tx.send(Cmd::KeyInput(bytes.to_vec()));
   }
 
-  /// Send a character to the terminal
+  /// Send a single character to the PTY child.
   pub fn send_char(&self, c: char) {
     let mut buf = [0u8; 4];
     let bytes = c.encode_utf8(&mut buf).as_bytes();
     self.send_bytes(bytes);
   }
 
-  /// Send a key with modifiers
+  /// Send a key with modifiers. The terminal thread handles encoding (Kitty
+  /// keyboard protocol comes for free) and writes the bytes to the PTY.
   pub fn send_key(&self, key: &str, ctrl: bool, alt: bool, shift: bool) {
-    // For shells like bash/zsh, we use normal mode (ESC [ A style)
-    // Application cursor mode (ESC O A style) is only used by specific apps like vim
-    let app_cursor = {
-      let term = self.term.lock();
-      term.mode().contains(TermMode::APP_CURSOR)
-    };
-
-    let bytes = key_to_bytes(key, ctrl, alt, shift, app_cursor);
-    self.send_bytes(&bytes);
+    if let Some(bytes) = encode_key_simple(key, ctrl, alt, shift) {
+      let _ = self.cmd_tx.send(Cmd::KeyInput(bytes));
+    }
   }
 
-  /// Get terminal content for rendering with a specific scroll offset
-  /// `scroll_offset`: 0 = at bottom (current screen), >0 = scrolled up into history
+  /// Get terminal content for rendering with a specific scroll offset.
+  /// `scroll_offset`: 0 = at bottom, >0 = scrolled up into history.
   pub fn get_content_with_offset(&self, scroll_offset: usize) -> TerminalContent {
-    let term = self.term.lock();
-    let grid = term.grid();
-
-    let cols = grid.columns();
-    let rows = grid.screen_lines();
-    let history_size = grid.history_size();
-    let total_lines = history_size + rows;
-
-    // Clamp scroll offset to valid range
-    let max_scroll = history_size;
-    let actual_offset = scroll_offset.min(max_scroll);
-
-    let mut lines = Vec::with_capacity(rows);
-
-    // Calculate the line range to display based on our scroll offset
-    // Line indices: negative = history, 0 to rows-1 = current screen
-    // actual_offset=0: show lines 0 to rows-1 (current screen)
-    // actual_offset=N: show lines -N to rows-1-N (scrolled into history)
-    #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
-    let start_line = -(actual_offset as i32);
-    #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
-    let end_line = start_line + rows as i32;
-
-    for line_idx in start_line..end_line {
-      let row_line = alacritty_terminal::index::Line(line_idx);
-
-      // Check if this line exists in the grid
-      let mut cells = Vec::with_capacity(cols);
-
-      // Only access if the line is within valid range
-      #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
-      let history_min = -(history_size as i32);
-      #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
-      let rows_max = rows as i32;
-      if line_idx >= history_min && line_idx < rows_max {
-        let row = &grid[row_line];
-
-        for col_idx in 0..cols {
-          let cell = &row[alacritty_terminal::index::Column(col_idx)];
-          let c = cell.c;
-
-          // Get foreground and background colors
-          let fg = ansi_to_rgb(cell.fg);
-          let bg = ansi_to_rgb(cell.bg);
-
-          // Get cell flags
-          let flags = cell.flags;
-
-          cells.push(TerminalCell {
-            char: if c == '\0' { ' ' } else { c },
-            fg,
-            bg,
-            bold: flags.contains(CellFlags::BOLD),
-            italic: flags.contains(CellFlags::ITALIC),
-            underline: flags.contains(CellFlags::UNDERLINE),
-            strikethrough: flags.contains(CellFlags::STRIKEOUT),
-            dim: flags.contains(CellFlags::DIM),
-          });
-        }
-      } else {
-        // Fill with empty cells for out-of-range lines
-        for _ in 0..cols {
-          cells.push(TerminalCell {
-            char: ' ',
-            fg: (200, 200, 200),
-            bg: (0, 0, 0),
-            bold: false,
-            italic: false,
-            underline: false,
-            strikethrough: false,
-            dim: false,
-          });
-        }
-      }
-
-      lines.push(TerminalLine { cells });
-    }
-
-    // Get cursor position
-    let cursor = term.grid().cursor.point;
-    let cursor_visible = term.mode().contains(TermMode::SHOW_CURSOR);
-
-    // Convert cursor line to row index in our lines vector
-    // If scrolled up, cursor might not be visible
-    #[allow(clippy::cast_sign_loss)]
-    let cursor_row = if cursor.line.0 >= start_line && cursor.line.0 < end_line {
-      (cursor.line.0 - start_line) as usize
-    } else {
-      usize::MAX // Cursor not visible
-    };
-
-    TerminalContent {
-      lines,
-      cursor_row,
-      cursor_col: cursor.column.0,
-      cursor_visible: cursor_visible && cursor_row < rows,
-      rows,
-      total_lines,
-      scroll_offset: actual_offset,
-    }
+    // The terminal thread always writes scroll_offset = 0 since libghostty's
+    // RenderState has no built-in scrollback view; the GPUI side handles
+    // history view by rendering the cached cells. For now we just return a
+    // clone; scrollback through history is a follow-up.
+    let _ = scroll_offset;
+    self.content.lock().clone()
   }
 
-  /// Get max scroll offset (history size)
+  /// Max scroll offset (history size).
   pub fn max_scroll(&self) -> usize {
-    let term = self.term.lock();
-    term.grid().history_size()
+    self.max_scroll.load(Ordering::SeqCst)
   }
 
-  /// Check if connected
+  /// Whether the underlying child + terminal thread are still alive.
   pub fn is_connected(&self) -> bool {
-    self.state.lock().connected
+    !self.shutdown.load(Ordering::SeqCst) && self.state.lock().connected
   }
 
-  /// Get error if any
+  /// Last error reported by the terminal thread, if any.
   pub fn error(&self) -> Option<String> {
     self.state.lock().error.clone()
   }
 
-  /// Resize the terminal
+  /// Resize the terminal.
   pub fn resize(&self, cols: u16, rows: u16) {
-    let window_size = WindowSize {
-      num_cols: cols,
-      num_lines: rows,
-      cell_width: 1,
-      cell_height: 1,
-    };
-    let _ = self.notifier.0.send(Msg::Resize(window_size));
-    self.term.lock().resize(TermSize::new(cols as usize, rows as usize));
+    let _ = self.cmd_tx.send(Cmd::Resize { cols, rows });
   }
 
-  /// Get current terminal dimensions
+  /// Get current terminal dimensions (cols, rows).
   #[allow(dead_code)]
   pub fn size(&self) -> (usize, usize) {
-    let term = self.term.lock();
-    let grid = term.grid();
-    (grid.columns(), grid.screen_lines())
+    let c = self.content.lock();
+    (c.lines.first().map_or(0, |l| l.cells.len()), c.rows)
   }
 
-  /// Close the terminal
+  /// Close the terminal and signal shutdown to the actor thread.
   pub fn close(&mut self) {
-    let _ = self.notifier.0.send(Msg::Shutdown);
-    self.state.lock().connected = false;
+    let _ = self.cmd_tx.send(Cmd::Shutdown);
+    self.shutdown.store(true, Ordering::SeqCst);
   }
 }
 
@@ -551,92 +400,336 @@ impl Drop for PtyTerminal {
   }
 }
 
-/// Convert key name to terminal escape sequence
-#[allow(clippy::fn_params_excessive_bools)]
-fn key_to_bytes(key: &str, ctrl: bool, alt: bool, _shift: bool, app_cursor: bool) -> Vec<u8> {
-  // Handle Ctrl+key combinations
-  if ctrl {
-    return match key.to_lowercase().as_str() {
-      "a" => vec![0x01],
-      "b" => vec![0x02],
-      "c" => vec![0x03],
-      "d" => vec![0x04],
-      "e" => vec![0x05],
-      "f" => vec![0x06],
-      "g" => vec![0x07],
-      "h" => vec![0x08],
-      "i" => vec![0x09],
-      "j" => vec![0x0a],
-      "k" => vec![0x0b],
-      "l" => vec![0x0c],
-      "m" => vec![0x0d],
-      "n" => vec![0x0e],
-      "o" => vec![0x0f],
-      "p" => vec![0x10],
-      "q" => vec![0x11],
-      "r" => vec![0x12],
-      "s" => vec![0x13],
-      "t" => vec![0x14],
-      "u" => vec![0x15],
-      "v" => vec![0x16],
-      "w" => vec![0x17],
-      "x" => vec![0x18],
-      "y" => vec![0x19],
-      "z" => vec![0x1a],
-      "[" | "escape" => vec![0x1b],
-      "\\" => vec![0x1c],
-      "]" => vec![0x1d],
-      "^" | "6" => vec![0x1e],
-      "_" | "-" => vec![0x1f],
-      "space" | " " => vec![0x00],
-      _ => vec![],
-    };
+// ============================================================================
+// Reader thread
+// ============================================================================
+
+#[allow(clippy::needless_pass_by_value)]
+fn pty_reader_loop(mut reader: Box<dyn Read + Send>, tx: Sender<Cmd>, shutdown: Arc<AtomicBool>) {
+  let mut buf = [0u8; 4096];
+  while !shutdown.load(Ordering::SeqCst) {
+    match reader.read(&mut buf) {
+      Ok(0) => break,
+      Ok(n) => {
+        if tx.send(Cmd::PtyOutput(buf[..n].to_vec())).is_err() {
+          break;
+        }
+      }
+      Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+      Err(_) => break,
+    }
+  }
+  let _ = tx.send(Cmd::ReaderClosed);
+}
+
+// ============================================================================
+// Terminal thread (owns the !Send Terminal + RenderState + Encoder)
+// ============================================================================
+
+#[allow(clippy::needless_pass_by_value)]
+fn terminal_actor_loop(
+  cmd_rx: mpsc::Receiver<Cmd>,
+  pty_writer_handle: Box<dyn Write + Send>,
+  initial_cols: u16,
+  initial_rows: u16,
+  content: &Arc<Mutex<TerminalContent>>,
+  state: &Arc<Mutex<TerminalState>>,
+  max_scroll: &Arc<AtomicUsize>,
+) -> Result<()> {
+  use std::cell::RefCell;
+  use std::rc::Rc;
+
+  let pty_writer = Rc::new(RefCell::new(pty_writer_handle));
+
+  let mut terminal = Terminal::new(TermOptions {
+    cols: initial_cols,
+    rows: initial_rows,
+    max_scrollback: SCROLLBACK_LINES,
+  })
+  .map_err(|e| anyhow!("terminal init failed: {e:?}"))?;
+
+  terminal
+    .resize(initial_cols, initial_rows, CELL_PIXEL_W, CELL_PIXEL_H)
+    .map_err(|e| anyhow!("initial resize failed: {e:?}"))?;
+
+  // VT-side responses (DSR, cursor position reports, etc.) are routed back to the PTY
+  // through `on_pty_write`. The closure runs synchronously inside `vt_write`; since
+  // we're single-threaded here, a `Rc<RefCell<_>>` is fine.
+  let writer_for_cb = Rc::clone(&pty_writer);
+  terminal
+    .on_pty_write(move |_t, data| {
+      let _ = writer_for_cb.borrow_mut().write_all(data);
+    })
+    .map_err(|e| anyhow!("on_pty_write registration failed: {e:?}"))?;
+
+  let mut render_state = RenderState::new().map_err(|e| anyhow!("render state init failed: {e:?}"))?;
+  let mut row_iter = RowIterator::new().map_err(|e| anyhow!("row iter init failed: {e:?}"))?;
+  let mut cell_iter = CellIterator::new().map_err(|e| anyhow!("cell iter init failed: {e:?}"))?;
+
+  let mut current_cols = initial_cols;
+  let mut current_rows = initial_rows;
+
+  // Initial render so the UI doesn't see an empty Default for one frame.
+  if let Err(err) = snapshot_into(
+    &terminal,
+    &mut render_state,
+    &mut row_iter,
+    &mut cell_iter,
+    current_cols,
+    current_rows,
+    content,
+    max_scroll,
+  ) {
+    state.lock().error = Some(err.to_string());
   }
 
-  // Handle Alt+key combinations
+  while let Ok(cmd) = cmd_rx.recv() {
+    match cmd {
+      Cmd::PtyOutput(bytes) => {
+        terminal.vt_write(&bytes);
+      }
+      Cmd::KeyInput(bytes) => {
+        if pty_writer.borrow_mut().write_all(&bytes).is_err() {
+          break;
+        }
+      }
+      Cmd::Resize { cols, rows } => {
+        if cols == current_cols && rows == current_rows {
+          continue;
+        }
+        if let Err(e) = terminal.resize(cols, rows, CELL_PIXEL_W, CELL_PIXEL_H) {
+          state.lock().error = Some(format!("resize failed: {e:?}"));
+          continue;
+        }
+        current_cols = cols;
+        current_rows = rows;
+      }
+      Cmd::ReaderClosed | Cmd::Shutdown => break,
+    }
+
+    if let Err(err) = snapshot_into(
+      &terminal,
+      &mut render_state,
+      &mut row_iter,
+      &mut cell_iter,
+      current_cols,
+      current_rows,
+      content,
+      max_scroll,
+    ) {
+      state.lock().error = Some(err.to_string());
+    }
+  }
+
+  Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn snapshot_into(
+  terminal: &Terminal<'static, 'static>,
+  render_state: &mut RenderState<'static>,
+  row_iter: &mut RowIterator<'static>,
+  cell_iter: &mut CellIterator<'static>,
+  cols: u16,
+  rows: u16,
+  content: &Arc<Mutex<TerminalContent>>,
+  max_scroll: &Arc<AtomicUsize>,
+) -> Result<()> {
+  let snapshot = render_state
+    .update(terminal)
+    .map_err(|e| anyhow!("render update failed: {e:?}"))?;
+
+  let snap_dirty = snapshot.dirty().map_err(|e| anyhow!("dirty query failed: {e:?}"))?;
+  if matches!(snap_dirty, Dirty::Clean) {
+    return Ok(());
+  }
+
+  let colors = snapshot.colors().map_err(|e| anyhow!("colors query failed: {e:?}"))?;
+  let cursor_visible = snapshot
+    .cursor_visible()
+    .map_err(|e| anyhow!("cursor_visible failed: {e:?}"))?;
+  let cursor_vp = snapshot
+    .cursor_viewport()
+    .map_err(|e| anyhow!("cursor_viewport failed: {e:?}"))?;
+
+  let bg_default = rgb_tuple(colors.background);
+  let fg_default = rgb_tuple(colors.foreground);
+
+  let mut lines: Vec<TerminalLine> = Vec::with_capacity(rows as usize);
+  let mut row_iteration = row_iter
+    .update(&snapshot)
+    .map_err(|e| anyhow!("row iter update failed: {e:?}"))?;
+
+  while let Some(row) = row_iteration.next() {
+    let mut cells: Vec<TerminalCell> = Vec::with_capacity(cols as usize);
+
+    let mut cell_iteration = cell_iter
+      .update(row)
+      .map_err(|e| anyhow!("cell iter update failed: {e:?}"))?;
+
+    while let Some(cell) = cell_iteration.next() {
+      let style = cell.style().map_err(|e| anyhow!("style failed: {e:?}"))?;
+
+      let mut fg = cell
+        .fg_color()
+        .map_err(|e| anyhow!("fg_color failed: {e:?}"))?
+        .map_or(fg_default, rgb_tuple);
+      let mut bg = cell
+        .bg_color()
+        .map_err(|e| anyhow!("bg_color failed: {e:?}"))?
+        .map_or(bg_default, rgb_tuple);
+
+      if style.inverse {
+        std::mem::swap(&mut fg, &mut bg);
+      }
+
+      let len = cell
+        .graphemes_len()
+        .map_err(|e| anyhow!("graphemes_len failed: {e:?}"))?;
+      let ch = if len == 0 {
+        ' '
+      } else {
+        let chars = cell.graphemes().map_err(|e| anyhow!("graphemes failed: {e:?}"))?;
+        chars.first().copied().unwrap_or(' ')
+      };
+
+      cells.push(TerminalCell {
+        char: if ch == '\0' { ' ' } else { ch },
+        fg,
+        bg,
+        bold: style.bold,
+        italic: style.italic,
+        underline: !matches!(style.underline, libghostty_vt::style::Underline::None),
+        strikethrough: style.strikethrough,
+        dim: style.faint,
+      });
+    }
+
+    // Pad to expected column count if cells are missing.
+    while cells.len() < cols as usize {
+      cells.push(TerminalCell {
+        char: ' ',
+        fg: fg_default,
+        bg: bg_default,
+        ..TerminalCell::default()
+      });
+    }
+
+    lines.push(TerminalLine { cells });
+    row.set_dirty(false).ok();
+  }
+
+  // Pad rows if the snapshot returned fewer than expected.
+  while lines.len() < rows as usize {
+    let mut cells = Vec::with_capacity(cols as usize);
+    for _ in 0..cols {
+      cells.push(TerminalCell {
+        char: ' ',
+        fg: fg_default,
+        bg: bg_default,
+        ..TerminalCell::default()
+      });
+    }
+    lines.push(TerminalLine { cells });
+  }
+
+  let (cur_row, cur_col) = cursor_vp.map_or((usize::MAX, 0), |vp| (vp.y as usize, vp.x as usize));
+
+  let new_content = TerminalContent {
+    lines,
+    cursor_row: cur_row,
+    cursor_col: cur_col,
+    cursor_visible,
+    rows: rows as usize,
+    total_lines: rows as usize,
+    scroll_offset: 0,
+  };
+
+  *content.lock() = new_content;
+  // libghostty doesn't expose a separate scrollback row count; treat scrollback
+  // as flat for now (UI can still scroll through the visible rows).
+  max_scroll.store(0, Ordering::SeqCst);
+
+  // Mark the snapshot clean so the next update only reports changes.
+  snapshot
+    .set_dirty(Dirty::Clean)
+    .map_err(|e| anyhow!("set_dirty failed: {e:?}"))?;
+
+  Ok(())
+}
+
+#[inline]
+fn rgb_tuple(c: RgbColor) -> (u8, u8, u8) {
+  (c.r, c.g, c.b)
+}
+
+// ============================================================================
+// Key encoding (simple subset matching the previous alacritty mapping)
+// ============================================================================
+
+/// Map a key + modifiers to PTY bytes. We don't go through `libghostty_vt::key`
+/// here because the encoder needs a live `&Terminal`; that lives on the actor
+/// thread. For the common shells we use, the simple xterm-style encoding
+/// matches what libghostty would emit in non-Kitty mode anyway.
+#[allow(clippy::fn_params_excessive_bools)]
+fn encode_key_simple(key: &str, ctrl: bool, alt: bool, _shift: bool) -> Option<Vec<u8>> {
+  if ctrl {
+    let byte = match key.to_lowercase().as_str() {
+      "a" => 0x01,
+      "b" => 0x02,
+      "c" => 0x03,
+      "d" => 0x04,
+      "e" => 0x05,
+      "f" => 0x06,
+      "g" => 0x07,
+      "h" => 0x08,
+      "i" => 0x09,
+      "j" => 0x0a,
+      "k" => 0x0b,
+      "l" => 0x0c,
+      "m" => 0x0d,
+      "n" => 0x0e,
+      "o" => 0x0f,
+      "p" => 0x10,
+      "q" => 0x11,
+      "r" => 0x12,
+      "s" => 0x13,
+      "t" => 0x14,
+      "u" => 0x15,
+      "v" => 0x16,
+      "w" => 0x17,
+      "x" => 0x18,
+      "y" => 0x19,
+      "z" => 0x1a,
+      "[" | "escape" => 0x1b,
+      "\\" => 0x1c,
+      "]" => 0x1d,
+      "^" | "6" => 0x1e,
+      "_" | "-" => 0x1f,
+      "space" | " " => 0x00,
+      _ => return None,
+    };
+    return Some(vec![byte]);
+  }
+
   if alt {
-    let mut bytes = vec![0x1b]; // ESC prefix
+    let mut bytes = vec![0x1b];
     if key.len() == 1 {
       bytes.extend(key.as_bytes());
     }
-    return bytes;
+    return Some(bytes);
   }
 
-  // Handle special keys
-  match key {
+  let bytes: Vec<u8> = match key {
     "enter" => vec![0x0d],
     "backspace" => vec![0x7f],
     "tab" => vec![0x09],
     "escape" => vec![0x1b],
     "space" => vec![0x20],
-    "up" => {
-      if app_cursor {
-        vec![0x1b, b'O', b'A'] // ESC O A
-      } else {
-        vec![0x1b, b'[', b'A'] // ESC [ A
-      }
-    }
-    "down" => {
-      if app_cursor {
-        vec![0x1b, b'O', b'B']
-      } else {
-        vec![0x1b, b'[', b'B']
-      }
-    }
-    "right" => {
-      if app_cursor {
-        vec![0x1b, b'O', b'C']
-      } else {
-        vec![0x1b, b'[', b'C']
-      }
-    }
-    "left" => {
-      if app_cursor {
-        vec![0x1b, b'O', b'D']
-      } else {
-        vec![0x1b, b'[', b'D']
-      }
-    }
+    "up" => vec![0x1b, b'[', b'A'],
+    "down" => vec![0x1b, b'[', b'B'],
+    "right" => vec![0x1b, b'[', b'C'],
+    "left" => vec![0x1b, b'[', b'D'],
     "home" => vec![0x1b, b'[', b'H'],
     "end" => vec![0x1b, b'[', b'F'],
     "pageup" => vec![0x1b, b'[', b'5', b'~'],
@@ -656,12 +749,13 @@ fn key_to_bytes(key: &str, ctrl: bool, alt: bool, _shift: bool, app_cursor: bool
     "f11" => vec![0x1b, b'[', b'2', b'3', b'~'],
     "f12" => vec![0x1b, b'[', b'2', b'4', b'~'],
     _ => {
-      // Single character
       if key.len() == 1 {
         key.as_bytes().to_vec()
       } else {
-        vec![]
+        return None;
       }
     }
-  }
+  };
+
+  Some(bytes)
 }

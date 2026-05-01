@@ -50,6 +50,15 @@ jobs:
             libvulkan-dev \
             libasound2-dev
 
+      # Zig is required by libghostty-vt-sys to build the vendored Ghostty C library.
+      # Only Linux + macOS use libghostty (Windows uses a placeholder UI for the terminal),
+      # so we skip Zig install on the Windows runner.
+      - name: Install Zig
+        if: matrix.os != 'windows-latest'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
