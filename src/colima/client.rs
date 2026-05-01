@@ -343,6 +343,7 @@ impl ColimaClient {
   }
 
   /// Get the docker socket path for a VM
+  #[allow(dead_code)]
   pub fn socket_path(name: Option<&str>) -> String {
     let home = dirs::home_dir().unwrap_or_default();
     let profile = name.unwrap_or("default");

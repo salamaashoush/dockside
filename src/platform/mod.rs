@@ -14,4 +14,4 @@ pub mod wsl;
 
 pub use detection::Platform;
 pub use docker_runtime::DockerRuntime;
-pub use paths::{get_binary_search_paths, get_config_dir, get_home_dir};
+pub use paths::{get_binary_search_paths, get_config_dir, get_default_docker_socket, get_home_dir, get_path_additions};

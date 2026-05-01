@@ -55,7 +55,7 @@ impl MachinesView {
       window,
       |this, _list, event: &MachineListEvent, window, cx| match event {
         MachineListEvent::Selected(machine) => {
-          this.on_select_machine(machine, window, cx);
+          this.on_select_machine(machine.as_ref(), window, cx);
         }
         MachineListEvent::NewMachine => {
           Self::show_create_dialog(window, cx);
@@ -103,16 +103,16 @@ impl MachinesView {
               this.on_tab_change(*tab, window, cx);
             }
           }
-          StateChanged::EditMachineRequest { machine_id } => {
+          StateChanged::EditMachineRequest {
+            machine_id: MachineId::Colima(name),
+          } => {
             // Find the machine and show edit dialog (only for Colima VMs)
-            if let MachineId::Colima(name) = machine_id {
-              let machine = {
-                let state = state.read(cx);
-                state.colima_vms().find(|vm| vm.name == *name).cloned()
-              };
-              if let Some(machine) = machine {
-                Self::show_edit_dialog(&machine, window, cx);
-              }
+            let machine = {
+              let state = state.read(cx);
+              state.colima_vms().find(|vm| vm.name == *name).cloned()
+            };
+            if let Some(machine) = machine {
+              Self::show_edit_dialog(&machine, window, cx);
             }
           }
           StateChanged::ConfigureHostRequest => {
@@ -233,8 +233,8 @@ impl MachinesView {
       self.load_machine_data(&colima_vm.name, cx);
     }
 
-    // If on Files tab, load the file list for the new machine (Colima only)
-    if self.active_tab == MachineDetailTab::Files && machine.is_colima() {
+    // If on Files tab, load the file list for the new machine
+    if self.active_tab == MachineDetailTab::Files && machine.supports_files() {
       self.on_navigate_path("/", cx);
     }
 
@@ -244,32 +244,22 @@ impl MachinesView {
   fn on_tab_change(&mut self, tab: MachineDetailTab, window: &mut Window, cx: &mut Context<'_, Self>) {
     self.active_tab = tab;
 
-    // If switching to terminal tab, create terminal view (Colima only)
+    // If switching to terminal tab, create terminal view (only for machines that support it)
     if tab == MachineDetailTab::Terminal
       && self.terminal_view.is_none()
       && let Some(machine) = self.selected_machine(cx)
-      && machine.is_colima()
+      && machine.supports_terminal()
     {
-      let profile = if machine.name() == "default" {
-        None
-      } else {
-        Some(machine.name().to_string())
-      };
-      self.terminal_view = Some(cx.new(|cx| TerminalView::for_colima(profile, window, cx)));
+      self.terminal_view = Some(cx.new(|cx| TerminalView::for_colima(machine.profile(), window, cx)));
     }
 
-    // If switching to processes tab, create process view (Colima only)
+    // If switching to processes tab, create the right process view for this machine
     if tab == MachineDetailTab::Processes
       && self.process_view.is_none()
       && let Some(machine) = self.selected_machine(cx)
-      && machine.is_colima()
+      && Machine::supports_processes()
     {
-      let profile = if machine.name() == "default" {
-        None
-      } else {
-        Some(machine.name().to_string())
-      };
-      self.process_view = Some(cx.new(|cx| ProcessView::for_colima(profile, window, cx)));
+      self.process_view = Some(cx.new(|cx| ProcessView::for_machine(&machine, window, cx)));
     }
 
     cx.notify();
@@ -648,7 +638,7 @@ impl MachinesView {
   fn on_open_in_editor(&mut self, data: &(String, bool), _window: &mut Window, cx: &mut Context<'_, Self>) {
     let (path, _is_dir) = data;
     if let Some(machine) = self.selected_machine(cx) {
-      services::open_machine_in_editor(&machine.name(), path, cx);
+      services::open_machine_in_editor(machine.name(), path, cx);
     }
   }
 }

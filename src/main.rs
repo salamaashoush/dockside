@@ -34,21 +34,21 @@ pub use assets::Assets;
 
 /// Get platform-specific titlebar options
 fn get_titlebar_options() -> TitlebarOptions {
-    let platform = Platform::detect();
+  let platform = Platform::detect();
 
-    match platform {
-        Platform::MacOS => TitlebarOptions {
-            title: Some("Dockside".into()),
-            appears_transparent: true,
-            traffic_light_position: Some(gpui::point(px(9.), px(9.))),
-        },
-        // Linux and Windows don't have traffic lights
-        Platform::Linux | Platform::WindowsWsl2 | Platform::Windows => TitlebarOptions {
-            title: Some("Dockside".into()),
-            appears_transparent: false,
-            traffic_light_position: None,
-        },
-    }
+  match platform {
+    Platform::MacOS => TitlebarOptions {
+      title: Some("Dockside".into()),
+      appears_transparent: true,
+      traffic_light_position: Some(gpui::point(px(9.), px(9.))),
+    },
+    // Linux and Windows don't have traffic lights
+    Platform::Linux | Platform::WindowsWsl2 | Platform::Windows => TitlebarOptions {
+      title: Some("Dockside".into()),
+      appears_transparent: false,
+      traffic_light_position: None,
+    },
+  }
 }
 
 /// Open the main application window

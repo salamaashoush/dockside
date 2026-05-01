@@ -638,18 +638,18 @@ impl DockerClient {
     // Fallback: try exec with different ps variants
     // Some containers might have busybox ps, some might have procps
     let ps_commands = [
-      vec!["ps", "aux"],                                     // Standard ps (procps)
-      vec!["ps", "-ef"],                                     // POSIX compatible
+      vec!["ps", "aux"],                                                        // Standard ps (procps)
+      vec!["ps", "-ef"],                                                        // POSIX compatible
       vec!["ps", "-eo", "user,pid,pcpu,pmem,vsz,rss,tty,stat,start,time,comm"], // Custom format
-      vec!["/bin/ps", "aux"],                                // Explicit path
+      vec!["/bin/ps", "aux"],                                                   // Explicit path
     ];
 
     for cmd in &ps_commands {
-      match self.exec_command(id, cmd.iter().map(|s| *s).collect()).await {
+      match self.exec_command(id, cmd.clone()).await {
         Ok(output) if !output.is_empty() && !output.contains("not found") => {
           return Ok(output);
         }
-        Ok(_) | Err(_) => continue,
+        Ok(_) | Err(_) => {}
       }
     }
 

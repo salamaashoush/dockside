@@ -1,7 +1,6 @@
 mod client;
 mod compose;
 mod containers;
-pub mod daemon_config;
 mod images;
 mod networks;
 mod prune;
@@ -12,7 +11,6 @@ mod volumes;
 pub use client::*;
 pub use compose::*;
 pub use containers::*;
-pub use daemon_config::*;
 pub use images::*;
 pub use networks::*;
 pub use prune::*;

@@ -76,13 +76,7 @@ impl Process {
     } else if parts.len() >= 4 {
       // Minimal format with at least user, pid, and some command
       let cmd = parts[3..].join(" ");
-      (
-        parts[0].to_string(),
-        parts[1].parse().unwrap_or(0),
-        0.0,
-        0.0,
-        cmd,
-      )
+      (parts[0].to_string(), parts[1].parse().unwrap_or(0), 0.0, 0.0, cmd)
     } else {
       // Very minimal - just PID and command
       let pid = parts[0].parse().ok().or_else(|| parts[1].parse().ok())?;
@@ -198,7 +192,7 @@ fn kill_process_async(source: ProcessSource, pid: u32, signal: &str, cx: &mut Ap
             std::process::Command::new("kill")
               .args([&format!("-{signal_num}"), &pid.to_string()])
               .output()
-              .map_err(|e| anyhow::anyhow!("Failed to run kill: {}", e))
+              .map_err(|e| anyhow::anyhow!("Failed to run kill: {e}"))
               .and_then(|output| {
                 if output.status.success() {
                   Ok(String::new())
@@ -269,6 +263,17 @@ impl ProcessView {
 
   pub fn for_host(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     Self::new(ProcessSource::Host, window, cx)
+  }
+
+  /// Pick the right `ProcessSource` for a `Machine` and return a configured view.
+  pub fn for_machine(machine: &crate::colima::Machine, window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+    if machine.supports_terminal() {
+      // Colima — needs SSH access via profile
+      Self::for_colima(machine.profile(), window, cx)
+    } else {
+      // Host — `ps aux` locally
+      Self::for_host(window, cx)
+    }
   }
 
   fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -357,7 +362,7 @@ impl ProcessView {
               std::process::Command::new("ps")
                 .args(["aux"])
                 .output()
-                .map_err(|e| anyhow::anyhow!("Failed to run ps: {}", e))
+                .map_err(|e| anyhow::anyhow!("Failed to run ps: {e}"))
                 .and_then(|output| {
                   if output.status.success() {
                     Ok(String::from_utf8_lossy(&output.stdout).to_string())

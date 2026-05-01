@@ -249,7 +249,7 @@ pub struct AppSettings {
   pub external_editor: ExternalEditor,
 }
 
-/// Default value for colima_enabled based on platform
+/// Default value for `colima_enabled` based on platform
 fn default_colima_enabled() -> bool {
   // Enable Colima by default on macOS (where it's the primary way to run Docker)
   // Disable by default on Linux (where native Docker is preferred)
@@ -279,7 +279,7 @@ impl Default for AppSettings {
 impl AppSettings {
   /// Get the platform-specific settings file path
   /// - macOS: `~/Library/Application Support/dockside/settings.json`
-  /// - Linux: `~/.config/dockside/settings.json` (XDG_CONFIG_HOME)
+  /// - Linux: `~/.config/dockside/settings.json` (`XDG_CONFIG_HOME`)
   /// - Windows: `%APPDATA%/dockside/settings.json`
   fn config_path() -> PathBuf {
     get_config_dir().join("settings.json")

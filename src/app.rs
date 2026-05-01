@@ -20,8 +20,8 @@ use crate::keybindings::{
 };
 
 use crate::assets::AppIcon;
-use crate::services::{DispatcherEvent, dispatcher, task_manager};
 use crate::colima::MachineId;
+use crate::services::{DispatcherEvent, dispatcher, task_manager};
 use crate::state::{CurrentView, DockerState, Selection, StateChanged, docker_state};
 use crate::ui::activity::ActivityMonitorView;
 use crate::ui::command_palette::{CommandPalette, CommandPaletteEvent, PaletteAction};

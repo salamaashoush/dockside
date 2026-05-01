@@ -1,151 +1,174 @@
 //! Colima VM management module
 //!
-//! This module is only available on macOS and Linux platforms.
-//! On Windows, stub implementations are provided for type compatibility.
+//! Type definitions are available on all platforms so that `Machine`,
+//! `MachineId`, and related enums can be used in cross-platform code.
+//!
+//! The `ColimaClient` (which shells out to the `colima` CLI) is only
+//! functional on macOS and Linux. On Windows a stub is provided that
+//! returns errors / empty results so callers compile unchanged.
+
+mod types;
+
+pub use types::*;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod client;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod types;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use client::*;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub use types::*;
 
-// Stub implementations for Windows
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-mod stubs {
-    use serde::{Deserialize, Serialize};
+mod client_stub {
+  use anyhow::{Result, anyhow};
 
-    /// Colima client stub for Windows
-    pub struct ColimaClient;
+  use super::{ColimaConfig, ColimaVm, VmFileEntry, VmOsInfo};
 
-    impl ColimaClient {
-        pub fn new() -> Self {
-            Self
-        }
+  fn unsupported<T>() -> Result<T> {
+    Err(anyhow!("Colima is not supported on this platform"))
+  }
 
-        pub fn list() -> anyhow::Result<Vec<ColimaVm>> {
-            Ok(Vec::new())
-        }
+  pub struct ColimaClient;
 
-        pub fn socket_path(_name: Option<&str>) -> String {
-            String::new()
-        }
+  impl ColimaClient {
+    pub fn new() -> Self {
+      Self
     }
 
-    impl Default for ColimaClient {
-        fn default() -> Self {
-            Self::new()
-        }
+    pub fn version() -> Result<String> {
+      unsupported()
     }
 
-    /// VM status stub
-    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-    pub enum VmStatus {
-        #[default]
-        Stopped,
-        Running,
-        Unknown,
+    pub fn list() -> Result<Vec<ColimaVm>> {
+      Ok(Vec::new())
     }
 
-    impl VmStatus {
-        pub fn is_running(&self) -> bool {
-            matches!(self, Self::Running)
-        }
+    pub fn status(_name: Option<&str>) -> Result<ColimaVm> {
+      unsupported()
     }
 
-    /// VM runtime stub
-    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-    pub enum VmRuntime {
-        #[default]
-        Docker,
-        Containerd,
-        Incus,
+    pub fn start_with_config(_profile: &str, _config: &ColimaConfig) -> Result<()> {
+      unsupported()
     }
 
-    /// VM architecture stub
-    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-    pub enum VmArch {
-        Host,
-        #[default]
-        Aarch64,
-        X86_64,
+    pub fn start_existing(_name: Option<&str>) -> Result<()> {
+      unsupported()
     }
 
-    /// VM type stub
-    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-    pub enum VmType {
-        #[default]
-        Qemu,
-        Vz,
+    pub fn stop(_name: Option<&str>) -> Result<()> {
+      unsupported()
     }
 
-    /// Mount type stub
-    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-    pub enum MountType {
-        #[default]
-        Sshfs,
-        NineP,
-        Virtiofs,
+    pub fn restart(_name: Option<&str>) -> Result<()> {
+      unsupported()
     }
 
-    /// Colima VM stub
-    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-    pub struct ColimaVm {
-        pub name: String,
-        pub status: VmStatus,
-        pub runtime: VmRuntime,
-        pub arch: VmArch,
-        pub cpus: u32,
-        pub memory: u64,
-        pub disk: u64,
-        pub kubernetes: bool,
-        pub address: Option<String>,
-        pub driver: Option<String>,
-        pub vm_type: Option<VmType>,
-        pub mount_type: Option<MountType>,
-        pub docker_socket: Option<String>,
-        pub containerd_socket: Option<String>,
-        pub hostname: Option<String>,
-        pub rosetta: bool,
-        pub ssh_agent: bool,
+    pub fn delete(_name: Option<&str>, _force: bool) -> Result<()> {
+      unsupported()
     }
 
-    /// Colima config stub
-    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-    pub struct ColimaConfig {
-        pub cpu: u32,
-        pub memory: u64,
-        pub disk: u64,
+    pub fn socket_path(_name: Option<&str>) -> String {
+      String::new()
     }
 
-    /// VM file entry stub
-    #[derive(Debug, Clone, Default)]
-    pub struct VmFileEntry {
-        pub name: String,
-        pub path: String,
-        pub is_dir: bool,
-        pub is_symlink: bool,
-        pub size: u64,
-        pub permissions: String,
-        pub owner: String,
-        pub modified: String,
+    pub fn run_command(_name: Option<&str>, _command: &str) -> Result<String> {
+      unsupported()
     }
 
-    /// VM OS info stub
-    #[derive(Debug, Clone, Default)]
-    pub struct VmOsInfo {
-        pub pretty_name: String,
-        pub name: String,
-        pub version: String,
-        pub version_id: String,
-        pub id: String,
-        pub kernel: String,
-        pub arch: String,
+    pub fn get_os_info(_name: Option<&str>) -> Result<VmOsInfo> {
+      unsupported()
     }
+
+    pub fn get_system_logs(_name: Option<&str>, _lines: u32) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn get_docker_logs(_name: Option<&str>, _lines: u32) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn get_containerd_logs(_name: Option<&str>, _lines: u32) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn list_files(_name: Option<&str>, _path: &str) -> Result<Vec<VmFileEntry>> {
+      Ok(Vec::new())
+    }
+
+    pub fn read_file(_name: Option<&str>, _path: &str, _max_lines: u32) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn resolve_symlink(_name: Option<&str>, _path: &str) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn is_directory(_name: Option<&str>, _path: &str) -> Result<bool> {
+      Ok(false)
+    }
+
+    pub fn get_disk_usage(_name: Option<&str>) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn get_memory_info(_name: Option<&str>) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn get_processes(_name: Option<&str>) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn config_path(_name: Option<&str>) -> std::path::PathBuf {
+      std::path::PathBuf::new()
+    }
+
+    pub fn read_config(_name: Option<&str>) -> Result<ColimaConfig> {
+      unsupported()
+    }
+
+    pub fn write_config(_name: Option<&str>, _config: &ColimaConfig) -> Result<()> {
+      unsupported()
+    }
+
+    pub fn update(_name: Option<&str>) -> Result<()> {
+      unsupported()
+    }
+
+    pub fn prune(_all: bool, _force: bool) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn ssh_config(_name: Option<&str>) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn cache_size() -> Result<String> {
+      Ok("0 B".to_string())
+    }
+
+    pub fn run_provision_script(_name: Option<&str>, _script: &str, _as_root: bool) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn template_path() -> std::path::PathBuf {
+      std::path::PathBuf::new()
+    }
+
+    pub fn read_template() -> Result<String> {
+      unsupported()
+    }
+
+    pub fn write_template(_content: &str) -> Result<()> {
+      unsupported()
+    }
+  }
+
+  impl Default for ColimaClient {
+    fn default() -> Self {
+      Self::new()
+    }
+  }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub use stubs::*;
+pub use client_stub::*;

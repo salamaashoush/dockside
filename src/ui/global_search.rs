@@ -320,7 +320,11 @@ impl GlobalSearch {
         results.push(SearchResult {
           result_type: SearchResultType::Machine,
           name: machine.name().to_string(),
-          subtitle: format!("{} - {} CPU, {memory_size} memory", machine.status_display(), machine.cpus()),
+          subtitle: format!(
+            "{} - {} CPU, {memory_size} memory",
+            machine.status_display(),
+            machine.cpus()
+          ),
           selection: Selection::Machine(machine.id()),
         });
       }
@@ -734,6 +738,7 @@ fn format_size(bytes: i64) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::colima::MachineId;
 
   #[test]
   fn test_format_size_bytes() {

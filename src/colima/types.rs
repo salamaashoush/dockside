@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::docker::DockerHostInfo;
+use crate::state::MachineDetailTab;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum VmStatus {
@@ -514,6 +515,7 @@ pub enum MachineId {
   Colima(String),
 }
 
+#[allow(dead_code)]
 impl MachineId {
   /// Get a display name for this machine ID
   pub fn name(&self) -> &str {
@@ -589,6 +591,10 @@ impl Machine {
   }
 
   /// Get the Docker socket path for this machine
+  ///
+  /// Forward-compatibility helper for cross-runtime callers. Currently the UI
+  /// reads the field directly off `ColimaVm` / `DockerHostInfo`.
+  #[allow(dead_code)]
   pub fn docker_socket(&self) -> Option<String> {
     match self {
       Machine::Host(h) => Some(h.docker_socket.clone()),
@@ -625,6 +631,7 @@ impl Machine {
   }
 
   /// Get the operating system name
+  #[allow(dead_code)]
   pub fn os(&self) -> &str {
     match self {
       Machine::Host(h) => &h.os,
@@ -633,6 +640,7 @@ impl Machine {
   }
 
   /// Get the Docker version if available
+  #[allow(dead_code)]
   pub fn docker_version(&self) -> Option<&str> {
     match self {
       Machine::Host(h) => Some(&h.docker_version),
@@ -641,18 +649,20 @@ impl Machine {
   }
 
   /// Get memory in gigabytes for display
+  #[allow(dead_code)]
   pub fn memory_gb(&self) -> f64 {
     self.memory() as f64 / (1024.0 * 1024.0 * 1024.0)
   }
 
   /// Get formatted memory string
+  #[allow(dead_code)]
   pub fn display_memory(&self) -> String {
     let gb = self.memory_gb();
     if gb >= 1.0 {
-      format!("{:.1} GB", gb)
+      format!("{gb:.1} GB")
     } else {
       let mb = self.memory() as f64 / (1024.0 * 1024.0);
-      format!("{:.0} MB", mb)
+      format!("{mb:.0} MB")
     }
   }
 
@@ -676,7 +686,7 @@ impl Machine {
     }
   }
 
-  /// Get the underlying ColimaVm if this is a Colima machine
+  /// Get the underlying `ColimaVm` if this is a Colima machine
   pub fn as_colima(&self) -> Option<&ColimaVm> {
     match self {
       Machine::Colima(vm) => Some(vm),
@@ -684,11 +694,54 @@ impl Machine {
     }
   }
 
-  /// Get the underlying DockerHostInfo if this is a Host machine
+  /// Get the underlying `DockerHostInfo` if this is a Host machine
   pub fn as_host(&self) -> Option<&DockerHostInfo> {
     match self {
       Machine::Host(h) => Some(h),
       Machine::Colima(_) => None,
+    }
+  }
+
+  /// Tabs supported by this machine type in the detail view.
+  ///
+  /// Host machines lack SSH-backed tabs (Terminal, Files, Logs, Config).
+  pub fn available_tabs(&self) -> &'static [MachineDetailTab] {
+    match self {
+      Machine::Host(_) => &MachineDetailTab::HOST_TABS,
+      Machine::Colima(_) => &MachineDetailTab::ALL,
+    }
+  }
+
+  /// True if an interactive shell can be opened on this machine.
+  /// Currently only Colima VMs (via `colima ssh`).
+  pub fn supports_terminal(&self) -> bool {
+    self.is_colima()
+  }
+
+  /// True if the file browser can list/read files on this machine.
+  /// Currently only Colima VMs (via SSH commands).
+  pub fn supports_files(&self) -> bool {
+    self.is_colima()
+  }
+
+  /// True if the machine exposes a process list.
+  /// Host uses local `ps`, Colima uses SSH-`ps`.
+  pub const fn supports_processes() -> bool {
+    true
+  }
+
+  /// True if the machine has an editable runtime configuration (e.g., colima.yaml).
+  #[allow(dead_code)]
+  pub fn supports_config(&self) -> bool {
+    self.is_colima()
+  }
+
+  /// Profile name for runtimes that have multiple instances (Colima profiles).
+  /// Returns `None` for the implicit "default" profile, or for the host machine.
+  pub fn profile(&self) -> Option<String> {
+    match self {
+      Machine::Colima(vm) if vm.name != "default" => Some(vm.name.clone()),
+      _ => None,
     }
   }
 }
@@ -1002,7 +1055,7 @@ mod tests {
     assert!(id.is_host());
     assert!(!id.is_colima());
     assert_eq!(id.name(), "Host");
-    assert_eq!(format!("{}", id), "Host");
+    assert_eq!(format!("{id}"), "Host");
   }
 
   #[test]
@@ -1011,7 +1064,7 @@ mod tests {
     assert!(!id.is_host());
     assert!(id.is_colima());
     assert_eq!(id.name(), "dev");
-    assert_eq!(format!("{}", id), "dev");
+    assert_eq!(format!("{id}"), "dev");
   }
 
   #[test]

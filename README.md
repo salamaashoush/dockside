@@ -1,13 +1,14 @@
 # Dockside
 
-A native macOS desktop application for managing Docker containers, images, volumes, networks, and Kubernetes resources via Colima.
+A native cross-platform desktop application for managing Docker containers, images, volumes, networks, and Kubernetes resources via Colima or native Docker.
 
-Built with [GPUI](https://gpui.rs) for a fast, native experience.
+Built with [GPUI](https://gpui.rs) for a fast, native experience on macOS, Linux, and Windows.
 
 ## Features
 
 - **Docker Management**: Containers, images, volumes, networks
-- **Kubernetes Support**: Pods, services, deployments via Colima
+- **Kubernetes Support**: Pods, services, deployments
+- **Cross-Platform**: macOS (Colima), Linux (native Docker / Colima), Windows (Docker in WSL2)
 - **Native Performance**: Built with Rust and GPUI framework
 - **Real-time Updates**: Live status monitoring
 - **Terminal Integration**: Exec into containers directly
@@ -15,13 +16,16 @@ Built with [GPUI](https://gpui.rs) for a fast, native experience.
 
 ## Requirements
 
-- macOS 13.0+
-- [Colima](https://github.com/abiosoft/colima) (container runtime)
+- macOS 13.0+, Linux (glibc 2.31+), or Windows 10/11
+- Docker runtime:
+  - **macOS**: [Colima](https://github.com/abiosoft/colima)
+  - **Linux**: Native Docker daemon or Colima
+  - **Windows**: Docker running inside WSL2 (exposed via TCP)
 - Docker CLI
 
 ## Installation
 
-### Quick Install
+### Quick Install (macOS / Linux)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/install.sh | bash
@@ -34,18 +38,26 @@ This will install Dockside and optionally set up Docker and Colima if not alread
 Download the latest release from the [Releases page](https://github.com/salamaashoush/dockside/releases).
 
 **macOS App Bundle:**
-1. Download `dockside-vX.X.X.app.zip`
+1. Download `Dockside-vX.X.X.app.zip`
 2. Extract and move to `/Applications`
 
-**CLI Binary:**
+**macOS CLI Binary:**
 1. Download `dockside-vX.X.X-aarch64-apple-darwin.tar.gz` (Apple Silicon) or `dockside-vX.X.X-x86_64-apple-darwin.tar.gz` (Intel)
 2. Extract: `tar -xzf dockside-*.tar.gz`
 3. Move to PATH: `mv dockside ~/.local/bin/`
 
+**Linux:**
+1. Download `dockside-vX.X.X-x86_64-unknown-linux-gnu.tar.gz`
+2. Extract: `tar -xzf dockside-*.tar.gz`
+3. Move to PATH: `mv dockside ~/.local/bin/`
+
+**Windows:**
+1. Download `dockside-vX.X.X-x86_64-pc-windows-msvc.zip`
+2. Extract and run `dockside.exe`
+
 ### Build from Source
 
 ```bash
-# Clone the repo
 git clone https://github.com/salamaashoush/dockside
 cd dockside
 
@@ -58,30 +70,27 @@ just run
 # Or build release
 just build-release
 
-# Create app bundle
+# Create app bundle (macOS)
 just bundle
 ```
 
 ## Usage
 
-### Starting Colima
+### Starting a Docker Runtime
 
-Before using Dockside, start Colima:
+**macOS / Linux (Colima):**
 
 ```bash
-# Standard Docker runtime
 colima start --cpu 4 --memory 8 --disk 60
-
-# With Kubernetes support
+# With Kubernetes
 colima start --cpu 4 --memory 8 --disk 60 --kubernetes
 ```
 
-Or use the justfile:
+Or via justfile: `just start-colima` / `just start-colima-k8s`.
 
-```bash
-just start-colima      # Standard
-just start-colima-k8s  # With Kubernetes
-```
+**Linux (native Docker):** ensure `dockerd` is running and `/var/run/docker.sock` is accessible.
+
+**Windows (WSL2):** install a WSL2 distro, install Docker inside it, and expose the daemon over TCP. The setup dialog walks you through this on first launch.
 
 ### Running Dockside
 
@@ -92,31 +101,24 @@ just run
 # Or run installed binary
 dockside
 
-# Or open the app bundle
-open /Applications/dockside.app
+# Or open the app bundle (macOS)
+open /Applications/Dockside.app
 ```
 
 ## Development
 
 ### Prerequisites
 
-- Rust 1.85+
+- Rust 1.91+
 - [just](https://github.com/casey/just) command runner
 
 ### Setup
 
 ```bash
-# Install development tools
-just init
-
-# Run in development mode
-just run
-
-# Run with debug logging
-just run-debug
-
-# Watch for changes
-just watch
+just init       # Install development tools
+just run        # Run in development mode
+just run-debug  # Run with debug logging
+just watch      # Watch for changes
 ```
 
 ### Commands
@@ -136,8 +138,8 @@ just ready        # Run all CI checks
 ```bash
 just build-release         # Build release binary
 just build-native          # Build with native CPU opts
-just build-macos-universal # Build universal binary
-just bundle                # Create .app bundle
+just build-macos-universal # Build universal binary (macOS)
+just bundle                # Create .app bundle (macOS)
 just install-app           # Install to /Applications
 ```
 
@@ -156,7 +158,9 @@ dockside/
 ├── src/
 │   ├── main.rs           # Entry point
 │   ├── app.rs            # Main application
+│   ├── platform/         # Platform detection + Docker runtime abstraction
 │   ├── docker/           # Docker client and types
+│   ├── colima/           # Colima client and machine types
 │   ├── kubernetes/       # Kubernetes client and types
 │   ├── state/            # Application state management
 │   ├── services/         # Background services
@@ -166,6 +170,7 @@ dockside/
 │   │   ├── pods/         # Pod views
 │   │   ├── services/     # Service views
 │   │   ├── deployments/  # Deployment views
+│   │   ├── machines/     # Machine + host views
 │   │   └── ...
 │   └── themes/           # Theme definitions
 ├── assets/               # App icons and resources

@@ -246,12 +246,12 @@ impl MachineDetail {
   fn render_info_tab(&self, machine: &Machine, cx: &App) -> gpui::Div {
     // Dispatch to appropriate render method based on machine type
     match machine {
-      Machine::Host(host) => self.render_host_info_tab(host, cx),
+      Machine::Host(host) => Self::render_host_info_tab(host, cx),
       Machine::Colima(vm) => self.render_colima_info_tab(vm, cx),
     }
   }
 
-  fn render_host_info_tab(&self, host: &crate::docker::DockerHostInfo, cx: &App) -> gpui::Div {
+  fn render_host_info_tab(host: &crate::docker::DockerHostInfo, cx: &App) -> gpui::Div {
     let _colors = &cx.theme().colors;
 
     let basic_info = vec![
@@ -432,7 +432,7 @@ impl MachineDetail {
               .text_sm()
               .text_color(cx.theme().colors.muted_foreground)
               .child("Host configuration is managed by the system."),
-          )
+          );
       }
     };
 
@@ -1329,12 +1329,8 @@ impl MachineDetail {
 
     let on_tab_change = self.on_tab_change.clone();
 
-    // Determine which tabs to show based on machine type
-    let tabs: &[MachineDetailTab] = if machine.is_host() {
-      &MachineDetailTab::HOST_TABS
-    } else {
-      &MachineDetailTab::ALL
-    };
+    // Tabs come from the machine's capability set
+    let tabs: &[MachineDetailTab] = machine.available_tabs();
 
     // Toolbar with just tabs - no action buttons
     let toolbar = h_flex()

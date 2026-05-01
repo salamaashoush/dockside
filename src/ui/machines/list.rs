@@ -19,7 +19,7 @@ use crate::ui::components::{render_error, render_loading};
 
 /// Machine list events emitted to parent
 pub enum MachineListEvent {
-  Selected(Machine),
+  Selected(Box<Machine>),
   NewMachine,
 }
 
@@ -185,7 +185,7 @@ impl ListDelegate for MachineListDelegate {
                       PopupMenuItem::new("Set as Active")
                         .icon(IconName::CircleCheck)
                         .on_click(move |_, _, cx| {
-                          services::switch_runtime(MachineId::Host, cx);
+                          services::switch_runtime(&MachineId::Host, cx);
                         }),
                     )
                     .item(
@@ -410,7 +410,7 @@ impl MachineList {
         let delegate = state.read(cx).delegate();
         let filtered = delegate.filtered_machines(cx);
         if let Some(machine) = filtered.get(ix.row) {
-          cx.emit(MachineListEvent::Selected(machine.clone()));
+          cx.emit(MachineListEvent::Selected(Box::new(machine.clone())));
         }
       }
       ListEvent::Cancel => {}

@@ -34,10 +34,11 @@ impl MachineDetailTab {
     MachineDetailTab::Files,
   ];
 
-  /// Tabs available for Host Docker (no SSH access)
-  pub const HOST_TABS: [MachineDetailTab; 2] = [
+  /// Tabs available for Host Docker (no SSH/VM, native processes only)
+  pub const HOST_TABS: [MachineDetailTab; 3] = [
     MachineDetailTab::Info,
     MachineDetailTab::Stats,
+    MachineDetailTab::Processes,
   ];
 
   pub fn label(self) -> &'static str {
@@ -50,11 +51,6 @@ impl MachineDetailTab {
       MachineDetailTab::Terminal => "Terminal",
       MachineDetailTab::Files => "Files",
     }
-  }
-
-  /// Check if this tab is supported for Host machines
-  pub fn is_host_supported(self) -> bool {
-    matches!(self, MachineDetailTab::Info | MachineDetailTab::Stats)
   }
 }
 
@@ -233,6 +229,7 @@ pub enum StateChanged {
   },
   /// Runtime switched to a different machine
   RuntimeSwitched {
+    #[allow(dead_code)]
     machine_id: MachineId,
   },
   /// Request to open a container with a specific tab
@@ -429,11 +426,13 @@ impl DockerState {
   }
 
   /// Find a machine by name (convenience method)
+  #[allow(dead_code)]
   pub fn get_machine_by_name(&self, name: &str) -> Option<&Machine> {
     self.machines.iter().find(|m| m.name() == name)
   }
 
   /// Get the currently active machine
+  #[allow(dead_code)]
   pub fn active(&self) -> Option<&Machine> {
     self.active_machine.as_ref().and_then(|id| self.get_machine(id))
   }
@@ -444,6 +443,7 @@ impl DockerState {
   }
 
   /// Clear the active machine
+  #[allow(dead_code)]
   pub fn clear_active(&mut self) {
     self.active_machine = None;
   }

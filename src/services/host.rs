@@ -5,9 +5,7 @@
 
 use gpui::App;
 
-use crate::docker::DaemonConfig;
 use crate::services::{Tokio, complete_task, fail_task, start_task};
-use crate::state::{StateChanged, docker_state};
 
 use super::core::{DispatcherEvent, dispatcher};
 
@@ -88,7 +86,7 @@ pub fn docker_system_prune(prune_volumes: bool, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| match result {
-      Ok(Ok(_)) => {
+      Ok(Ok(())) => {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
@@ -108,59 +106,6 @@ pub fn docker_system_prune(prune_volumes: bool, cx: &mut App) {
         fail_task(cx, task_id, error.clone());
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed { error });
-        });
-      }
-    })
-  })
-  .detach();
-}
-
-/// Read the Docker daemon.json configuration file
-pub async fn read_daemon_config() -> anyhow::Result<DaemonConfig> {
-  DaemonConfig::load_default().await
-}
-
-/// Write the Docker daemon.json configuration file
-///
-/// Note: Writing to /etc/docker/daemon.json typically requires root permissions.
-pub async fn write_daemon_config(config: &DaemonConfig) -> anyhow::Result<()> {
-  config.save_default().await
-}
-
-/// Get the default daemon.json path for the current platform
-pub fn daemon_json_path() -> std::path::PathBuf {
-  DaemonConfig::default_path()
-}
-
-/// Refresh host Docker system info
-pub fn refresh_host_info(cx: &mut App) {
-  let state = docker_state(cx);
-
-  let tokio_task = Tokio::spawn(cx, async move {
-    use crate::services::core::docker_client;
-
-    let client_handle = docker_client();
-    let guard = client_handle.read().await;
-
-    if let Some(docker) = guard.as_ref() {
-      docker.get_system_info().await.ok()
-    } else {
-      None
-    }
-  });
-
-  cx.spawn(async move |cx| {
-    let result = tokio_task.await;
-    cx.update(|cx| {
-      if let Ok(Some(host_info)) = result {
-        state.update(cx, |state, cx| {
-          // Update the host machine if it exists
-          if let Some(host_machine) = state.machines.iter_mut().find(|m| m.is_host()) {
-            if let crate::colima::Machine::Host(existing) = host_machine {
-              *existing = host_info;
-            }
-          }
-          cx.emit(StateChanged::MachinesUpdated);
         });
       }
     })

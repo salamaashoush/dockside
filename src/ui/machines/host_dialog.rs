@@ -3,7 +3,9 @@
 //! Settings panel for native Docker on Linux, similar to Docker Desktop.
 //! Allows configuring daemon.json settings with a user-friendly interface.
 
-use gpui::{App, Context, Entity, FocusHandle, Focusable, Hsla, ParentElement, Render, Styled, Window, div, prelude::*, px};
+use gpui::{
+  App, Context, Entity, FocusHandle, Focusable, Hsla, ParentElement, Render, Styled, Window, div, prelude::*, px,
+};
 use gpui_component::{
   Disableable, Selectable, Sizable,
   button::{Button, ButtonVariants},
@@ -35,7 +37,7 @@ impl HostDialogTab {
     vec![Self::DockerEngine, Self::Registries, Self::Network, Self::Advanced]
   }
 
-  fn label(&self) -> &'static str {
+  fn label(self) -> &'static str {
     match self {
       Self::DockerEngine => "Docker Engine",
       Self::Registries => "Registries",
@@ -45,13 +47,12 @@ impl HostDialogTab {
   }
 }
 
-/// Theme colors struct for passing to helper methods (same pattern as MachineDialog)
+/// Theme colors struct for passing to helper methods (same pattern as `MachineDialog`)
 #[derive(Clone)]
 struct DialogColors {
   border: Hsla,
   foreground: Hsla,
   muted_foreground: Hsla,
-  background: Hsla,
   sidebar: Hsla,
   danger: Hsla,
   success: Hsla,
@@ -72,7 +73,6 @@ pub struct HostDialog {
   daemon_json_loading: bool,
   daemon_json_error: Option<String>,
   daemon_json_saved: bool,
-  last_synced_content: String,
 
   // Registries tab
   insecure_registries_input: Option<Entity<InputState>>,
@@ -122,7 +122,6 @@ impl HostDialog {
       daemon_json_loading: false,
       daemon_json_error: None,
       daemon_json_saved: false,
-      last_synced_content: String::new(),
       insecure_registries_input: None,
       registry_mirrors_input: None,
       dns_input: None,
@@ -158,7 +157,7 @@ impl HostDialog {
             (content, None)
           }
         }
-        Err(_) => ("{}".to_string(), Some(serde_json::json!({})))
+        Err(_) => ("{}".to_string(), Some(serde_json::json!({}))),
       }
     } else {
       ("{}".to_string(), Some(serde_json::json!({})))
@@ -166,12 +165,27 @@ impl HostDialog {
   }
 
   fn extract_settings_from_json(&mut self, json: &serde_json::Value) {
-    self.experimental = json.get("experimental").and_then(|v| v.as_bool()).unwrap_or(false);
-    self.debug = json.get("debug").and_then(|v| v.as_bool()).unwrap_or(false);
-    self.live_restore = json.get("live-restore").and_then(|v| v.as_bool()).unwrap_or(false);
-    self.userland_proxy = json.get("userland-proxy").and_then(|v| v.as_bool()).unwrap_or(true);
-    self.ip_forward = json.get("ip-forward").and_then(|v| v.as_bool()).unwrap_or(true);
-    self.iptables = json.get("iptables").and_then(|v| v.as_bool()).unwrap_or(true);
+    self.experimental = json
+      .get("experimental")
+      .and_then(serde_json::Value::as_bool)
+      .unwrap_or(false);
+    self.debug = json.get("debug").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    self.live_restore = json
+      .get("live-restore")
+      .and_then(serde_json::Value::as_bool)
+      .unwrap_or(false);
+    self.userland_proxy = json
+      .get("userland-proxy")
+      .and_then(serde_json::Value::as_bool)
+      .unwrap_or(true);
+    self.ip_forward = json
+      .get("ip-forward")
+      .and_then(serde_json::Value::as_bool)
+      .unwrap_or(true);
+    self.iptables = json
+      .get("iptables")
+      .and_then(serde_json::Value::as_bool)
+      .unwrap_or(true);
   }
 
   fn ensure_initialized(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -180,8 +194,8 @@ impl HostDialog {
     }
 
     // Parse current JSON to extract values for form fields
-    let json: serde_json::Value = serde_json::from_str(&self.daemon_json_content)
-      .unwrap_or_else(|_| serde_json::json!({}));
+    let json: serde_json::Value =
+      serde_json::from_str(&self.daemon_json_content).unwrap_or_else(|_| serde_json::json!({}));
 
     // Initialize registries inputs
     let registries = json
@@ -218,32 +232,32 @@ impl HostDialog {
         .default_value(dns)
     }));
 
-    self.http_proxy_input = Some(cx.new(|cx| {
-      InputState::new(window, cx).placeholder("http://proxy.example.com:8080")
-    }));
+    self.http_proxy_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("http://proxy.example.com:8080")));
 
-    self.https_proxy_input = Some(cx.new(|cx| {
-      InputState::new(window, cx).placeholder("https://proxy.example.com:8080")
-    }));
+    self.https_proxy_input =
+      Some(cx.new(|cx| InputState::new(window, cx).placeholder("https://proxy.example.com:8080")));
 
-    self.no_proxy_input = Some(cx.new(|cx| {
-      InputState::new(window, cx).placeholder("localhost,127.0.0.1,.example.com")
-    }));
+    self.no_proxy_input =
+      Some(cx.new(|cx| InputState::new(window, cx).placeholder("localhost,127.0.0.1,.example.com")));
 
     self.initialized = true;
   }
 
   fn build_json_from_settings(&self, cx: &App) -> Result<String, String> {
     // Start with current JSON content or empty object
-    let mut json: serde_json::Value = serde_json::from_str(&self.daemon_json_content)
-      .unwrap_or_else(|_| serde_json::json!({}));
+    let mut json: serde_json::Value =
+      serde_json::from_str(&self.daemon_json_content).unwrap_or_else(|_| serde_json::json!({}));
 
     let obj = json.as_object_mut().ok_or("Invalid JSON structure")?;
 
     // Update registries
     if let Some(input) = &self.insecure_registries_input {
       let text = input.read(cx).text().to_string();
-      let registries: Vec<String> = text.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+      let registries: Vec<String> = text
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
       if registries.is_empty() {
         obj.remove("insecure-registries");
       } else {
@@ -253,7 +267,11 @@ impl HostDialog {
 
     if let Some(input) = &self.registry_mirrors_input {
       let text = input.read(cx).text().to_string();
-      let mirrors: Vec<String> = text.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+      let mirrors: Vec<String> = text
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
       if mirrors.is_empty() {
         obj.remove("registry-mirrors");
       } else {
@@ -264,7 +282,11 @@ impl HostDialog {
     // Update DNS
     if let Some(input) = &self.dns_input {
       let text = input.read(cx).text().to_string();
-      let dns: Vec<String> = text.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+      let dns: Vec<String> = text
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
       if dns.is_empty() {
         obj.remove("dns");
       } else {
@@ -291,25 +313,25 @@ impl HostDialog {
       obj.remove("live-restore");
     }
 
-    if !self.userland_proxy {
-      obj.insert("userland-proxy".to_string(), serde_json::json!(false));
-    } else {
+    if self.userland_proxy {
       obj.remove("userland-proxy");
+    } else {
+      obj.insert("userland-proxy".to_string(), serde_json::json!(false));
     }
 
-    if !self.ip_forward {
-      obj.insert("ip-forward".to_string(), serde_json::json!(false));
-    } else {
+    if self.ip_forward {
       obj.remove("ip-forward");
-    }
-
-    if !self.iptables {
-      obj.insert("iptables".to_string(), serde_json::json!(false));
     } else {
-      obj.remove("iptables");
+      obj.insert("ip-forward".to_string(), serde_json::json!(false));
     }
 
-    serde_json::to_string_pretty(&json).map_err(|e| format!("Failed to serialize: {}", e))
+    if self.iptables {
+      obj.remove("iptables");
+    } else {
+      obj.insert("iptables".to_string(), serde_json::json!(false));
+    }
+
+    serde_json::to_string_pretty(&json).map_err(|e| format!("Failed to serialize: {e}"))
   }
 
   fn save_config(&mut self, restart: bool, cx: &mut Context<'_, Self>) {
@@ -343,7 +365,7 @@ impl HostDialog {
         .spawn(async move {
           // Validate JSON
           if let Err(e) = serde_json::from_str::<serde_json::Value>(&content) {
-            return Err(format!("Invalid JSON: {}", e));
+            return Err(format!("Invalid JSON: {e}"));
           }
 
           // Write to daemon.json using sudo tee
@@ -353,15 +375,17 @@ impl HostDialog {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to start sudo: {}", e))?;
+            .map_err(|e| format!("Failed to start sudo: {e}"))?;
 
           {
             use std::io::Write;
             let stdin = child.stdin.as_mut().ok_or("Failed to open stdin")?;
-            stdin.write_all(content.as_bytes()).map_err(|e| format!("Failed to write: {}", e))?;
+            stdin
+              .write_all(content.as_bytes())
+              .map_err(|e| format!("Failed to write: {e}"))?;
           }
 
-          let status = child.wait().map_err(|e| format!("Failed to wait: {}", e))?;
+          let status = child.wait().map_err(|e| format!("Failed to wait: {e}"))?;
           if !status.success() {
             return Err("sudo tee failed - check permissions".to_string());
           }
@@ -475,8 +499,7 @@ impl HostDialog {
           .text_color(colors.muted_foreground)
           .child("Configure the Docker daemon by editing the JSON below."),
       )
-      .child(editor_view
-      )
+      .child(editor_view)
   }
 
   fn render_registries_tab(&self, colors: &DialogColors) -> impl IntoElement {
@@ -552,9 +575,11 @@ impl HostDialog {
           .child(Self::render_form_row(
             "HTTPS Proxy",
             "Proxy for HTTPS connections",
-            div().w(px(250.)).when_some(self.https_proxy_input.clone(), |el, input| {
-              el.child(Input::new(&input).small().w_full())
-            }),
+            div()
+              .w(px(250.))
+              .when_some(self.https_proxy_input.clone(), |el, input| {
+                el.child(Input::new(&input).small().w_full())
+              }),
             colors,
           ))
           .child(Self::render_form_row(
@@ -570,12 +595,12 @@ impl HostDialog {
       .child(Self::render_form_row(
         "IP Forwarding",
         "Enable IP forwarding for containers",
-        Switch::new("ip-forward")
-          .checked(self.ip_forward)
-          .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+        Switch::new("ip-forward").checked(self.ip_forward).on_click(cx.listener(
+          |this, checked: &bool, _window, cx| {
             this.ip_forward = *checked;
             cx.notify();
-          })),
+          },
+        )),
         colors,
       ))
       .child(Self::render_form_row(
@@ -640,19 +665,16 @@ impl HostDialog {
         colors,
       ))
       .child(
-        div()
-          .w_full()
-          .p(px(16.))
-          .child(
-            div()
-              .w_full()
-              .p(px(12.))
-              .rounded(px(6.))
-              .bg(colors.sidebar)
-              .text_xs()
-              .text_color(colors.muted_foreground)
-              .child("Changes require Docker daemon restart to take effect."),
-          ),
+        div().w_full().p(px(16.)).child(
+          div()
+            .w_full()
+            .p(px(12.))
+            .rounded(px(6.))
+            .bg(colors.sidebar)
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child("Changes require Docker daemon restart to take effect."),
+        ),
       )
   }
 
@@ -677,7 +699,7 @@ impl HostDialog {
           .flex_1()
           .when(has_error, |el| {
             let error = self.daemon_json_error.clone().unwrap_or_default();
-            el.child(div().text_sm().text_color(colors.danger).child(format!("Error: {}", error)))
+            el.child(div().text_sm().text_color(colors.danger).child(format!("Error: {error}")))
           })
           .when(is_saved && !has_error, |el| {
             el.child(div().text_sm().text_color(colors.success).child("Configuration saved"))
@@ -728,7 +750,6 @@ impl Render for HostDialog {
       border: theme_colors.border,
       foreground: theme_colors.foreground,
       muted_foreground: theme_colors.muted_foreground,
-      background: theme_colors.background,
       sidebar: theme_colors.sidebar,
       danger: theme_colors.danger,
       success: theme_colors.success,

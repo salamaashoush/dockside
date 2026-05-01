@@ -62,13 +62,13 @@ pub fn dispatcher(cx: &App) -> Entity<ActionDispatcher> {
 ///
 /// This disconnects the current Docker client and connects to a new runtime.
 /// Used when switching between Host Docker and Colima VMs.
-pub fn switch_runtime(machine_id: MachineId, cx: &mut App) {
+pub fn switch_runtime(machine_id: &MachineId, cx: &mut App) {
   let state = docker_state(cx);
   let disp = dispatcher(cx);
   let client_handle = docker_client();
 
   // Determine the runtime to use based on machine_id
-  let runtime = match &machine_id {
+  let runtime = match machine_id {
     MachineId::Host => DockerRuntime::native_default(),
     MachineId::Colima(profile) => DockerRuntime::Colima {
       profile: profile.clone(),
