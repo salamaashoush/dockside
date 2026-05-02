@@ -98,6 +98,7 @@ impl Render for WorkloadsView {
           .w_full()
           .items_center()
           .flex_shrink_0()
+          .bg(colors.tab_bar)
           .border_b_1()
           .border_color(colors.border)
           .child(div().flex_1().min_w_0().overflow_hidden().child(tab_bar))
