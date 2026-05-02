@@ -16,12 +16,15 @@ use crate::state::ImageInspectData;
 
 type ImageActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
+type ImageNameCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 
 pub struct ImageDetail {
   image: Option<ImageInfo>,
   inspect_data: Option<ImageInspectData>,
   active_tab: usize,
   on_delete: Option<ImageActionCallback>,
+  on_tag: Option<ImageNameCallback>,
+  on_push: Option<ImageNameCallback>,
   on_tab_change: Option<TabChangeCallback>,
 }
 
@@ -32,6 +35,8 @@ impl ImageDetail {
       inspect_data: None,
       active_tab: 0,
       on_delete: None,
+      on_tag: None,
+      on_push: None,
       on_tab_change: None,
     }
   }
@@ -48,6 +53,22 @@ impl ImageDetail {
 
   pub fn active_tab(mut self, tab: usize) -> Self {
     self.active_tab = tab;
+    self
+  }
+
+  pub fn on_tag<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_tag = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_push<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_push = Some(Rc::new(callback));
     self
   }
 
@@ -548,19 +569,49 @@ impl ImageDetail {
               })
           })),
       )
-      .child(h_flex().gap(px(8.)).child({
-        let on_delete = on_delete.clone();
-        let id = image_id_for_delete.clone();
-        Button::new("delete")
-          .icon(Icon::new(AppIcon::Trash))
-          .ghost()
-          .small()
-          .on_click(move |_ev, window, cx| {
-            if let Some(ref cb) = on_delete {
-              cb(&id, window, cx);
-            }
+      .child(
+        h_flex()
+          .gap(px(8.))
+          .child({
+            let on_tag = self.on_tag.clone();
+            let id = image_id_for_delete.clone();
+            Button::new("image-tag")
+              .label("Tag")
+              .ghost()
+              .small()
+              .on_click(move |_ev, window, cx| {
+                if let Some(ref cb) = on_tag {
+                  cb(&id, window, cx);
+                }
+              })
           })
-      }));
+          .child({
+            let on_push = self.on_push.clone();
+            let id = image_id_for_delete.clone();
+            Button::new("image-push")
+              .label("Push")
+              .ghost()
+              .small()
+              .on_click(move |_ev, window, cx| {
+                if let Some(ref cb) = on_push {
+                  cb(&id, window, cx);
+                }
+              })
+          })
+          .child({
+            let on_delete = on_delete.clone();
+            let id = image_id_for_delete.clone();
+            Button::new("delete")
+              .icon(Icon::new(AppIcon::Trash))
+              .ghost()
+              .small()
+              .on_click(move |_ev, window, cx| {
+                if let Some(ref cb) = on_delete {
+                  cb(&id, window, cx);
+                }
+              })
+          }),
+      );
 
     // Content based on active tab
     let content = match self.active_tab {

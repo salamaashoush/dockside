@@ -132,6 +132,14 @@ impl TaskManager {
     }
   }
 
+  /// Set the running task's progress fraction + a free-form status line.
+  pub fn set_progress(&mut self, task_id: u64, progress: f32, status: Option<String>) {
+    if let Some(task) = self.tasks.get_mut(&task_id) {
+      task.progress = Some(progress.clamp(0.0, 1.0));
+      task.stage_status = status;
+    }
+  }
+
   /// Mark task as completed
   pub fn complete_task(&mut self, task_id: u64) {
     if let Some(task) = self.tasks.get_mut(&task_id) {
@@ -199,6 +207,15 @@ pub fn advance_stage(cx: &mut App, task_id: u64) {
   let manager = task_manager(cx);
   manager.update(cx, |m, cx| {
     m.advance_stage(task_id);
+    cx.notify();
+  });
+}
+
+/// Update progress + status for a task from any context.
+pub fn set_task_progress(cx: &mut App, task_id: u64, progress: f32, status: Option<String>) {
+  let manager = task_manager(cx);
+  manager.update(cx, |m, cx| {
+    m.set_progress(task_id, progress, status);
     cx.notify();
   });
 }

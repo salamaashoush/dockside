@@ -4,6 +4,7 @@ use gpui_component::theme::ActiveTheme;
 use crate::docker::ImageInfo;
 use crate::services;
 use crate::state::{DockerState, ImageInspectData, Selection, StateChanged, docker_state};
+use crate::ui::dialogs::{open_push_image_dialog, open_tag_image_dialog};
 use crate::ui::dialogs;
 
 use super::detail::ImageDetail;
@@ -146,6 +147,24 @@ impl Render for ImagesView {
         this.inspect_data = None;
         this.active_tab = 0;
         cx.notify();
+      }))
+      .on_tag(cx.listener(|this, id: &str, window, cx| {
+        let source = this
+          .selected_image(cx)
+          .as_ref()
+          .map(|img| img.display_name())
+          .unwrap_or_else(|| id.to_string());
+        open_tag_image_dialog(source, window, cx);
+      }))
+      .on_push(cx.listener(|this, _id: &str, window, cx| {
+        if let Some(img) = this.selected_image(cx) {
+          let display = img.display_name();
+          let (image, tag) = display
+            .rsplit_once(':')
+            .map(|(i, t)| (i.to_string(), t.to_string()))
+            .unwrap_or_else(|| (display, "latest".to_string()));
+          open_push_image_dialog(image, tag, window, cx);
+        }
       }));
 
     div()

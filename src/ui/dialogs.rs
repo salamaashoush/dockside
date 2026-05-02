@@ -17,6 +17,8 @@ use crate::services;
 use crate::ui::containers::CreateContainerDialog;
 use crate::ui::deployments::create_dialog::CreateDeploymentDialog;
 use crate::ui::images::pull_dialog::PullImageDialog;
+use crate::ui::images::push_dialog::PushImageDialog;
+use crate::ui::images::tag_dialog::TagImageDialog;
 use crate::ui::machines::MachineDialog;
 use crate::ui::networks::create_dialog::CreateNetworkDialog;
 use crate::ui::prune_dialog::PruneDialog;
@@ -46,6 +48,72 @@ pub fn open_pull_image_dialog(window: &mut Window, cx: &mut App) {
                 let options = dialog.read(cx).get_options(cx);
                 if !options.image.is_empty() {
                   services::pull_image(options.image, options.platform.as_docker_arg().map(String::from), cx);
+                  window.close_dialog(cx);
+                }
+              }
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
+/// Opens the Tag Image dialog with a Tag button configured.
+pub fn open_tag_image_dialog(source: String, window: &mut Window, cx: &mut App) {
+  let dialog_entity = cx.new(TagImageDialog::new(source));
+
+  window.open_dialog(cx, move |dialog, _window, _cx| {
+    let dialog_clone = dialog_entity.clone();
+
+    dialog
+      .title("Tag Image")
+      .min_w(px(500.))
+      .child(dialog_entity.clone())
+      .footer(move |_dialog_state, _, _window, _cx| {
+        let dialog_for_tag = dialog_clone.clone();
+        vec![
+          Button::new("tag")
+            .label("Tag")
+            .primary()
+            .on_click({
+              let dialog = dialog_for_tag.clone();
+              move |_ev, window, cx| {
+                let opts = dialog.read(cx).get_options(cx);
+                if !opts.repo.is_empty() {
+                  services::tag_image(opts.source, opts.repo, opts.tag, cx);
+                  window.close_dialog(cx);
+                }
+              }
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
+/// Opens the Push Image dialog with a Push button configured.
+pub fn open_push_image_dialog(image: String, tag: String, window: &mut Window, cx: &mut App) {
+  let dialog_entity = cx.new(PushImageDialog::new(image, tag));
+
+  window.open_dialog(cx, move |dialog, _window, _cx| {
+    let dialog_clone = dialog_entity.clone();
+
+    dialog
+      .title("Push Image")
+      .min_w(px(520.))
+      .child(dialog_entity.clone())
+      .footer(move |_dialog_state, _, _window, _cx| {
+        let dialog_for_push = dialog_clone.clone();
+        vec![
+          Button::new("push")
+            .label("Push")
+            .primary()
+            .on_click({
+              let dialog = dialog_for_push.clone();
+              move |_ev, window, cx| {
+                let opts = dialog.read(cx).get_options(cx);
+                if !opts.image.is_empty() && !opts.tag.is_empty() {
+                  services::push_image(opts.image, opts.tag, opts.username, opts.password, cx);
                   window.close_dialog(cx);
                 }
               }

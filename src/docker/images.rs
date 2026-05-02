@@ -1,5 +1,8 @@
 use anyhow::Result;
-use bollard::query_parameters::{CreateImageOptions, ListImagesOptions, RemoveImageOptions};
+use bollard::auth::DockerCredentials;
+use bollard::query_parameters::{
+  CreateImageOptions, ListImagesOptions, PushImageOptionsBuilder, RemoveImageOptions, TagImageOptionsBuilder,
+};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -18,6 +21,40 @@ pub struct ImageInfo {
   pub labels: HashMap<String, String>,
   pub architecture: Option<String>,
   pub os: Option<String>,
+}
+
+/// One streamed event from `pull_image_with_progress`. Most events report
+/// a layer id; the leading "Pulling from..." event has an empty id and the
+/// status string in `status`.
+#[derive(Debug, Clone, Default)]
+pub struct PullProgressEvent {
+  pub id: String,
+  pub status: String,
+  pub current: Option<i64>,
+  pub total: Option<i64>,
+}
+
+fn format_push_event(info: &bollard::models::PushImageInfo) -> String {
+  let id_part = match &info.progress_detail {
+    Some(_) => String::new(),
+    None => String::new(),
+  };
+  let status = info.status.clone().unwrap_or_default();
+  let progress = info.progress.clone().unwrap_or_default();
+  let mut out = status;
+  if !progress.is_empty() {
+    if !out.is_empty() {
+      out.push(' ');
+    }
+    out.push_str(&progress);
+  }
+  if !id_part.is_empty() {
+    if !out.is_empty() {
+      out.push(' ');
+    }
+    out.push_str(&id_part);
+  }
+  out
 }
 
 /// One entry in `docker image history` output. `id == "<missing>"` when
@@ -153,16 +190,75 @@ impl DockerClient {
     )
   }
 
+  /// Tag an existing image as `repo:tag`. `repo` may include a registry
+  /// host (e.g. `ghcr.io/foo/bar`) per docker tag rules.
+  pub async fn tag_image(&self, source: &str, repo: &str, tag: &str) -> Result<()> {
+    let docker = self.client()?;
+    let opts = TagImageOptionsBuilder::default().repo(repo).tag(tag).build();
+    docker.tag_image(source, Some(opts)).await?;
+    Ok(())
+  }
+
+  /// Push `image_name` to its registry. Supports an optional username +
+  /// password pair; pass `None` to use the daemon's stored credentials.
+  /// Streams progress via the callback (one entry per layer event).
+  pub async fn push_image_with_progress<F>(
+    &self,
+    image_name: &str,
+    tag: &str,
+    auth: Option<(String, String)>,
+    mut on_progress: F,
+  ) -> Result<()>
+  where
+    F: FnMut(String) + Send,
+  {
+    let docker = self.client()?;
+    let opts = PushImageOptionsBuilder::default().tag(tag).build();
+    let credentials = auth.map(|(username, password)| DockerCredentials {
+      username: Some(username),
+      password: Some(password),
+      ..Default::default()
+    });
+    let mut stream = docker.push_image(image_name, Some(opts), credentials);
+    while let Some(result) = stream.next().await {
+      match result {
+        Ok(info) => {
+          let line = format_push_event(&info);
+          if !line.is_empty() {
+            on_progress(line);
+          }
+        }
+        Err(e) => return Err(anyhow::anyhow!("Push failed: {e}")),
+      }
+    }
+    Ok(())
+  }
+
   /// Pull an image from a registry
   pub async fn pull_image(&self, image: &str, platform: Option<&str>) -> Result<()> {
+    self
+      .pull_image_with_progress(image, platform, |_| {})
+      .await
+  }
+
+  /// Pull an image from a registry, calling `on_progress` for each
+  /// streamed event. Each event reports a layer id, status, and current
+  /// / total bytes (when available) so callers can render a progress UI.
+  pub async fn pull_image_with_progress<F>(
+    &self,
+    image: &str,
+    platform: Option<&str>,
+    mut on_progress: F,
+  ) -> Result<()>
+  where
+    F: FnMut(PullProgressEvent) + Send,
+  {
     let docker = self.client()?;
 
     // Parse image name into repository and tag
     let (repo, tag) = if let Some(pos) = image.rfind(':') {
-      // Check if this is a port number (e.g., localhost:5000/image)
       let after_colon = &image[pos + 1..];
       if after_colon.contains('/') || after_colon.parse::<u16>().is_ok() {
-        // It's a port, not a tag
         (image, "latest")
       } else {
         (&image[..pos], after_colon)
@@ -179,12 +275,16 @@ impl DockerClient {
     };
 
     let mut stream = docker.create_image(Some(options), None, None);
-
-    // Consume the stream to completion
     while let Some(result) = stream.next().await {
       match result {
-        Ok(_info) => {
-          // Progress info available in _info.status, _info.progress, etc.
+        Ok(info) => {
+          let detail = info.progress_detail.unwrap_or_default();
+          on_progress(PullProgressEvent {
+            id: info.id.unwrap_or_default(),
+            status: info.status.unwrap_or_default(),
+            current: detail.current,
+            total: detail.total,
+          });
         }
         Err(e) => {
           return Err(anyhow::anyhow!("Failed to pull image: {e}"));

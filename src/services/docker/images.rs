@@ -74,8 +74,8 @@ pub fn delete_image(id: String, cx: &mut App) {
   .detach();
 }
 
-pub fn pull_image(image: String, platform: Option<String>, cx: &mut App) {
-  let task_id = start_task(cx, format!("Pulling image {image}..."));
+pub fn tag_image(source: String, repo: String, tag: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Tagging {source} as {repo}:{tag}..."));
   let disp = dispatcher(cx);
   let client = docker_client();
 
@@ -84,7 +84,7 @@ pub fn pull_image(image: String, platform: Option<String>, cx: &mut App) {
     let docker = guard
       .as_ref()
       .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
-    docker.pull_image(&image, platform.as_deref()).await
+    docker.tag_image(&source, &repo, &tag).await
   });
 
   cx.spawn(async move |cx| {
@@ -94,7 +94,138 @@ pub fn pull_image(image: String, platform: Option<String>, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: "Image pulled successfully".to_string(),
+            message: "Image tagged".to_string(),
+          });
+        });
+        refresh_images(cx);
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+pub fn push_image(image: String, tag: String, username: Option<String>, password: Option<String>, cx: &mut App) {
+  let task_id = start_task(cx, format!("Pushing {image}:{tag}..."));
+  let disp = dispatcher(cx);
+  let client = docker_client();
+
+  let auth = match (username, password) {
+    (Some(u), Some(p)) => Some((u, p)),
+    _ => None,
+  };
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    docker
+      .push_image_with_progress(&image, &tag, auth, |line| {
+        tracing::debug!(target: "docker.push", "{line}");
+      })
+      .await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(())) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: "Image pushed".to_string(),
+          });
+        });
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+pub fn pull_image(image: String, platform: Option<String>, cx: &mut App) {
+  let task_id = start_task(cx, format!("Pulling image {image}..."));
+  let disp = dispatcher(cx);
+  let client = docker_client();
+
+  // Channel for progress events emitted from the bollard stream task.
+  let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::docker::PullProgressEvent>(64);
+
+  let image_for_call = image.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    docker
+      .pull_image_with_progress(&image_for_call, platform.as_deref(), |ev| {
+        let _ = tx.try_send(ev);
+      })
+      .await
+  });
+
+  // Drain the progress channel on the UI side and update the task.
+  cx.spawn(async move |cx| {
+    // Per-layer total/current state for an aggregate fraction.
+    let mut totals: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();
+    while let Some(ev) = rx.recv().await {
+      if let (Some(cur), Some(tot)) = (ev.current, ev.total)
+        && tot > 0
+      {
+        totals.insert(ev.id.clone(), (cur, tot));
+      }
+      let (sum_cur, sum_tot): (i64, i64) = totals
+        .values()
+        .fold((0i64, 0i64), |(a, b), (c, t)| (a + c, b + t));
+      #[allow(clippy::cast_precision_loss)]
+      let frac = if sum_tot > 0 {
+        (sum_cur as f32) / (sum_tot as f32)
+      } else {
+        0.0
+      };
+      let status = if ev.id.is_empty() {
+        ev.status.clone()
+      } else {
+        format!("{}: {}", ev.id, ev.status)
+      };
+      let _ = cx.update(|cx| {
+        crate::services::task_manager::set_task_progress(cx, task_id, frac, Some(status));
+      });
+    }
+  })
+  .detach();
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(())) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Image {image} pulled"),
           });
         });
         refresh_images(cx);
