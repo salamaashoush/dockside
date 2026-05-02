@@ -541,12 +541,8 @@ impl NetworkDetail {
     // Toolbar with tabs and actions
     let toolbar = h_flex()
       .w_full()
-      .px(px(16.))
-      .py(px(8.))
-      .gap(px(12.))
       .items_center()
-      .border_b_1()
-      .border_color(colors.border)
+      .flex_shrink_0()
       .child(
         TabBar::new("network-tabs")
           .flex_1()
@@ -566,7 +562,7 @@ impl NetworkDetail {
         let on_delete = on_delete.clone();
         let id = network_id.clone();
         el.child(
-          h_flex().gap(px(8.)).child(
+          h_flex().pr(px(12.)).gap(px(8.)).child(
             Button::new("network-actions")
               .icon(IconName::Ellipsis)
               .ghost()

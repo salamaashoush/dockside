@@ -762,12 +762,8 @@ impl ImageDetail {
     // Toolbar with tabs and actions
     let toolbar = h_flex()
       .w_full()
-      .px(px(16.))
-      .py(px(8.))
-      .gap(px(12.))
       .items_center()
-      .border_b_1()
-      .border_color(colors.border)
+      .flex_shrink_0()
       .child(
         TabBar::new("image-tabs")
           .flex_1()
@@ -783,7 +779,7 @@ impl ImageDetail {
               })
           })),
       )
-      .child(h_flex().gap(px(8.)).child({
+      .child(h_flex().pr(px(12.)).gap(px(8.)).child({
         let on_scan = self.on_scan.clone();
         let on_save = self.on_save.clone();
         let on_tag = self.on_tag.clone();

@@ -1083,13 +1083,8 @@ impl ContainerDetail {
     // Toolbar with tabs and actions
     let toolbar = h_flex()
       .w_full()
-      .px(px(16.))
-      .py(px(8.))
-      .gap(px(12.))
       .items_center()
       .flex_shrink_0()
-      .border_b_1()
-      .border_color(colors.border)
       .child(
         TabBar::new("container-tabs")
           .flex_1()
@@ -1106,7 +1101,7 @@ impl ContainerDetail {
               })
           })),
       )
-      .child(h_flex().gap(px(8.)).child({
+      .child(h_flex().pr(px(12.)).gap(px(8.)).child({
         let on_start = on_start.clone();
         let on_stop = on_stop.clone();
         let on_restart = on_restart.clone();

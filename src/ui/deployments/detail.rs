@@ -670,8 +670,6 @@ impl Render for DeploymentDetail {
       self.last_synced_yaml = self.yaml_content.clone();
     }
 
-    let colors = cx.theme().colors;
-
     let Some(deployment) = self.deployment.clone() else {
       return div().size_full().child(Self::render_empty(cx));
     };
@@ -724,18 +722,7 @@ impl Render for DeploymentDetail {
       .flex()
       .flex_col()
       .overflow_hidden()
-      .child(
-        h_flex()
-          .w_full()
-          .px(px(16.))
-          .py(px(8.))
-          .gap(px(12.))
-          .items_center()
-          .border_b_1()
-          .border_color(colors.border)
-          .flex_shrink_0()
-          .child(tab_bar),
-      )
+      .child(div().w_full().flex_shrink_0().child(tab_bar))
       .child(div().flex_1().min_h_0().overflow_hidden().child(content))
   }
 }

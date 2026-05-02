@@ -483,13 +483,8 @@ impl PodDetail {
     // Toolbar with tabs and actions
     let toolbar = h_flex()
       .w_full()
-      .px(px(16.))
-      .py(px(8.))
-      .gap(px(12.))
       .items_center()
       .flex_shrink_0()
-      .border_b_1()
-      .border_color(colors.border)
       .child(
         TabBar::new("pod-tabs")
           .flex_1()
@@ -506,7 +501,7 @@ impl PodDetail {
               })
           })),
       )
-      .child(h_flex().gap(px(8.)).child({
+      .child(h_flex().pr(px(12.)).gap(px(8.)).child({
         let on_delete = on_delete.clone();
         let name = pod_name.clone();
         let ns = pod_namespace.clone();

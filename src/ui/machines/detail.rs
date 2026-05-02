@@ -1333,31 +1333,23 @@ impl MachineDetail {
     let tabs: &[MachineDetailTab] = machine.available_tabs();
 
     // Toolbar with just tabs - no action buttons
-    let toolbar = h_flex()
-      .w_full()
-      .px(px(16.))
-      .py(px(8.))
-      .items_center()
-      .border_b_1()
-      .border_color(colors.border)
-      .flex_shrink_0()
-      .child(
-        TabBar::new("machine-tabs")
-          .flex_1()
-          .py(px(0.))
-          .children(tabs.iter().map(|tab| {
-            let on_tab_change = on_tab_change.clone();
-            let tab_variant = *tab;
-            Tab::new()
-              .label(tab.label().to_string())
-              .selected(self.active_tab == *tab)
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_tab_change {
-                  cb(&tab_variant, window, cx);
-                }
-              })
-          })),
-      );
+    let toolbar =
+      h_flex()
+        .w_full()
+        .items_center()
+        .flex_shrink_0()
+        .child(TabBar::new("machine-tabs").flex_1().children(tabs.iter().map(|tab| {
+          let on_tab_change = on_tab_change.clone();
+          let tab_variant = *tab;
+          Tab::new()
+            .label(tab.label().to_string())
+            .selected(self.active_tab == *tab)
+            .on_click(move |_ev, window, cx| {
+              if let Some(ref cb) = on_tab_change {
+                cb(&tab_variant, window, cx);
+              }
+            })
+        })));
 
     // Terminal, Logs, and Files tabs need full height without scroll (they handle their own scrolling)
     let is_full_height_tab = matches!(

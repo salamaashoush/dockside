@@ -455,12 +455,8 @@ impl VolumeDetail {
     // Toolbar with tabs and actions
     let toolbar = h_flex()
       .w_full()
-      .px(px(16.))
-      .py(px(8.))
-      .gap(px(12.))
       .items_center()
-      .border_b_1()
-      .border_color(colors.border)
+      .flex_shrink_0()
       .child(
         TabBar::new("volume-tabs")
           .flex_1()
@@ -476,7 +472,7 @@ impl VolumeDetail {
               })
           })),
       )
-      .child(h_flex().gap(px(8.)).child({
+      .child(h_flex().pr(px(12.)).gap(px(8.)).child({
         let on_delete = on_delete.clone();
         let name = volume_name_for_delete.clone();
         Button::new("volume-actions")
