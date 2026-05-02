@@ -5,6 +5,7 @@ use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{
   Api, Client, Config,
   api::{DeleteParams, ListParams, LogParams, Patch, PatchParams, PostParams},
+  config::{KubeConfigOptions, Kubeconfig},
 };
 use serde_json::json;
 use std::fmt::Write as _;
@@ -24,8 +25,19 @@ impl KubeClient {
   /// Includes VPN-aware fallback: if the server URL uses a VM IP that's unreachable,
   /// automatically tries localhost with the same port
   pub async fn new() -> Result<Self> {
-    // First, try to load the config to inspect the server URL
-    let config = Config::infer().await.context("Failed to load kubeconfig")?;
+    // First, try to load the config to inspect the server URL.
+    // Honor the user's `kubeconfig_path` setting if set; otherwise
+    // fall back to the standard `Config::infer` discovery.
+    let custom_path = crate::state::AppSettings::load().kubeconfig_path;
+    let config = if custom_path.is_empty() {
+      Config::infer().await.context("Failed to load kubeconfig")?
+    } else {
+      let kubeconfig = Kubeconfig::read_from(&custom_path)
+        .with_context(|| format!("Failed to read kubeconfig at {custom_path}"))?;
+      Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
+        .await
+        .context("Failed to build kube config from custom path")?
+    };
 
     // Check if the server URL uses a non-localhost IP (likely VM IP)
     let server_url = config.cluster_url.to_string();

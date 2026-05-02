@@ -255,9 +255,13 @@ impl MachineDialog {
       }));
     }
 
+    // Default CPU/Mem/Disk pulled from app settings when creating a
+    // brand new machine (no existing machine to clone from).
+    let app = crate::state::settings_state(cx).read(cx).settings.clone();
+
     // CPUs input
     if self.cpus_input.is_none() {
-      let default_cpus = machine.map_or_else(|| "2".to_string(), |m| m.cpus.to_string());
+      let default_cpus = machine.map_or_else(|| app.colima_default_cpus.to_string(), |m| m.cpus.to_string());
       self.cpus_input = Some(cx.new(|cx| {
         let mut state = InputState::new(window, cx).placeholder("CPUs");
         state.insert(&default_cpus, window, cx);
@@ -267,7 +271,8 @@ impl MachineDialog {
 
     // Memory input
     if self.memory_input.is_none() {
-      let default_memory = machine.map_or_else(|| "2".to_string(), |m| format!("{:.0}", m.memory_gb()));
+      let default_memory =
+        machine.map_or_else(|| app.colima_default_memory_gb.to_string(), |m| format!("{:.0}", m.memory_gb()));
       self.memory_input = Some(cx.new(|cx| {
         let mut state = InputState::new(window, cx).placeholder("Memory (GB)");
         state.insert(&default_memory, window, cx);
@@ -277,7 +282,8 @@ impl MachineDialog {
 
     // Disk input
     if self.disk_input.is_none() {
-      let default_disk = machine.map_or_else(|| "60".to_string(), |m| format!("{:.0}", m.disk_gb()));
+      let default_disk =
+        machine.map_or_else(|| app.colima_default_disk_gb.to_string(), |m| format!("{:.0}", m.disk_gb()));
       self.disk_input = Some(cx.new(|cx| {
         let mut state = InputState::new(window, cx).placeholder("Disk (GB)");
         state.insert(&default_disk, window, cx);

@@ -25,10 +25,6 @@ use gpui::{
 use super::TerminalContent;
 use crate::state::TerminalCursorStyle;
 
-/// Primary monospace family used for measurement and paint. Single family,
-/// no fallbacks — the shaper must produce stable advances across cells.
-const PRIMARY_FAMILY: &str = "DejaVu Sans Mono";
-
 /// Cell-grid coordinate (column, row) inside the rendered viewport.
 pub type GridPoint = (u16, u16);
 
@@ -55,6 +51,7 @@ pub struct GridMetrics {
 /// Render a `TerminalContent` snapshot inside its parent's bounds.
 pub struct TerminalGrid {
   pub content: TerminalContent,
+  pub font_family: SharedString,
   pub font_size: Pixels,
   pub line_height_factor: f32,
   pub default_fg: Hsla,
@@ -169,7 +166,7 @@ impl Element for TerminalGrid {
     // Pattern lifted from superhq-ai/superhq's `gpui-terminal` crate
     // (`crates/gpui-terminal/src/render.rs:262-293`).
     let measure_font = Font {
-      family: PRIMARY_FAMILY.into(),
+      family: self.font_family.clone(),
       features: FontFeatures::default(),
       fallbacks: None,
       weight: FontWeight::NORMAL,
@@ -316,7 +313,7 @@ impl Element for TerminalGrid {
 
         let mut buf = [0u8; 4];
         let ch_str = cell.char.encode_utf8(&mut buf);
-        text_runs.push(make_text_run(origin, row_y, col, ch_str, &attrs, cell_width));
+        text_runs.push(make_text_run(origin, row_y, col, ch_str, &attrs, cell_width, &self.font_family));
       }
 
       // ----- Cursor overlay (Bar / Underline). Block was painted inline. -----
@@ -508,6 +505,7 @@ fn make_text_run(
   text: &str,
   attrs: &CellAttrs,
   cell_width: Pixels,
+  family: &SharedString,
 ) -> TextRunSpec {
   #[allow(clippy::cast_precision_loss)]
   let x = origin.x + cell_width * (start_col as f32);
@@ -540,7 +538,7 @@ fn make_text_run(
   };
   let run = TextRun {
     len: text.len(),
-    font: monospace_font(weight, style),
+    font: monospace_font(family, weight, style),
     color: attrs.fg,
     background_color: None,
     underline,
@@ -557,9 +555,9 @@ fn make_text_run(
 /// fallback chain causes per-glyph font swaps in the shaper, which makes
 /// natural advance widths drift between cells and produces visible
 /// letter-spacing in the grid.
-fn monospace_font(weight: FontWeight, style: FontStyle) -> Font {
+fn monospace_font(family: &SharedString, weight: FontWeight, style: FontStyle) -> Font {
   Font {
-    family: PRIMARY_FAMILY.into(),
+    family: family.clone(),
     features: FontFeatures::default(),
     weight,
     style,

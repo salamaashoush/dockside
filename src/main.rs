@@ -159,6 +159,7 @@ fn main() {
     let settings = AppSettings::load();
     let saved_theme_name = settings.theme.theme_name().to_string();
 
+
     // Load and apply theme SYNCHRONOUSLY before window opens (prevents flicker)
     if let Some(themes_dir) = get_themes_dir() {
       // Load saved theme immediately

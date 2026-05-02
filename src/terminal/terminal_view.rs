@@ -811,8 +811,14 @@ impl Render for TerminalView {
 
     let search_match_count = search_matches.len();
     let _ = search_match_count; // displayed via the find bar via `match_count` below
+    let font_family: gpui::SharedString = if settings.terminal_font_family.trim().is_empty() {
+      "DejaVu Sans Mono".into()
+    } else {
+      settings.terminal_font_family.clone().into()
+    };
     let grid = super::grid_element::TerminalGrid {
       content,
+      font_family,
       font_size: px(font_size),
       line_height_factor: settings.terminal_line_height,
       default_fg: colors.foreground,

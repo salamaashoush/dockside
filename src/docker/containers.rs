@@ -162,6 +162,11 @@ pub struct ContainerInfo {
   /// Pulled from the daemon's container list response so the Volumes
   /// view can cross-reference without an inspect-per-container.
   pub volumes_used: Vec<String>,
+  /// Names of networks the container is attached to. Pulled from
+  /// `NetworkSettings.Networks` on the `list_containers` response so
+  /// the Networks view can cross-reference without inspecting each
+  /// container.
+  pub networks_used: Vec<String>,
 }
 
 impl ContainerInfo {
@@ -285,6 +290,13 @@ impl DockerClient {
         })
         .collect();
 
+      let networks_used: Vec<String> = container
+        .network_settings
+        .clone()
+        .and_then(|ns| ns.networks)
+        .map(|m| m.into_keys().collect())
+        .unwrap_or_default();
+
       result.push(ContainerInfo {
         id,
         name,
@@ -299,6 +311,7 @@ impl DockerClient {
         size_rw: container.size_rw,
         size_root_fs: container.size_root_fs,
         volumes_used,
+        networks_used,
       });
     }
 
@@ -1164,6 +1177,7 @@ mod tests {
       size_rw: None,
       size_root_fs: None,
       volumes_used: vec![],
+      networks_used: vec![],
     };
     assert_eq!(container.short_id(), "abc123def456");
 
@@ -1210,6 +1224,7 @@ mod tests {
       size_rw: None,
       size_root_fs: None,
       volumes_used: vec![],
+      networks_used: vec![],
     };
     assert_eq!(container.display_ports(), "8080:80, 8443:443");
 
@@ -1327,6 +1342,7 @@ mod tests {
       size_rw: None,
       size_root_fs: None,
       volumes_used: vec![],
+      networks_used: vec![],
     };
     assert_eq!(container.short_id(), "123456789012");
   }
@@ -1353,6 +1369,7 @@ mod tests {
       size_rw: None,
       size_root_fs: None,
       volumes_used: vec![],
+      networks_used: vec![],
     };
     // Should return empty string when no public ports
     assert_eq!(container.display_ports(), "");

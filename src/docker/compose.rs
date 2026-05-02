@@ -149,6 +149,7 @@ mod tests {
       size_rw: None,
       size_root_fs: None,
       volumes_used: vec![],
+      networks_used: vec![],
     }
   }
 
