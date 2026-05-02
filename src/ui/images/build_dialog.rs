@@ -1,8 +1,8 @@
-use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Hsla, Render, Styled, Window, div, prelude::*, px};
+use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Hsla, Render, Styled, Timer, Window, div, prelude::*, px};
 use gpui_component::{
   IndexPath, Sizable, h_flex,
   button::{Button, ButtonVariants},
-  input::{Input, InputState},
+  input::{Input, InputEvent, InputState},
   label::Label,
   scroll::ScrollableElement,
   select::{Select, SelectState},
@@ -10,10 +10,17 @@ use gpui_component::{
   theme::ActiveTheme,
   v_flex,
 };
+use std::time::Duration;
 
 use super::pull_dialog::PullPlatform;
 use crate::docker::{ERR_HADOLINT_NOT_INSTALLED, LintReport, hadolint_install_hint};
 use crate::ui::components::{render_error_panel, render_install_hint};
+
+/// Debounce window before auto-lint actually fires after the user
+/// stops typing in `context_dir` / `dockerfile`. Long enough to feel
+/// non-intrusive; short enough that the inline banner updates without
+/// the user hunting for the Lint button.
+const AUTO_LINT_DEBOUNCE: Duration = Duration::from_millis(750);
 
 #[derive(Debug, Clone, Default)]
 pub struct BuildImageOptions {
@@ -46,6 +53,12 @@ pub struct BuildImageDialog {
   lint_loading: bool,
   lint_result: Option<Result<LintReport, String>>,
   lint_dockerfile_path: Option<String>,
+  /// Generation counter incremented on every Dockerfile-field edit.
+  /// The debounce timer captures the value at scheduling time and the
+  /// trailing `run_lint` only fires if it still matches — that lets us
+  /// "cancel" stale runs without juggling Task handles.
+  lint_gen: u64,
+  lint_subscribed: bool,
 }
 
 impl BuildImageDialog {
@@ -64,7 +77,36 @@ impl BuildImageDialog {
       lint_loading: false,
       lint_result: None,
       lint_dockerfile_path: None,
+      lint_gen: 0,
+      lint_subscribed: false,
     }
+  }
+
+  /// Bump the generation, wait `AUTO_LINT_DEBOUNCE`, and re-run lint
+  /// if no further edits arrived in the meantime. Errors and missing
+  /// hadolint are routed through the same `lint_result` slot as the
+  /// manual Lint button, so the inline banner / install hint updates
+  /// without any extra UI.
+  fn schedule_auto_lint(&mut self, cx: &mut Context<'_, Self>) {
+    self.lint_gen = self.lint_gen.wrapping_add(1);
+    let scheduled = self.lint_gen;
+    cx.spawn(async move |this, cx| {
+      Timer::after(AUTO_LINT_DEBOUNCE).await;
+      let _ = cx.update(|cx| {
+        if let Some(this) = this.upgrade() {
+          let still_latest = this.read(cx).lint_gen == scheduled;
+          let context_empty = this
+            .read(cx)
+            .context_input
+            .as_ref()
+            .is_none_or(|s| s.read(cx).text().to_string().is_empty());
+          if still_latest && !context_empty {
+            Self::run_lint(&this, cx);
+          }
+        }
+      });
+    })
+    .detach();
   }
 
   /// Resolve `<context_dir>/<dockerfile>` and run hadolint in the
@@ -114,6 +156,26 @@ impl BuildImageDialog {
       self.dockerfile_input = Some(cx.new(|cx| {
         InputState::new(window, cx).default_value("Dockerfile")
       }));
+    }
+    // Subscribe once both inputs exist so edits to either field
+    // schedule a debounced auto-lint. Idempotent via the `lint_subscribed`
+    // latch so this only wires up the first time we render.
+    if !self.lint_subscribed
+      && let (Some(ctx_input), Some(df_input)) = (self.context_input.clone(), self.dockerfile_input.clone())
+    {
+      self.lint_subscribed = true;
+      cx.subscribe(&ctx_input, |this, _state, ev: &InputEvent, cx| {
+        if matches!(ev, InputEvent::Change) {
+          this.schedule_auto_lint(cx);
+        }
+      })
+      .detach();
+      cx.subscribe(&df_input, |this, _state, ev: &InputEvent, cx| {
+        if matches!(ev, InputEvent::Change) {
+          this.schedule_auto_lint(cx);
+        }
+      })
+      .detach();
     }
     if self.tag_input.is_none() {
       self.tag_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. my-app:latest")));
