@@ -8,6 +8,7 @@ pub mod dialogs;
 pub mod global_search;
 pub mod images;
 pub mod machines;
+pub mod models;
 pub mod networks;
 pub mod pods;
 pub mod prune_dialog;

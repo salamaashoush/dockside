@@ -1,7 +1,9 @@
 use anyhow::{Result, anyhow};
 use std::process::Stdio;
 
-use super::{ColimaConfig, ColimaVm, MountType, VmArch, VmFileEntry, VmOsInfo, VmRuntime, VmStatus, VmType};
+use super::{
+  ColimaConfig, ColimaVm, ModelRunner, MountType, VmArch, VmFileEntry, VmOsInfo, VmRuntime, VmStatus, VmType,
+};
 use crate::utils::colima_cmd;
 
 pub struct ColimaClient;
@@ -352,6 +354,71 @@ impl ColimaClient {
   }
 
   /// Run a command in the VM via SSH
+  /// Run `colima model <subcommand>` with the given runner.
+  /// Captures stdout+stderr; returns combined output for display.
+  fn model_cmd(profile: Option<&str>, runner: ModelRunner, sub_args: &[&str]) -> Result<String> {
+    let mut cmd = colima_cmd();
+    cmd.arg("model");
+    if let Some(p) = profile
+      && p != "default"
+    {
+      cmd.arg("--profile").arg(p);
+    }
+    cmd.arg("--runner").arg(runner.as_arg());
+    for a in sub_args {
+      cmd.arg(a);
+    }
+    let output = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output()?;
+    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.is_empty() {
+      if !combined.is_empty() {
+        combined.push('\n');
+      }
+      combined.push_str(&stderr);
+    }
+    if !output.status.success() {
+      return Err(anyhow!(combined));
+    }
+    Ok(combined)
+  }
+
+  /// `colima model setup` — install/update runner inside VM.
+  pub fn model_setup(profile: Option<&str>, runner: ModelRunner) -> Result<String> {
+    Self::model_cmd(profile, runner, &["setup"])
+  }
+
+  /// `colima model list` — pulled models. Returns raw text.
+  pub fn model_list(profile: Option<&str>, runner: ModelRunner) -> Result<String> {
+    Self::model_cmd(profile, runner, &["list"])
+  }
+
+  /// `colima model pull <name>` — download model.
+  pub fn model_pull(profile: Option<&str>, runner: ModelRunner, name: &str) -> Result<String> {
+    Self::model_cmd(profile, runner, &["pull", name])
+  }
+
+  /// Build the `colima model serve` command without running it. Caller
+  /// can spawn it in a terminal session so the user sees streaming
+  /// output and can stop it with Ctrl-C.
+  #[must_use]
+  pub fn model_serve_args(profile: Option<&str>, runner: ModelRunner, name: &str, port: u16) -> Vec<String> {
+    let mut args: Vec<String> = vec!["model".into()];
+    if let Some(p) = profile
+      && p != "default"
+    {
+      args.push("--profile".into());
+      args.push(p.into());
+    }
+    args.push("--runner".into());
+    args.push(runner.as_arg().into());
+    args.push("serve".into());
+    args.push(name.into());
+    args.push("--port".into());
+    args.push(port.to_string());
+    args
+  }
+
   pub fn run_command(name: Option<&str>, command: &str) -> Result<String> {
     let mut cmd = colima_cmd();
     cmd.arg("ssh");

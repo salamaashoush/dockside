@@ -12,6 +12,10 @@ pub enum CurrentView {
   Services,
   Deployments,
   Machines,
+  /// AI Models — sidebar entry only on macOS aarch64, but variant is
+  /// always defined so match arms compile on every platform.
+  #[allow(dead_code)]
+  Models,
   ActivityMonitor,
   Settings,
 }
@@ -92,10 +96,11 @@ mod tests {
       CurrentView::Services,
       CurrentView::Deployments,
       CurrentView::Machines,
+      CurrentView::Models,
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 11);
+    assert_eq!(views.len(), 12);
   }
 
   #[test]

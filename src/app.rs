@@ -32,6 +32,7 @@ use crate::ui::dialogs;
 use crate::ui::global_search::{GlobalSearch, GlobalSearchEvent};
 use crate::ui::images::ImagesView;
 use crate::ui::machines::MachinesView;
+use crate::ui::models::ModelsView;
 use crate::ui::networks::NetworksView;
 use crate::ui::pods::PodsView;
 use crate::ui::services::ServicesView;
@@ -55,6 +56,7 @@ pub struct DocksideApp {
   deployments_view: Entity<DeploymentsView>,
   activity_view: Entity<ActivityMonitorView>,
   settings_view: Entity<SettingsView>,
+  models_view: Entity<ModelsView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
   pending_notifications: Vec<(NotificationType, String)>,
   // Pending setup check result - triggers dialog when set
@@ -129,6 +131,7 @@ impl DocksideApp {
     let deployments_view = cx.new(|cx| DeploymentsView::new(window, cx));
     let activity_view = cx.new(|cx| ActivityMonitorView::new(window, cx));
     let settings_view = cx.new(SettingsView::new);
+    let models_view = cx.new(|cx| ModelsView::new(window, cx));
 
     // Run setup checks async — only surface the dialog if a *required* piece is
     // missing. Docker is the only universal must-have. Colima is only required
@@ -188,6 +191,7 @@ impl DocksideApp {
       deployments_view,
       activity_view,
       settings_view,
+      models_view,
       pending_notifications: Vec::new(),
       pending_setup_check: None,
       focus_handle,
@@ -600,16 +604,27 @@ impl DocksideApp {
                 )
             })
             .child(
-                SidebarGroup::new("Runtimes").child(
-                    SidebarMenu::new().child(
+                SidebarGroup::new("Runtimes").child({
+                    let menu = SidebarMenu::new().child(
                         SidebarMenuItem::new("Machines")
                             .icon(AppIcon::Machine)
                             .active(current_view == CurrentView::Machines)
                             .on_click(cx.listener(|_this, _ev, _window, cx| {
                                 crate::services::set_view(CurrentView::Machines, cx);
                             })),
-                    ),
-                ),
+                    );
+                    // AI Models view: krunkit + colima model. macOS Apple Silicon only.
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    let menu = menu.child(
+                        SidebarMenuItem::new("Models")
+                            .icon(AppIcon::Activity)
+                            .active(current_view == CurrentView::Models)
+                            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                crate::services::set_view(CurrentView::Models, cx);
+                            })),
+                    );
+                    menu
+                }),
             )
             .child(
                 SidebarGroup::new("General").child(
@@ -656,6 +671,7 @@ impl DocksideApp {
       CurrentView::Deployments => div().size_full().child(self.deployments_view.clone()),
       CurrentView::ActivityMonitor => div().size_full().child(self.activity_view.clone()),
       CurrentView::Settings => div().size_full().child(self.settings_view.clone()),
+      CurrentView::Models => div().size_full().child(self.models_view.clone()),
     }
   }
 

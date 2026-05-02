@@ -21,7 +21,7 @@ pub use client::*;
 mod client_stub {
   use anyhow::{Result, anyhow};
 
-  use super::{ColimaConfig, ColimaVm, VmFileEntry, VmOsInfo};
+  use super::{ColimaConfig, ColimaVm, ModelRunner, VmFileEntry, VmOsInfo};
 
   fn unsupported<T>() -> Result<T> {
     Err(anyhow!("Colima is not supported on this platform"))
@@ -160,6 +160,23 @@ mod client_stub {
 
     pub fn write_template(_content: &str) -> Result<()> {
       unsupported()
+    }
+
+    pub fn model_setup(_profile: Option<&str>, _runner: ModelRunner) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn model_list(_profile: Option<&str>, _runner: ModelRunner) -> Result<String> {
+      unsupported()
+    }
+
+    pub fn model_pull(_profile: Option<&str>, _runner: ModelRunner, _name: &str) -> Result<String> {
+      unsupported()
+    }
+
+    #[must_use]
+    pub fn model_serve_args(_profile: Option<&str>, _runner: ModelRunner, _name: &str, _port: u16) -> Vec<String> {
+      Vec::new()
     }
   }
 

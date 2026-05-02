@@ -45,6 +45,8 @@ pub enum TerminalSessionType {
     container: Option<String>,
     shell: Option<String>,
   },
+  /// Run an arbitrary command (e.g. `colima model serve …`).
+  Custom { program: String, args: Vec<String> },
 }
 
 impl TerminalSessionType {
@@ -63,6 +65,10 @@ impl TerminalSessionType {
       container,
       shell,
     }
+  }
+
+  pub fn custom_command(program: String, args: Vec<String>) -> Self {
+    Self::Custom { program, args }
   }
 
   /// Build a `CommandBuilder` for `portable-pty` from the session type.
@@ -127,6 +133,7 @@ impl TerminalSessionType {
         }
         ("kubectl", args)
       }
+      Self::Custom { program, args } => (program.as_str(), args.clone()),
     };
 
     let mut cmd = CommandBuilder::new(program);

@@ -112,6 +112,33 @@ impl VmType {
   }
 }
 
+/// Backend used by `colima model` for AI workloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModelRunner {
+  /// Docker Model Runner — Docker AI Registry + `HuggingFace`.
+  #[default]
+  Docker,
+  /// Ramalama — `HuggingFace` + Ollama registries.
+  Ramalama,
+}
+
+impl ModelRunner {
+  pub fn as_arg(self) -> &'static str {
+    match self {
+      ModelRunner::Docker => "docker",
+      ModelRunner::Ramalama => "ramalama",
+    }
+  }
+
+  #[allow(dead_code)]
+  pub fn display_name(self) -> &'static str {
+    match self {
+      ModelRunner::Docker => "Docker Model Runner",
+      ModelRunner::Ramalama => "Ramalama",
+    }
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MountType {
