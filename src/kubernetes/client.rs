@@ -132,7 +132,7 @@ impl KubeClient {
     Ok(())
   }
 
-  /// Get pod logs
+  /// Get pod logs (snapshot).
   pub async fn get_pod_logs(
     &self,
     name: &str,
@@ -156,6 +156,50 @@ impl KubeClient {
       .context(format!("Failed to get logs for pod {name} in namespace {namespace}"))?;
 
     Ok(logs)
+  }
+
+  /// Stream pod logs as raw bytes into the given channel until the
+  /// receiver drops or the pod stops producing output.
+  pub async fn stream_pod_logs(
+    &self,
+    name: &str,
+    namespace: &str,
+    container: Option<&str>,
+    tail_lines: Option<i64>,
+    timestamps: bool,
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+  ) -> Result<()> {
+    use futures::AsyncBufReadExt;
+    use futures::TryStreamExt;
+
+    let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+
+    let mut params = LogParams::default();
+    if let Some(c) = container {
+      params.container = Some(c.to_string());
+    }
+    if let Some(lines) = tail_lines {
+      params.tail_lines = Some(lines);
+    }
+    params.follow = true;
+    params.timestamps = timestamps;
+
+    let reader = api
+      .log_stream(name, &params)
+      .await
+      .context(format!("Failed to open log stream for pod {name}"))?;
+    let mut lines = reader.lines();
+
+    while let Some(line) = lines.try_next().await? {
+      // Re-add CRLF since the line stream stripped the trailing \n.
+      let mut bytes = line.into_bytes();
+      bytes.push(b'\r');
+      bytes.push(b'\n');
+      if tx.send(bytes).await.is_err() {
+        return Ok(());
+      }
+    }
+    Ok(())
   }
 
   /// Force delete a pod (grace period 0)

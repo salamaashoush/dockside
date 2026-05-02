@@ -1,11 +1,12 @@
-use gpui::{App, Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, Render, Styled, Task, Timer, Window, div, prelude::*, px};
 use gpui_component::{input::InputState, theme::ActiveTheme};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::kubernetes::{PodInfo, PodPhase};
 use crate::services;
 use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
-use crate::terminal::{TerminalSessionType, TerminalView};
+use crate::terminal::{LogStream, TerminalSessionType, TerminalView};
 
 use super::detail::{PodDetail, PodDetailTab, PodTabState};
 use super::list::{PodList, PodListEvent};
@@ -25,6 +26,11 @@ pub struct PodsView {
   last_synced_logs: String,
   last_synced_describe: String,
   last_synced_yaml: String,
+  // libghostty-backed log viewer (selection / colors / copy / scroll
+  // shared with the interactive terminal via the TerminalSource trait).
+  logs_stream: Option<Arc<LogStream>>,
+  logs_terminal_view: Option<Entity<TerminalView>>,
+  logs_task: Option<Task<()>>,
 }
 
 impl PodsView {
@@ -181,6 +187,9 @@ impl PodsView {
       last_synced_logs: String::new(),
       last_synced_describe: String::new(),
       last_synced_yaml: String::new(),
+      logs_stream: None,
+      logs_terminal_view: None,
+      logs_task: None,
     }
   }
 
@@ -279,11 +288,63 @@ impl PodsView {
   fn load_pod_logs(&mut self, pod: &PodInfo, cx: &mut Context<'_, Self>) {
     self.pod_tab_state.logs_loading = true;
     self.pod_tab_state.logs.clear();
-    cx.notify();
 
-    // Load logs
+    // Tear down the previous task / stream / view so the old pod's
+    // bytes don't leak into the new viewer.
+    self.logs_task = None;
+    self.logs_stream = LogStream::new(120, 40).ok().map(Arc::new);
+    if let Some(stream) = self.logs_stream.clone() {
+      self.logs_terminal_view = Some(cx.new(|cx| TerminalView::for_log_stream(stream, cx)));
+    } else {
+      self.logs_terminal_view = None;
+    }
+
+    let pod_name = pod.name.clone();
+    let namespace = pod.namespace.clone();
     let container = self.pod_tab_state.selected_container.clone();
-    services::get_pod_logs(pod.name.clone(), pod.namespace.clone(), container, 500, cx);
+    let max_lines = settings_state(cx).read(cx).settings.max_log_lines as i64;
+    let target = self.logs_stream.clone();
+    let tokio_handle = services::Tokio::runtime_handle();
+
+    let task = cx.spawn(async move |this, cx| {
+      let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+      let stream_handle = tokio_handle.spawn(async move {
+        let kube = match crate::kubernetes::KubeClient::new().await {
+          Ok(c) => c,
+          Err(e) => {
+            let _ = tx.send(format!("k8s client not connected: {e}\r\n").into_bytes()).await;
+            return;
+          }
+        };
+        if let Err(e) = kube
+          .stream_pod_logs(&pod_name, &namespace, container.as_deref(), Some(max_lines), false, tx.clone())
+          .await
+        {
+          let _ = tx
+            .send(format!("\r\n[log stream ended: {e}]\r\n").into_bytes())
+            .await;
+        }
+      });
+
+      while let Some(chunk) = rx.recv().await {
+        if let Some(s) = target.as_ref() {
+          s.feed_bytes(chunk);
+        }
+        let still_alive = this
+          .update(cx, |this, cx| {
+            this.pod_tab_state.logs_loading = false;
+            cx.notify();
+          })
+          .is_ok();
+        if !still_alive {
+          break;
+        }
+      }
+      stream_handle.abort();
+    });
+    self.logs_task = Some(task);
+
+    cx.notify();
   }
 
   fn on_container_select(&mut self, container: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -382,6 +443,7 @@ impl Render for PodsView {
       .pod_state(pod_tab_state)
       .terminal_view(terminal_view)
       .logs_editor(logs_editor)
+      .logs_terminal(self.logs_terminal_view.clone())
       .describe_editor(describe_editor)
       .yaml_editor(yaml_editor)
       .on_tab_change(cx.listener(|this, tab: &PodDetailTab, window, cx| {

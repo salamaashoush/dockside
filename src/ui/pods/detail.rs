@@ -46,6 +46,7 @@ pub struct PodDetail {
   active_tab: PodDetailTab,
   pod_state: Option<PodTabState>,
   terminal_view: Option<Entity<TerminalView>>,
+  logs_terminal: Option<Entity<TerminalView>>,
   logs_editor: Option<Entity<InputState>>,
   describe_editor: Option<Entity<InputState>>,
   yaml_editor: Option<Entity<InputState>>,
@@ -62,6 +63,7 @@ impl PodDetail {
       active_tab: PodDetailTab::Info,
       pod_state: None,
       terminal_view: None,
+      logs_terminal: None,
       logs_editor: None,
       describe_editor: None,
       yaml_editor: None,
@@ -94,6 +96,11 @@ impl PodDetail {
 
   pub fn logs_editor(mut self, editor: Option<Entity<InputState>>) -> Self {
     self.logs_editor = editor;
+    self
+  }
+
+  pub fn logs_terminal(mut self, view: Option<Entity<TerminalView>>) -> Self {
+    self.logs_terminal = view;
     self
   }
 
@@ -308,13 +315,17 @@ impl PodDetail {
     let state = self.pod_state.as_ref();
     let is_loading = state.is_some_and(|s| s.logs_loading);
 
-    if is_loading {
+    if is_loading && self.logs_terminal.is_none() {
       return v_flex().size_full().p(px(16.)).child(
         div()
           .text_sm()
           .text_color(colors.muted_foreground)
           .child("Loading logs..."),
       );
+    }
+
+    if let Some(view) = self.logs_terminal.clone() {
+      return div().size_full().child(div().size_full().min_h_0().child(view));
     }
 
     if let Some(ref editor) = self.logs_editor {

@@ -1,6 +1,4 @@
-use gpui::{
-  App, Context, Entity, Render, Styled, Task, Timer, UniformListScrollHandle, Window, div, prelude::*, px,
-};
+use gpui::{App, Context, Entity, Render, Styled, Task, Timer, Window, div, prelude::*, px};
 use gpui_component::{
   WindowExt,
   button::{Button, ButtonVariants},
@@ -41,16 +39,6 @@ pub struct ContainersView {
   /// Stats poll task — runs while Stats tab is active for the current
   /// container, dropped when leaving the tab or switching containers.
   stats_task: Option<Task<()>>,
-  /// Scroll handle for the (virtualized) logs uniform list.
-  logs_scroll_handle: UniformListScrollHandle,
-  /// Sticky-bottom flag: when true (default), incoming chunks scroll
-  /// the list to the bottom. User scrolling up flips this off; the
-  /// "Following" toolbar button (or a fresh container select) flips it
-  /// back on.
-  logs_auto_follow: bool,
-  /// Cached line count from the previous frame so we know when the
-  /// buffer grew and need to re-scroll.
-  logs_last_line_count: usize,
   /// libghostty-backed terminal that the streaming bytes are fed into.
   logs_stream: Option<std::sync::Arc<LogStream>>,
   /// `TerminalView` driving `logs_stream` — rendered on the Logs tab so
@@ -186,9 +174,6 @@ impl ContainersView {
       last_synced_file_content: String::new(),
       logs_task: None,
       stats_task: None,
-      logs_scroll_handle: UniformListScrollHandle::default(),
-      logs_auto_follow: true,
-      logs_last_line_count: 0,
       logs_stream: None,
       logs_terminal_view: None,
     }
