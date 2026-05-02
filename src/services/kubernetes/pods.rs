@@ -151,36 +151,6 @@ pub fn delete_pod(name: String, namespace: String, cx: &mut App) {
   .detach();
 }
 
-/// Get logs for a pod
-pub fn get_pod_logs(name: String, namespace: String, container: Option<String>, tail_lines: i64, cx: &mut App) {
-  let state = docker_state(cx);
-  let name_clone = name.clone();
-  let namespace_clone = namespace.clone();
-
-  let tokio_task = Tokio::spawn(cx, async move {
-    let client = crate::kubernetes::KubeClient::new().await?;
-    client
-      .get_pod_logs(&name, &namespace, container.as_deref(), Some(tail_lines))
-      .await
-  });
-
-  cx.spawn(async move |cx| {
-    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
-
-    cx.update(|cx| {
-      let logs = result.unwrap_or_else(|e| format!("Error fetching logs: {e}"));
-      state.update(cx, |_state, cx| {
-        cx.emit(StateChanged::PodLogsLoaded {
-          pod_name: name_clone,
-          namespace: namespace_clone,
-          logs,
-        });
-      });
-    })
-  })
-  .detach();
-}
-
 /// Get pod describe output (kubectl describe pod)
 pub fn get_pod_describe(name: String, namespace: String, cx: &mut App) {
   let state = docker_state(cx);

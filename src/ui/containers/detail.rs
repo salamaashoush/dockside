@@ -110,7 +110,6 @@ pub struct ContainerDetail {
   container_state: Option<ContainerTabState>,
   terminal_view: Option<Entity<TerminalView>>,
   process_view: Option<Entity<ProcessView>>,
-  logs_editor: Option<Entity<InputState>>,
   inspect_editor: Option<Entity<InputState>>,
   file_content_editor: Option<Entity<InputState>>,
   on_start: Option<ContainerActionCallback>,
@@ -138,7 +137,6 @@ impl ContainerDetail {
       container_state: None,
       terminal_view: None,
       process_view: None,
-      logs_editor: None,
       inspect_editor: None,
       file_content_editor: None,
       on_start: None,
@@ -181,11 +179,6 @@ impl ContainerDetail {
 
   pub fn process_view(mut self, view: Option<Entity<ProcessView>>) -> Self {
     self.process_view = view;
-    self
-  }
-
-  pub fn logs_editor(mut self, editor: Option<Entity<InputState>>) -> Self {
-    self.logs_editor = editor;
     self
   }
 

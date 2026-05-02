@@ -25,12 +25,10 @@ pub struct ContainersView {
   active_tab: ContainerDetailTab,
   terminal_view: Option<Entity<TerminalView>>,
   process_view: Option<Entity<ProcessView>>,
-  logs_editor: Option<Entity<InputState>>,
   inspect_editor: Option<Entity<InputState>>,
   file_content_editor: Option<Entity<InputState>>,
   container_tab_state: ContainerTabState,
   // Track what we've synced to editors to prevent infinite loops
-  last_synced_logs: String,
   last_synced_inspect: String,
   last_synced_file_content: String,
   /// Active live-tail task. Dropped when switching containers / toggling
@@ -165,11 +163,9 @@ impl ContainersView {
       active_tab: ContainerDetailTab::Info,
       terminal_view: None,
       process_view: None,
-      logs_editor: None,
       inspect_editor: None,
       file_content_editor: None,
       container_tab_state: ContainerTabState::new(),
-      last_synced_logs: String::new(),
       last_synced_inspect: String::new(),
       last_synced_file_content: String::new(),
       logs_task: None,
@@ -410,24 +406,14 @@ impl ContainersView {
     // This allows users to stay on their current tab when switching containers
     self.terminal_view = None;
     self.process_view = None;
-    self.last_synced_logs.clear();
     self.last_synced_inspect.clear();
     self.last_synced_file_content.clear();
 
     // Reset file explorer state to root
     self.container_tab_state = ContainerTabState::new();
 
-    // Create editors for logs and inspect with syntax highlighting
+    // Create editors for inspect with syntax highlighting
     // Note: code_editor() is required for replace() method to work
-    self.logs_editor = Some(cx.new(|cx| {
-      InputState::new(window, cx)
-        .multi_line(true)
-        .code_editor("log")
-        .line_number(true)
-        .searchable(true)
-        .soft_wrap(false)
-    }));
-
     self.inspect_editor = Some(cx.new(|cx| {
       InputState::new(window, cx)
         .multi_line(true)
@@ -793,7 +779,6 @@ impl ContainersView {
   fn restart_logs(&mut self, container_id: &str, cx: &mut Context<'_, Self>) {
     self.logs_task = None;
     self.container_tab_state.logs.clear();
-    self.last_synced_logs.clear();
     self.container_tab_state.logs_loading = true;
     // Fresh libghostty terminal + `TerminalView` per restart so cleared
     // / re-tailed logs don't pile on top of the previous container's
@@ -1046,7 +1031,6 @@ impl Render for ContainersView {
     let container_tab_state = self.container_tab_state.clone();
     let terminal_view = self.terminal_view.clone();
     let process_view = self.process_view.clone();
-    let logs_editor = self.logs_editor.clone();
     let inspect_editor = self.inspect_editor.clone();
     let file_content_editor = self.file_content_editor.clone();
     let has_selection = selected_container.is_some();
@@ -1058,7 +1042,6 @@ impl Render for ContainersView {
       .container_state(container_tab_state)
       .terminal_view(terminal_view)
       .process_view(process_view)
-      .logs_editor(logs_editor)
       .logs_terminal(self.logs_terminal_view.clone())
       .inspect_editor(inspect_editor)
       .file_content_editor(file_content_editor)

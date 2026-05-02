@@ -93,20 +93,6 @@ impl PodsView {
             }
             cx.notify();
           }
-          StateChanged::PodLogsLoaded {
-            pod_name,
-            namespace,
-            logs,
-          } => {
-            if let Selection::Pod { name, namespace: ns } = &this.docker_state.read(cx).selection
-              && name == pod_name
-              && ns == namespace
-            {
-              logs.clone_into(&mut this.pod_tab_state.logs);
-              this.pod_tab_state.logs_loading = false;
-              cx.notify();
-            }
-          }
           StateChanged::PodDescribeLoaded {
             pod_name,
             namespace,

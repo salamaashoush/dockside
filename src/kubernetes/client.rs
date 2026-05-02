@@ -132,32 +132,6 @@ impl KubeClient {
     Ok(())
   }
 
-  /// Get pod logs (snapshot).
-  pub async fn get_pod_logs(
-    &self,
-    name: &str,
-    namespace: &str,
-    container: Option<&str>,
-    tail_lines: Option<i64>,
-  ) -> Result<String> {
-    let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
-
-    let mut params = LogParams::default();
-    if let Some(c) = container {
-      params.container = Some(c.to_string());
-    }
-    if let Some(lines) = tail_lines {
-      params.tail_lines = Some(lines);
-    }
-
-    let logs = api
-      .logs(name, &params)
-      .await
-      .context(format!("Failed to get logs for pod {name} in namespace {namespace}"))?;
-
-    Ok(logs)
-  }
-
   /// Stream pod logs as raw bytes into the given channel until the
   /// receiver drops or the pod stops producing output.
   pub async fn stream_pod_logs(

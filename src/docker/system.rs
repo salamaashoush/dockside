@@ -102,7 +102,6 @@ impl DockerHostInfo {
 /// Aggregate disk usage breakdown from `docker system df`.
 #[derive(Debug, Clone, Default)]
 pub struct DiskUsageSummary {
-  pub layer_size_total: i64,
   pub images_count: usize,
   pub images_active: i64,
   pub images_size: i64,
@@ -135,10 +134,7 @@ impl DockerClient {
     let docker = self.client()?;
     let resp = docker.df(None::<DataUsageOptions>).await?;
 
-    let mut sum = DiskUsageSummary {
-      layer_size_total: resp.layers_size.unwrap_or(0),
-      ..DiskUsageSummary::default()
-    };
+    let mut sum = DiskUsageSummary::default();
 
     let images = resp.images.unwrap_or_default();
     sum.images_count = images.len();

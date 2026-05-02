@@ -289,8 +289,8 @@ impl DockerClient {
     if let Some(p) = platform {
       builder = builder.platform(p);
     }
-    let build_args_owned: std::collections::HashMap<String, String> = build_args.into_iter().collect();
-    let build_args_ref: std::collections::HashMap<&str, &str> = build_args_owned
+    let build_args_owned: HashMap<String, String> = build_args.into_iter().collect();
+    let build_args_ref: HashMap<&str, &str> = build_args_owned
       .iter()
       .map(|(k, v)| (k.as_str(), v.as_str()))
       .collect();

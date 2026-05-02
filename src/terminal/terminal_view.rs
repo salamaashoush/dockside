@@ -802,7 +802,7 @@ impl Render for TerminalView {
       Vec::new()
     };
 
-    let search_match_color = gpui::Hsla {
+    let search_match_color = Hsla {
       h: 50.0 / 360.0,
       s: 0.95,
       l: 0.55,
@@ -1117,7 +1117,7 @@ impl Render for TerminalView {
         }
         let match_count = search_matches.len();
         el.child(
-          gpui_component::h_flex()
+          h_flex()
             .id("terminal-find-bar")
             .w_full()
             .gap(px(8.))

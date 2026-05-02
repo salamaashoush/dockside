@@ -19,12 +19,6 @@ pub struct ScanSummary {
   pub vulns: Vec<Vulnerability>,
 }
 
-impl ScanSummary {
-  pub fn total(&self) -> usize {
-    self.critical + self.high + self.medium + self.low + self.unknown
-  }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vulnerability {
   pub id: String,

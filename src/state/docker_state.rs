@@ -224,11 +224,6 @@ pub enum StateChanged {
     image_id: String,
     error: String,
   },
-  PodLogsLoaded {
-    pod_name: String,
-    namespace: String,
-    logs: String,
-  },
   PodDescribeLoaded {
     pod_name: String,
     namespace: String,
