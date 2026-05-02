@@ -1,82 +1,75 @@
 # Dockside
 
-A native cross-platform desktop application for managing Docker containers, images, volumes, networks, and Kubernetes resources via Colima or native Docker.
+Native desktop app for managing Docker containers, images, volumes, networks, and Kubernetes resources via Colima or native Docker.
 
-Built with [GPUI](https://gpui.rs) for a fast, native experience on macOS, Linux, and Windows.
+Built with [GPUI](https://gpui.rs) for a fast, native experience on **macOS (Apple Silicon)** and **Linux (x86_64)**.
+
+> Windows and Intel macOS are not supported.
 
 ## Features
 
-- **Docker Management**: Containers, images, volumes, networks
-- **Kubernetes Support**: Pods, services, deployments
-- **Cross-Platform**: macOS (Colima), Linux (native Docker / Colima), Windows (Docker in WSL2)
-- **Native Performance**: Built with Rust and GPUI framework
-- **Real-time Updates**: Live status monitoring
-- **Terminal Integration**: Exec into containers directly
-- **Log Viewing**: Stream container and pod logs
+- **Docker management**: containers, images, volumes, networks, compose
+- **Kubernetes**: pods, services, deployments
+- **Embedded terminal**: `docker exec`, container logs, `kubectl exec`
+- **Image vulnerability scanning** via Trivy
+- **Dockerfile linting** via Hadolint
+- **Live stats**: CPU / memory / network / disk sparklines
+- **Compose**: project-level start/stop/restart + `docker compose watch` streaming
+- **Themes**: dozens of bundled themes, hot-reloaded
+- **Settings**: theme, terminal font, refresh intervals, kubeconfig override, Colima defaults, …
 
 ## Requirements
 
-- macOS 13.0+, Linux (glibc 2.31+), or Windows 10/11
-- Docker runtime:
-  - **macOS**: [Colima](https://github.com/abiosoft/colima)
-  - **Linux**: Native Docker daemon or Colima
-  - **Windows**: Docker running inside WSL2 (exposed via TCP)
-- Docker CLI
+- **macOS 13.0+** on Apple Silicon, or **Linux** with glibc 2.31+
+- A Docker runtime:
+  - macOS: [Colima](https://github.com/abiosoft/colima) (managed in-app)
+  - Linux: native `dockerd` (or Colima)
+- `docker` CLI on PATH
+- Optional: `kubectl` for Kubernetes panels, `trivy` for image scanning, `hadolint` for Dockerfile linting
 
 ## Installation
 
-### Quick Install (macOS / Linux)
+### One-line install (latest release)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/scripts/install.sh | bash
 ```
 
-This will install Dockside and optionally set up Docker and Colima if not already installed.
+- macOS arm64 → `/Applications/Dockside.app` (quarantine xattr stripped)
+- Linux x86_64 → `~/.local/bin/dockside` + themes in `~/.local/share/dockside` + `.desktop` entry + icon
 
-### Manual Installation
+Pin a version: `./scripts/install.sh v0.2.0`.
 
-Download the latest release from the [Releases page](https://github.com/salamaashoush/dockside/releases).
+### Manual install
 
-**macOS App Bundle:**
-1. Download `Dockside-vX.X.X.app.zip`
-2. Extract and move to `/Applications`
+Download the latest archive from the [Releases page](https://github.com/salamaashoush/dockside/releases):
 
-**macOS CLI Binary:**
-1. Download `dockside-vX.X.X-aarch64-apple-darwin.tar.gz` (Apple Silicon) or `dockside-vX.X.X-x86_64-apple-darwin.tar.gz` (Intel)
-2. Extract: `tar -xzf dockside-*.tar.gz`
-3. Move to PATH: `mv dockside ~/.local/bin/`
+- **macOS arm64**: `Dockside-vX.Y.Z-macos-arm64.zip` → unzip and move `Dockside.app` to `/Applications`
+- **Linux x86_64**: `Dockside-vX.Y.Z-linux-x86_64.tar.gz` → extract, copy `dockside` to a directory on PATH, copy `themes/` next to it (or set `DOCKSIDE_THEMES_DIR`)
 
-**Linux:**
-1. Download `dockside-vX.X.X-x86_64-unknown-linux-gnu.tar.gz`
-2. Extract: `tar -xzf dockside-*.tar.gz`
-3. Move to PATH: `mv dockside ~/.local/bin/`
-
-**Windows:**
-1. Download `dockside-vX.X.X-x86_64-pc-windows-msvc.zip`
-2. Extract and run `dockside.exe`
-
-### Build from Source
+## Build from source
 
 ```bash
 git clone https://github.com/salamaashoush/dockside
 cd dockside
 
-# Install dependencies
-just install-deps
+# One-shot: install Rust + Zig 0.15.2 + system libs for your host
+just install-build-deps     # or: bash scripts/install-deps.sh
 
-# Build and run
-just run
-
-# Or build release
-just build-release
-
-# Create app bundle (macOS)
-just bundle
+# Run / build
+just run                    # debug
+just build-release          # release binary
+just bundle                 # macOS .app bundle
 ```
+
+`scripts/install-deps.sh` auto-detects:
+
+- **macOS**: ensures `brew install pkg-config cmake`, runs `rustup`, downloads pinned Zig
+- **Linux**: detects `apt-get` / `dnf` / `pacman` / `zypper` and installs gtk3 + webkit2gtk + libxdo + libappindicator + libxcb + libxkbcommon + openssl + vulkan + alsa development headers, plus Rust + Zig
 
 ## Usage
 
-### Starting a Docker Runtime
+### Starting a Docker runtime
 
 **macOS / Linux (Colima):**
 
@@ -88,9 +81,7 @@ colima start --cpu 4 --memory 8 --disk 60 --kubernetes
 
 Or via justfile: `just start-colima` / `just start-colima-k8s`.
 
-**Linux (native Docker):** ensure `dockerd` is running and `/var/run/docker.sock` is accessible.
-
-**Windows (WSL2):** install a WSL2 distro, install Docker inside it, and expose the daemon over TCP. The setup dialog walks you through this on first launch.
+**Linux (native Docker):** ensure `dockerd` is running and `/var/run/docker.sock` is reachable.
 
 ### Running Dockside
 
@@ -98,10 +89,10 @@ Or via justfile: `just start-colima` / `just start-colima-k8s`.
 # Run from source
 just run
 
-# Or run installed binary
+# Run installed binary
 dockside
 
-# Or open the app bundle (macOS)
+# macOS bundle
 open /Applications/Dockside.app
 ```
 
@@ -110,72 +101,73 @@ open /Applications/Dockside.app
 ### Prerequisites
 
 - Rust 1.91+
+- [Zig](https://ziglang.org/) 0.15.2 (vendored Ghostty C core via `libghostty-vt-sys`)
 - [just](https://github.com/casey/just) command runner
 
-### Setup
+`just install-build-deps` installs all of the above.
+
+### Common commands
 
 ```bash
-just init       # Install development tools
-just run        # Run in development mode
-just run-debug  # Run with debug logging
-just watch      # Watch for changes
+just              # list recipes
+just check        # fast compile check
+just build        # debug build
+just test         # run tests
+just lint         # clippy
+just fmt          # rustfmt
+just ready        # run all CI checks
+just watch        # cargo-watch loop
 ```
 
-### Commands
+### Build / package
 
 ```bash
-just              # List all commands
-just check        # Fast compilation check
-just build        # Build debug version
-just test         # Run tests
-just lint         # Run clippy
-just fmt          # Format code
-just ready        # Run all CI checks
-```
-
-### Building
-
-```bash
-just build-release         # Build release binary
-just build-native          # Build with native CPU opts
-just build-macos-universal # Build universal binary (macOS)
-just bundle                # Create .app bundle (macOS)
-just install-app           # Install to /Applications
+just build-release     # release binary
+just build-native      # native CPU opts
+just bundle            # macOS .app bundle
+just install-app       # install bundle to /Applications
 ```
 
 ### Releasing
 
 ```bash
-just bump patch|minor|major  # Bump version
-just release patch           # Create release tag
-just release-all patch       # Full release workflow
+just bump patch|minor|major   # bumps Cargo.toml + lock
+just release patch            # bump + changelog + commit + tag + push
 ```
 
-## Project Structure
+A pushed `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which:
+
+1. Builds macOS arm64 + Linux x86_64
+2. Bundles `Dockside.app` (macOS) and `Dockside-vX.Y.Z-linux-x86_64.tar.gz`
+3. Generates release notes from `CHANGELOG.md`
+4. Creates the GitHub release with both artifacts
+
+## Project structure
 
 ```
 dockside/
 ├── src/
-│   ├── main.rs           # Entry point
-│   ├── app.rs            # Main application
-│   ├── platform/         # Platform detection + Docker runtime abstraction
-│   ├── docker/           # Docker client and types
-│   ├── colima/           # Colima client and machine types
-│   ├── kubernetes/       # Kubernetes client and types
-│   ├── state/            # Application state management
-│   ├── services/         # Background services
-│   ├── ui/               # UI components
-│   │   ├── containers/   # Container views
-│   │   ├── images/       # Image views
-│   │   ├── pods/         # Pod views
-│   │   ├── services/     # Service views
-│   │   ├── deployments/  # Deployment views
-│   │   ├── machines/     # Machine + host views
-│   │   └── ...
-│   └── themes/           # Theme definitions
-├── assets/               # App icons and resources
-├── scripts/              # Build and release scripts
-└── justfile              # Task runner commands
+│   ├── main.rs          # entry point + theme bootstrap
+│   ├── app.rs           # main application
+│   ├── platform/        # platform detection + runtime abstraction
+│   ├── docker/          # Docker client and types
+│   ├── colima/          # Colima client and machines
+│   ├── kubernetes/      # kube client and types
+│   ├── state/           # global app state (selection, settings, …)
+│   ├── services/        # background tasks + dispatcher
+│   ├── terminal/        # libghostty-backed terminal grid + log streams
+│   └── ui/              # views: containers, images, volumes, networks,
+│                        # pods, services, deployments, machines, compose,
+│                        # activity monitor, settings
+├── assets/              # icons, Info.plist
+├── themes/              # bundled themes (.json)
+├── scripts/
+│   ├── install.sh       # end-user installer (macOS / Linux)
+│   ├── install-deps.sh  # contributor build deps
+│   ├── release.sh       # bump + changelog + tag + push
+│   └── bump-version.sh  # Cargo.toml version bump
+├── .github/workflows/   # CI + release pipelines
+└── justfile             # task runner
 ```
 
 ## License

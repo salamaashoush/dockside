@@ -243,7 +243,11 @@ install:
 uninstall:
     cargo uninstall dockside
 
-# Install dependencies (Docker, Colima) on macOS
+# Install build dependencies (Rust + Zig + system libs) for the host platform
+install-build-deps:
+    bash scripts/install-deps.sh
+
+# Install runtime dependencies (Docker, Colima) on macOS
 install-deps:
     @echo "Installing Docker and Colima..."
     @which brew > /dev/null || (echo "Homebrew not found. Please install it first." && exit 1)
