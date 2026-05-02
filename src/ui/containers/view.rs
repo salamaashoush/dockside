@@ -36,6 +36,9 @@ pub struct ContainersView {
   /// Active live-tail task. Dropped when switching containers / toggling
   /// follow-off so the bollard stream sender hits send-error and exits.
   logs_task: Option<Task<()>>,
+  /// Stats poll task — runs while Stats tab is active for the current
+  /// container, dropped when leaving the tab or switching containers.
+  stats_task: Option<Task<()>>,
 }
 
 impl ContainersView {
@@ -164,6 +167,7 @@ impl ContainersView {
       last_synced_inspect: String::new(),
       last_synced_file_content: String::new(),
       logs_task: None,
+      stats_task: None,
     }
   }
 
@@ -440,6 +444,17 @@ impl ContainersView {
   fn on_tab_change(&mut self, tab: ContainerDetailTab, window: &mut Window, cx: &mut Context<'_, Self>) {
     self.active_tab = tab;
 
+    // Stats tab: spin up a poll loop while it's active. Drop it on any
+    // other tab so we don't keep hitting bollard.
+    if tab == ContainerDetailTab::Stats
+      && let Some(ref container) = self.selected_container(cx)
+    {
+      let id = container.id.clone();
+      self.start_stats_poll(id, cx);
+    } else {
+      self.stats_task = None;
+    }
+
     // If switching to terminal tab, create terminal view
     if tab == ContainerDetailTab::Terminal
       && self.terminal_view.is_none()
@@ -695,10 +710,14 @@ impl ContainersView {
     let id = container_id.to_string();
     let id_for_inspect = id.clone();
 
-    // Inspect snapshot.
+    // Inspect snapshot + structured extras (health/exit/mounts).
     self.container_tab_state.inspect_loading = true;
+    self.container_tab_state.container_extras = None;
     let tokio_handle = services::Tokio::runtime_handle();
     let client = services::docker_client();
+    let id_for_extras = id_for_inspect.clone();
+    let tokio_for_extras = tokio_handle.clone();
+    let client_for_extras = client.clone();
     cx.spawn(async move |this, cx| {
       let inspect = cx
         .background_executor()
@@ -720,6 +739,29 @@ impl ContainersView {
         this.container_tab_state.inspect = inspect;
         this.container_tab_state.inspect_loading = false;
         cx.notify();
+      });
+    })
+    .detach();
+
+    cx.spawn(async move |this, cx| {
+      let extras = cx
+        .background_executor()
+        .spawn(async move {
+          tokio_for_extras.block_on(async {
+            let guard = client_for_extras.read().await;
+            match guard.as_ref() {
+              Some(c) => c.container_extras(&id_for_extras).await.ok(),
+              None => None,
+            }
+          })
+        })
+        .await;
+
+      let _ = this.update(cx, |this, cx| {
+        if let Some(ex) = extras {
+          this.container_tab_state.container_extras = Some(ex);
+          cx.notify();
+        }
       });
     })
     .detach();
@@ -842,6 +884,68 @@ impl ContainersView {
     self.container_tab_state.logs.clear();
     // Render-time sync replaces the editor with the empty string next frame.
     cx.notify();
+  }
+
+  fn start_stats_poll(&mut self, container_id: String, cx: &mut Context<'_, Self>) {
+    self.stats_task = None;
+    let interval = settings_state(cx).read(cx).settings.stats_refresh_interval.max(1);
+    let task = cx.spawn(async move |this, cx| {
+      loop {
+        let tokio_handle = services::Tokio::runtime_handle();
+        let client = services::docker_client();
+        let id_for_call = container_id.clone();
+        let stats = cx
+          .background_executor()
+          .spawn(async move {
+            tokio_handle.block_on(async {
+              let guard = client.read().await;
+              match guard.as_ref() {
+                Some(c) => c.get_container_stats(&id_for_call).await.ok(),
+                None => None,
+              }
+            })
+          })
+          .await;
+
+        let still_alive = this
+          .update(cx, |this, cx| {
+            if let Some(s) = stats {
+              this.container_tab_state.stats_cpu.push(s.cpu_percent);
+              this.container_tab_state.stats_mem_pct.push(s.memory_percent);
+              #[allow(clippy::cast_precision_loss)]
+              this
+                .container_tab_state
+                .stats_net
+                .push((s.network_rx + s.network_tx) as f64);
+              #[allow(clippy::cast_precision_loss)]
+              this
+                .container_tab_state
+                .stats_disk
+                .push((s.block_read + s.block_write) as f64);
+              for v in [
+                &mut this.container_tab_state.stats_cpu,
+                &mut this.container_tab_state.stats_mem_pct,
+                &mut this.container_tab_state.stats_net,
+                &mut this.container_tab_state.stats_disk,
+              ] {
+                if v.len() > 60 {
+                  v.remove(0);
+                }
+              }
+              this.container_tab_state.stats_latest = Some(s);
+              cx.notify();
+            }
+            // Stop the loop if the user navigated away from Stats.
+            this.active_tab == ContainerDetailTab::Stats
+          })
+          .unwrap_or(false);
+        if !still_alive {
+          break;
+        }
+        Timer::after(Duration::from_secs(interval)).await;
+      }
+    });
+    self.stats_task = Some(task);
   }
 }
 

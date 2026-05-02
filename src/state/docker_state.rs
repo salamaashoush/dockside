@@ -60,16 +60,18 @@ impl MachineDetailTab {
 pub enum ContainerDetailTab {
   #[default]
   Info = 0,
-  Logs = 1,
-  Processes = 2,
-  Terminal = 3,
-  Files = 4,
-  Inspect = 5,
+  Stats = 1,
+  Logs = 2,
+  Processes = 3,
+  Terminal = 4,
+  Files = 5,
+  Inspect = 6,
 }
 
 impl ContainerDetailTab {
-  pub const ALL: [ContainerDetailTab; 6] = [
+  pub const ALL: [ContainerDetailTab; 7] = [
     ContainerDetailTab::Info,
+    ContainerDetailTab::Stats,
     ContainerDetailTab::Logs,
     ContainerDetailTab::Processes,
     ContainerDetailTab::Terminal,
@@ -80,6 +82,7 @@ impl ContainerDetailTab {
   pub fn label(self) -> &'static str {
     match self {
       ContainerDetailTab::Info => "Info",
+      ContainerDetailTab::Stats => "Stats",
       ContainerDetailTab::Logs => "Logs",
       ContainerDetailTab::Processes => "Processes",
       ContainerDetailTab::Terminal => "Terminal",

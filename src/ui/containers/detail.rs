@@ -14,6 +14,10 @@ use std::rc::Rc;
 // Re-export from state module for backwards compatibility
 pub use crate::state::ContainerDetailTab;
 
+fn format_bytes(bytes: u64) -> String {
+  bytesize::ByteSize(bytes).to_string()
+}
+
 use crate::assets::AppIcon;
 use crate::docker::{ContainerFileEntry, ContainerInfo};
 use crate::terminal::TerminalView;
@@ -53,6 +57,15 @@ pub struct ContainerTabState {
   pub file_content_loading: bool,
   /// Error when loading file content failed
   pub file_content_error: Option<String>,
+  /// Structured extras from container inspect (health, restart_count, etc).
+  pub container_extras: Option<crate::docker::ContainerExtras>,
+  /// Latest container stats sample (None if not yet loaded / unavailable).
+  pub stats_latest: Option<crate::docker::ContainerStats>,
+  /// Rolling history (last 60 samples) for sparkline charts.
+  pub stats_cpu: Vec<f64>,
+  pub stats_mem_pct: Vec<f64>,
+  pub stats_net: Vec<f64>,
+  pub stats_disk: Vec<f64>,
 }
 
 impl Default for ContainerTabState {
@@ -72,6 +85,12 @@ impl Default for ContainerTabState {
       file_content: String::new(),
       file_content_loading: false,
       file_content_error: None,
+      container_extras: None,
+      stats_latest: None,
+      stats_cpu: Vec::with_capacity(60),
+      stats_mem_pct: Vec::with_capacity(60),
+      stats_net: Vec::with_capacity(60),
+      stats_disk: Vec::with_capacity(60),
     }
   }
 }
@@ -316,7 +335,7 @@ impl ContainerDetail {
       )
   }
 
-  fn render_info_tab(container: &ContainerInfo, cx: &App) -> gpui::Div {
+  fn render_info_tab(&self, container: &ContainerInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     let info_row = |label: &str, value: String| {
@@ -339,7 +358,12 @@ impl ContainerDetail {
     let is_running = container.state.is_running();
     let status_color = if is_running { colors.success } else { colors.danger };
 
-    v_flex()
+    let extras = self
+      .container_state
+      .as_ref()
+      .and_then(|s| s.container_extras.clone());
+
+    let mut col = v_flex()
       .w_full()
       .p(px(16.))
       .gap(px(8.))
@@ -374,7 +398,260 @@ impl ContainerDetail {
             .map(|c| c.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_default(),
         ))
-      })
+      });
+
+    if let Some(ex) = extras {
+      if let Some(rc) = ex.restart_count {
+        col = col.child(info_row("Restart count", rc.to_string()));
+      }
+      if let Some(ec) = ex.exit_code
+        && !is_running
+      {
+        col = col.child(info_row("Exit code", ec.to_string()));
+      }
+      if let Some(start) = ex.started_at.as_ref().filter(|s| !s.is_empty() && *s != "0001-01-01T00:00:00Z") {
+        col = col.child(info_row("Started", start.clone()));
+      }
+      if let Some(end) = ex.finished_at.as_ref().filter(|s| !s.is_empty() && *s != "0001-01-01T00:00:00Z") {
+        col = col.child(info_row("Finished", end.clone()));
+      }
+
+      // Health section.
+      if let Some(h) = ex.health.as_ref() {
+        let health_color = match h.status.as_str() {
+          "healthy" => colors.success,
+          "starting" => colors.warning,
+          "unhealthy" => colors.danger,
+          _ => colors.muted_foreground,
+        };
+        col = col.child(
+          h_flex()
+            .w_full()
+            .py(px(12.))
+            .justify_between()
+            .border_b_1()
+            .border_color(colors.border)
+            .child(div().text_sm().text_color(colors.muted_foreground).child("Health"))
+            .child(
+              h_flex()
+                .gap(px(8.))
+                .items_center()
+                .child(div().w(px(8.)).h(px(8.)).rounded_full().bg(health_color))
+                .child(
+                  div()
+                    .text_sm()
+                    .text_color(colors.foreground)
+                    .child(if h.status.is_empty() { "n/a".to_string() } else { h.status.clone() }),
+                )
+                .when_some(h.failing_streak.filter(|n| *n > 0), |el, n| {
+                  el.child(
+                    div()
+                      .text_xs()
+                      .text_color(colors.muted_foreground)
+                      .child(format!("(failing streak {n})")),
+                  )
+                }),
+            ),
+        );
+        if !h.log.is_empty() {
+          let mut entries = v_flex().w_full().gap(px(4.));
+          for entry in h.log.iter().rev().take(5) {
+            let exit = entry.exit_code.unwrap_or(0);
+            let line_color = if exit == 0 { colors.success } else { colors.danger };
+            let when = entry.end.clone().unwrap_or_default();
+            let trimmed = entry.output.trim().to_string();
+            entries = entries.child(
+              h_flex()
+                .gap(px(8.))
+                .items_start()
+                .child(div().w(px(60.)).text_xs().text_color(line_color).child(format!("exit {exit}")))
+                .child(div().w(px(160.)).text_xs().text_color(colors.muted_foreground).child(when))
+                .child(
+                  div()
+                    .flex_1()
+                    .text_xs()
+                    .font_family("monospace")
+                    .text_color(colors.foreground)
+                    .child(trimmed),
+                ),
+            );
+          }
+          col = col.child(div().mt(px(4.)).child(entries));
+        }
+      }
+
+      // Mounts section.
+      if !ex.mounts.is_empty() {
+        col = col.child(
+          div()
+            .mt(px(8.))
+            .text_sm()
+            .text_color(colors.muted_foreground)
+            .child("Mounts"),
+        );
+        for m in &ex.mounts {
+          let rw_label = if m.rw { "rw" } else { "ro" };
+          let title = match m.kind.as_str() {
+            "volume" => format!(
+              "volume {} → {}",
+              m.name.clone().unwrap_or_else(|| m.source.clone()),
+              m.destination
+            ),
+            "bind" => format!("bind {} → {}", m.source, m.destination),
+            other => format!("{other} {} → {}", m.source, m.destination),
+          };
+          col = col.child(
+            h_flex()
+              .w_full()
+              .py(px(8.))
+              .gap(px(8.))
+              .border_b_1()
+              .border_color(colors.border)
+              .child(
+                div()
+                  .flex_1()
+                  .text_xs()
+                  .font_family("monospace")
+                  .text_color(colors.foreground)
+                  .child(title),
+              )
+              .child(div().w(px(40.)).text_xs().text_color(colors.muted_foreground).child(rw_label))
+              .child(
+                div()
+                  .w(px(80.))
+                  .text_xs()
+                  .text_color(colors.muted_foreground)
+                  .child(m.mode.clone()),
+              ),
+          );
+        }
+      }
+    }
+
+    col
+  }
+
+  fn render_stats_tab(&self, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+    let state = self.container_state.as_ref();
+    let Some(state) = state else {
+      return v_flex().w_full().p(px(16.)).child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("No stats."),
+      );
+    };
+
+    let cpu = state
+      .stats_latest
+      .as_ref()
+      .map_or(0.0, |s| s.cpu_percent);
+    let mem_pct = state
+      .stats_latest
+      .as_ref()
+      .map_or(0.0, |s| s.memory_percent);
+    let mem_usage = state.stats_latest.as_ref().map_or(0, |s| s.memory_usage);
+    let mem_limit = state.stats_latest.as_ref().map_or(0, |s| s.memory_limit);
+    let net_rx = state.stats_latest.as_ref().map_or(0, |s| s.network_rx);
+    let net_tx = state.stats_latest.as_ref().map_or(0, |s| s.network_tx);
+    let blk_r = state.stats_latest.as_ref().map_or(0, |s| s.block_read);
+    let blk_w = state.stats_latest.as_ref().map_or(0, |s| s.block_write);
+
+    let card = |title: &'static str,
+                main: String,
+                sub: String,
+                history: &[f64],
+                color: gpui::Hsla|
+     -> gpui::Div {
+      let history_owned: Vec<f64> = history.to_vec();
+      v_flex()
+        .flex_1()
+        .min_w(px(180.))
+        .p(px(12.))
+        .bg(colors.background)
+        .rounded(px(8.))
+        .border_1()
+        .border_color(colors.border)
+        .gap(px(4.))
+        .child(
+          div()
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(title.to_string()),
+        )
+        .child(
+          div()
+            .text_lg()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(colors.foreground)
+            .child(main),
+        )
+        .child(div().text_xs().text_color(colors.muted_foreground).child(sub))
+        .child(div().h(px(48.)).mt(px(6.)).child(Self::render_sparkline(&history_owned, color)))
+    };
+
+    let cpu_color = colors.primary;
+    let mem_color = colors.success;
+    let net_color = colors.warning;
+    let disk_color = colors.danger;
+
+    let row1 = h_flex()
+      .gap(px(12.))
+      .child(card(
+        "CPU",
+        format!("{cpu:.1}%"),
+        String::new(),
+        &state.stats_cpu,
+        cpu_color,
+      ))
+      .child(card(
+        "Memory",
+        format!("{mem_pct:.1}%"),
+        format!("{} / {}", format_bytes(mem_usage), format_bytes(mem_limit)),
+        &state.stats_mem_pct,
+        mem_color,
+      ));
+
+    let row2 = h_flex()
+      .gap(px(12.))
+      .mt(px(12.))
+      .child(card(
+        "Network",
+        format!("rx {} / tx {}", format_bytes(net_rx), format_bytes(net_tx)),
+        String::new(),
+        &state.stats_net,
+        net_color,
+      ))
+      .child(card(
+        "Disk I/O",
+        format!("r {} / w {}", format_bytes(blk_r), format_bytes(blk_w)),
+        String::new(),
+        &state.stats_disk,
+        disk_color,
+      ));
+
+    v_flex().w_full().p(px(16.)).gap(px(8.)).child(row1).child(row2)
+  }
+
+  fn render_sparkline(history: &[f64], color: gpui::Hsla) -> gpui::Div {
+    let max = history.iter().copied().fold(0.0f64, f64::max).max(1.0);
+    h_flex()
+      .w_full()
+      .h_full()
+      .items_end()
+      .gap(px(1.))
+      .children(history.iter().rev().take(60).rev().map(|&v| {
+        let pct = (v / max * 100.0).min(100.0);
+        #[allow(clippy::cast_possible_truncation)]
+        let h = (pct * 0.48) as f32;
+        div()
+          .flex_1()
+          .h_full()
+          .flex()
+          .items_end()
+          .child(div().w_full().h(px(h)).bg(color).rounded_t(px(2.)))
+      }))
   }
 
   fn render_logs_tab(&self, cx: &App) -> gpui::Div {
@@ -840,7 +1117,7 @@ impl ContainerDetail {
         ContainerDetailTab::Processes => self.render_processes_tab(is_running, cx),
         ContainerDetailTab::Terminal => self.render_terminal_tab(is_running, cx),
         ContainerDetailTab::Files => self.render_files_tab(is_running, window, cx),
-        _ => Self::render_info_tab(container, cx).into_any_element(),
+        _ => self.render_info_tab(container, cx).into_any_element(),
       };
       result = result.child(
         div()
@@ -855,7 +1132,8 @@ impl ContainerDetail {
     } else {
       let content = match self.active_tab {
         ContainerDetailTab::Inspect => self.render_inspect_tab(cx),
-        _ => Self::render_info_tab(container, cx),
+        ContainerDetailTab::Stats => self.render_stats_tab(cx),
+        _ => self.render_info_tab(container, cx),
       };
       result = result.child(
         div()

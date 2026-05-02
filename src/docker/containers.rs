@@ -137,6 +137,44 @@ impl ContainerInfo {
   }
 }
 
+/// Extras pulled from a full container inspect — surfaced on the Info tab.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContainerExtras {
+  pub restart_count: Option<i64>,
+  pub exit_code: Option<i64>,
+  pub started_at: Option<String>,
+  pub finished_at: Option<String>,
+  pub health: Option<ContainerHealth>,
+  pub mounts: Vec<MountInfo>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContainerHealth {
+  pub status: String,
+  pub failing_streak: Option<i64>,
+  pub log: Vec<HealthLogEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HealthLogEntry {
+  pub start: Option<String>,
+  pub end: Option<String>,
+  pub exit_code: Option<i64>,
+  pub output: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MountInfo {
+  /// "bind" / "volume" / "tmpfs" etc.
+  pub kind: String,
+  pub source: String,
+  pub destination: String,
+  pub mode: String,
+  pub rw: bool,
+  /// Volume name (only set for `volume` mounts).
+  pub name: Option<String>,
+}
+
 /// File entry in a container filesystem
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContainerFileEntry {
@@ -535,6 +573,64 @@ impl DockerClient {
     let info = docker.inspect_container(id, None::<InspectContainerOptions>).await?;
     let json = serde_json::to_string_pretty(&info)?;
     Ok(json)
+  }
+
+  /// Pull out the structured "extras" we need for the Info tab — health
+  /// status + recent log lines, restart count, exit code, mounts list.
+  pub async fn container_extras(&self, id: &str) -> Result<ContainerExtras> {
+    use bollard::query_parameters::InspectContainerOptions;
+    let docker = self.client()?;
+    let info = docker.inspect_container(id, None::<InspectContainerOptions>).await?;
+
+    let state = info.state.unwrap_or_default();
+    let exit_code = state.exit_code;
+    let restart_count = info.restart_count;
+    let started_at = state.started_at;
+    let finished_at = state.finished_at;
+
+    let health = state.health.map(|h| {
+      let status = h.status.map_or_else(String::new, |s| s.to_string());
+      let failing_streak = h.failing_streak;
+      let log: Vec<HealthLogEntry> = h
+        .log
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| HealthLogEntry {
+          start: entry.start,
+          end: entry.end,
+          exit_code: entry.exit_code,
+          output: entry.output.unwrap_or_default(),
+        })
+        .collect();
+      ContainerHealth {
+        status,
+        failing_streak,
+        log,
+      }
+    });
+
+    let mounts = info
+      .mounts
+      .unwrap_or_default()
+      .into_iter()
+      .map(|m| MountInfo {
+        kind: m.typ.map_or_else(String::new, |t| t.to_string()),
+        source: m.source.unwrap_or_default(),
+        destination: m.destination.unwrap_or_default(),
+        mode: m.mode.unwrap_or_default(),
+        rw: m.rw.unwrap_or(true),
+        name: m.name,
+      })
+      .collect();
+
+    Ok(ContainerExtras {
+      restart_count,
+      exit_code,
+      started_at,
+      finished_at,
+      health,
+      mounts,
+    })
   }
 
   /// Execute a command in a container and return combined stdout+stderr.
