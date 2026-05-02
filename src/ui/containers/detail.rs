@@ -14,6 +14,22 @@ use std::rc::Rc;
 // Re-export from state module for backwards compatibility
 pub use crate::state::ContainerDetailTab;
 
+/// One-line tooltip summary for a sparkline series. Shared between
+/// the Activity Monitor and the per-container Stats tab.
+fn sparkline_summary(label: &str, series: &[f64], unit: &str) -> String {
+  if series.is_empty() {
+    return format!("{label} no data");
+  }
+  let last = *series.last().unwrap();
+  let min = series.iter().copied().fold(f64::INFINITY, f64::min);
+  let max = series.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+  #[allow(clippy::cast_precision_loss)]
+  let avg = series.iter().sum::<f64>() / series.len() as f64;
+  format!(
+    "{label} last {last:.1}{unit} (min {min:.1}{unit} / max {max:.1}{unit} / avg {avg:.1}{unit})"
+  )
+}
+
 fn format_bytes(bytes: u64) -> String {
   bytesize::ByteSize(bytes).to_string()
 }
@@ -559,6 +575,8 @@ impl ContainerDetail {
     let blk_w = state.stats_latest.as_ref().map_or(0, |s| s.block_write);
 
     let card = |title: &'static str,
+                chart_id: &'static str,
+                unit: &'static str,
                 main: String,
                 sub: String,
                 history: &[f64],
@@ -588,7 +606,12 @@ impl ContainerDetail {
             .child(main),
         )
         .child(div().text_xs().text_color(colors.muted_foreground).child(sub))
-        .child(div().h(px(48.)).mt(px(6.)).child(Self::render_sparkline(&history_owned, color)))
+        .child(
+          div()
+            .h(px(48.))
+            .mt(px(6.))
+            .child(Self::render_sparkline(chart_id, title, unit, &history_owned, color)),
+        )
     };
 
     let cpu_color = colors.primary;
@@ -600,6 +623,8 @@ impl ContainerDetail {
       .gap(px(12.))
       .child(card(
         "CPU",
+        "stats-cpu",
+        "%",
         format!("{cpu:.1}%"),
         String::new(),
         &state.stats_cpu,
@@ -607,6 +632,8 @@ impl ContainerDetail {
       ))
       .child(card(
         "Memory",
+        "stats-mem",
+        "%",
         format!("{mem_pct:.1}%"),
         format!("{} / {}", format_bytes(mem_usage), format_bytes(mem_limit)),
         &state.stats_mem_pct,
@@ -618,6 +645,8 @@ impl ContainerDetail {
       .mt(px(12.))
       .child(card(
         "Network",
+        "stats-net",
+        "B",
         format!("rx {} / tx {}", format_bytes(net_rx), format_bytes(net_tx)),
         String::new(),
         &state.stats_net,
@@ -625,6 +654,8 @@ impl ContainerDetail {
       ))
       .child(card(
         "Disk I/O",
+        "stats-disk",
+        "B",
         format!("r {} / w {}", format_bytes(blk_r), format_bytes(blk_w)),
         String::new(),
         &state.stats_disk,
@@ -634,9 +665,23 @@ impl ContainerDetail {
     v_flex().w_full().p(px(16.)).gap(px(8.)).child(row1).child(row2)
   }
 
-  fn render_sparkline(history: &[f64], color: gpui::Hsla) -> gpui::Div {
+  fn render_sparkline(
+    chart_id: &'static str,
+    label: &'static str,
+    unit: &'static str,
+    history: &[f64],
+    color: gpui::Hsla,
+  ) -> impl IntoElement {
     let data: Vec<f64> = history.iter().rev().take(60).rev().copied().collect();
-    div().w_full().h_full().child(crate::ui::components::Sparkline::new(data, color))
+    let tooltip_text = sparkline_summary(label, &data, unit);
+    div()
+      .id(chart_id)
+      .w_full()
+      .h_full()
+      .child(crate::ui::components::Sparkline::new(data, color))
+      .tooltip(move |window, cx| {
+        gpui_component::tooltip::Tooltip::new(tooltip_text.clone()).build(window, cx)
+      })
   }
 
   fn render_logs_tab(&self, cx: &App) -> gpui::Div {
