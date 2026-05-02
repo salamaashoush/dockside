@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bollard::query_parameters::{
-  PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions, PruneVolumesOptions,
+  PruneBuildOptionsBuilder, PruneContainersOptions, PruneImagesOptions, PruneNetworksOptions, PruneVolumesOptions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +14,7 @@ pub struct PruneResult {
   pub images_deleted: Vec<String>,
   pub volumes_deleted: Vec<String>,
   pub networks_deleted: Vec<String>,
+  pub build_cache_deleted: Vec<String>,
   pub space_reclaimed: u64,
   // Kubernetes
   pub pods_deleted: Vec<String>,
@@ -31,6 +32,7 @@ impl PruneResult {
       + self.images_deleted.len()
       + self.volumes_deleted.len()
       + self.networks_deleted.len()
+      + self.build_cache_deleted.len()
       + self.pods_deleted.len()
       + self.deployments_deleted.len()
       + self.services_deleted.len()
@@ -114,6 +116,21 @@ impl DockerClient {
       ..Default::default()
     })
   }
+
+  /// Prune the `BuildKit` build cache. `all = true` removes every cache
+  /// entry; `all = false` removes only unused entries (Docker's default).
+  pub async fn prune_build_cache(&self, all: bool) -> Result<PruneResult> {
+    let docker = self.client()?;
+
+    let options = PruneBuildOptionsBuilder::default().all(all).build();
+    let response = docker.prune_build(Some(options)).await?;
+
+    Ok(PruneResult {
+      build_cache_deleted: response.caches_deleted.unwrap_or_default(),
+      space_reclaimed: u64::try_from(response.space_reclaimed.unwrap_or(0)).unwrap_or(0),
+      ..Default::default()
+    })
+  }
 }
 
 #[cfg(test)]
@@ -158,6 +175,7 @@ mod tests {
       images_deleted: vec!["i1".to_string()],
       volumes_deleted: vec!["v1".to_string(), "v2".to_string(), "v3".to_string()],
       networks_deleted: vec!["n1".to_string()],
+      build_cache_deleted: vec![],
       pods_deleted: vec!["p1".to_string()],
       deployments_deleted: vec![],
       services_deleted: vec!["s1".to_string(), "s2".to_string()],

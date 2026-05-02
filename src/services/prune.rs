@@ -27,6 +27,8 @@ pub fn prune_docker(options: &crate::ui::PruneOptions, cx: &mut App) -> Entity<P
   let prune_images = options.prune_images;
   let prune_volumes = options.prune_volumes;
   let prune_networks = options.prune_networks;
+  let prune_build_cache = options.prune_build_cache;
+  let build_cache_all = options.build_cache_all;
   let images_dangling_only = options.images_dangling_only;
   let prune_k8s_pods = options.prune_k8s_pods;
   let prune_k8s_pods_all = options.prune_k8s_pods_all;
@@ -58,6 +60,11 @@ pub fn prune_docker(options: &crate::ui::PruneOptions, cx: &mut App) -> Entity<P
 
     if prune_networks && let Ok(r) = docker.prune_networks().await {
       result.networks_deleted = r.networks_deleted;
+    }
+
+    if prune_build_cache && let Ok(r) = docker.prune_build_cache(build_cache_all).await {
+      result.build_cache_deleted = r.build_cache_deleted;
+      result.space_reclaimed += r.space_reclaimed;
     }
 
     // Kubernetes pruning
@@ -156,6 +163,9 @@ pub fn prune_docker(options: &crate::ui::PruneOptions, cx: &mut App) -> Entity<P
           }
           if !prune_result.networks_deleted.is_empty() {
             parts.push(format!("{} networks", prune_result.networks_deleted.len()));
+          }
+          if !prune_result.build_cache_deleted.is_empty() {
+            parts.push(format!("{} build cache entries", prune_result.build_cache_deleted.len()));
           }
           if !prune_result.pods_deleted.is_empty() {
             parts.push(format!("{} pods", prune_result.pods_deleted.len()));

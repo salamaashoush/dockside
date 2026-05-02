@@ -11,6 +11,8 @@ pub struct PruneOptions {
   pub prune_images: bool,
   pub prune_volumes: bool,
   pub prune_networks: bool,
+  pub prune_build_cache: bool,
+  pub build_cache_all: bool,
   pub images_dangling_only: bool,
   // Kubernetes options
   pub prune_k8s_pods: bool,
@@ -25,6 +27,7 @@ impl PruneOptions {
       && !self.prune_images
       && !self.prune_volumes
       && !self.prune_networks
+      && !self.prune_build_cache
       && !self.prune_k8s_pods
       && !self.prune_k8s_deployments
       && !self.prune_k8s_services
@@ -126,6 +129,8 @@ impl Render for PruneDialog {
     let volumes_checked = self.options.prune_volumes;
     let networks_checked = self.options.prune_networks;
     let dangling_only = self.options.images_dangling_only;
+    let build_cache_checked = self.options.prune_build_cache;
+    let build_cache_all = self.options.build_cache_all;
     // Kubernetes options
     let k8s_pods_checked = self.options.prune_k8s_pods;
     let k8s_pods_all = self.options.prune_k8s_pods_all;
@@ -221,6 +226,14 @@ impl Render for PruneDialog {
                 .text_sm()
                 .text_color(colors.secondary_foreground)
                 .child(format!("Networks removed: {}", result.networks_deleted.len())),
+            )
+          })
+          .when(!result.build_cache_deleted.is_empty(), |this| {
+            this.child(
+              div()
+                .text_sm()
+                .text_color(colors.secondary_foreground)
+                .child(format!("Build cache entries removed: {}", result.build_cache_deleted.len())),
             )
           })
           .when(!result.pods_deleted.is_empty(), |this| {
@@ -468,6 +481,52 @@ impl Render for PruneDialog {
                 colors.foreground,
                 colors.muted_foreground,
             ))
+            // BuildKit build cache
+            .child(render_form_row(
+                "Build cache",
+                "Remove BuildKit build cache",
+                Switch::new("build-cache")
+                    .checked(build_cache_checked)
+                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                        this.options.prune_build_cache = *checked;
+                        if !*checked {
+                            this.options.build_cache_all = false;
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+                colors.border,
+                colors.foreground,
+                colors.muted_foreground,
+            ))
+            // Build cache "all" sub-option
+            .when(build_cache_checked, |this| {
+                this.child(
+                    h_flex()
+                        .w_full()
+                        .py(px(8.))
+                        .px(px(32.))
+                        .justify_between()
+                        .items_center()
+                        .border_b_1()
+                        .border_color(colors.border)
+                        .bg(colors.sidebar)
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(colors.muted_foreground)
+                                .child("Remove ALL build cache (including in-use)"),
+                        )
+                        .child(
+                            Switch::new("build-cache-all")
+                                .checked(build_cache_all)
+                                .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                    this.options.build_cache_all = *checked;
+                                    cx.notify();
+                                })),
+                        ),
+                )
+            })
             // Kubernetes section header
             .child(
                 div()
