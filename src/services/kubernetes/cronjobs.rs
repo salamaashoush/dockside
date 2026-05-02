@@ -40,6 +40,69 @@ pub fn refresh_cronjobs(cx: &mut App) {
   .detach();
 }
 
+pub fn get_cronjob_yaml(name: String, namespace: String, cx: &mut App) {
+  let state = docker_state(cx);
+  let name_clone = name.clone();
+  let namespace_clone = namespace.clone();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.get_cronjob_yaml(&name, &namespace).await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    let yaml = match result {
+      Ok(y) => y,
+      Err(e) => format!("Error: {e}"),
+    };
+
+    cx.update(|cx| {
+      state.update(cx, |_state, cx| {
+        cx.emit(StateChanged::CronJobYamlLoaded {
+          name: name_clone,
+          namespace: namespace_clone,
+          yaml,
+        });
+      });
+    })
+  })
+  .detach();
+}
+
+pub fn apply_cronjob_yaml(name: String, namespace: String, yaml: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Applying cronjob '{name}'..."));
+  let disp = dispatcher(cx);
+  let label = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.apply_cronjob_yaml(&name, &namespace, &yaml).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("CronJob '{label}' applied"),
+          });
+        });
+        refresh_cronjobs(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to apply cronjob '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn delete_cronjob(name: String, namespace: String, cx: &mut App) {
   cronjob_action(cx, "Deleting", name, namespace, |client, n, ns| async move {
     client.delete_cronjob(&n, &ns).await.map(|()| String::new())

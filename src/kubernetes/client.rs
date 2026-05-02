@@ -815,6 +815,25 @@ impl KubeClient {
     Ok(())
   }
 
+  pub async fn get_cronjob_yaml(&self, name: &str, namespace: &str) -> Result<String> {
+    let api: Api<CronJob> = Api::namespaced(self.client.clone(), namespace);
+    let c = api.get(name).await.context(format!("Failed to get cronjob {name}"))?;
+    serde_yaml::to_string(&c).context("Failed to serialize cronjob to YAML")
+  }
+
+  pub async fn apply_cronjob_yaml(&self, name: &str, namespace: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut c: CronJob = serde_yaml::from_str(yaml_str).context("Failed to parse cronjob YAML")?;
+    c.metadata.name = Some(name.to_string());
+    c.metadata.namespace = Some(namespace.to_string());
+    let api: Api<CronJob> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .replace(name, &PostParams::default(), &c)
+      .await
+      .with_context(|| format!("Failed to apply cronjob {name}"))?;
+    Ok(())
+  }
+
   /// Rollback a Deployment to its previous revision. Walks owned
   /// `ReplicaSet`s, finds the one whose `deployment.kubernetes.io/revision`
   /// annotation is `current - 1`, and patches the deployment's pod

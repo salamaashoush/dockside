@@ -233,6 +233,7 @@ pub enum FavoriteRef {
   StatefulSet { name: String, namespace: String },
   DaemonSet { name: String, namespace: String },
   Job { name: String, namespace: String },
+  CronJob { name: String, namespace: String },
   Machine { id: String, label: String },
 }
 
@@ -248,7 +249,8 @@ impl FavoriteRef {
       | Self::Service { name, .. }
       | Self::StatefulSet { name, .. }
       | Self::DaemonSet { name, .. }
-      | Self::Job { name, .. } => name,
+      | Self::Job { name, .. }
+      | Self::CronJob { name, .. } => name,
       Self::Machine { label, .. } => label,
     }
   }
@@ -265,6 +267,7 @@ impl FavoriteRef {
       Self::StatefulSet { .. } => "StatefulSet",
       Self::DaemonSet { .. } => "DaemonSet",
       Self::Job { .. } => "Job",
+      Self::CronJob { .. } => "CronJob",
       Self::Machine { .. } => "Machine",
     }
   }

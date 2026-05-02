@@ -178,6 +178,16 @@ pub enum JobDetailTab {
   Yaml = 2,
 }
 
+/// Tab indices for cronjob detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum CronJobDetailTab {
+  #[default]
+  Info = 0,
+  Jobs = 1,
+  Yaml = 2,
+}
+
 /// Represents the currently selected item across all views
 /// This enables keyboard shortcuts to act on the selection
 #[derive(Clone, Debug, Default)]
@@ -209,6 +219,10 @@ pub enum Selection {
     namespace: String,
   },
   Job {
+    name: String,
+    namespace: String,
+  },
+  CronJob {
     name: String,
     namespace: String,
   },
@@ -400,6 +414,16 @@ pub enum StateChanged {
     name: String,
     namespace: String,
     tab: JobDetailTab,
+  },
+  CronJobYamlLoaded {
+    name: String,
+    namespace: String,
+    yaml: String,
+  },
+  CronJobTabRequest {
+    name: String,
+    namespace: String,
+    tab: CronJobDetailTab,
   },
   JobsUpdated,
   CronJobsUpdated,
@@ -756,6 +780,13 @@ impl DockerState {
 
   pub fn get_job(&self, name: &str, namespace: &str) -> Option<&JobInfo> {
     self.jobs.iter().find(|j| j.name == name && j.namespace == namespace)
+  }
+
+  pub fn get_cronjob(&self, name: &str, namespace: &str) -> Option<&CronJobInfo> {
+    self
+      .cronjobs
+      .iter()
+      .find(|c| c.name == name && c.namespace == namespace)
   }
 
   // Navigation
