@@ -1217,6 +1217,9 @@ impl Render for DocksideApp {
           Selection::Deployment { name, namespace } => {
             crate::services::restart_deployment(name, namespace, cx);
           }
+          Selection::StatefulSet { name, namespace } => {
+            crate::services::rollout_restart_statefulset(name, namespace, cx);
+          }
           Selection::None => {
             window.push_notification(
               (NotificationType::Info, SharedString::from("Select a resource first.")),
@@ -1254,6 +1257,9 @@ impl Render for DocksideApp {
           }
           Selection::Service { name, namespace } => {
             crate::services::delete_service(name, namespace, cx);
+          }
+          Selection::StatefulSet { name, namespace } => {
+            crate::services::delete_statefulset(name, namespace, cx);
           }
           Selection::Machine(MachineId::Colima(name)) => {
             crate::services::delete_machine(name, cx);

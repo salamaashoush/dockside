@@ -170,6 +170,23 @@ pub fn open_service_yaml(name: String, namespace: String, cx: &mut App) {
 // ==================== Deployment Tab Navigation ====================
 
 /// Open deployment with YAML tab selected
+pub fn open_statefulset_yaml(name: String, namespace: String, cx: &mut App) {
+  let state = docker_state(cx);
+  state.update(cx, |state, cx| {
+    state.set_view(CurrentView::StatefulSets);
+    state.set_selection(crate::state::Selection::StatefulSet {
+      name: name.clone(),
+      namespace: namespace.clone(),
+    });
+    cx.emit(StateChanged::StatefulSetTabRequest {
+      name: name.clone(),
+      namespace: namespace.clone(),
+      tab: crate::state::StatefulSetDetailTab::Yaml,
+    });
+  });
+  super::kubernetes::get_statefulset_yaml(name, namespace, cx);
+}
+
 pub fn open_deployment_yaml(name: String, namespace: String, cx: &mut App) {
   let state = docker_state(cx);
   state.update(cx, |_state, cx| {

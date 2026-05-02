@@ -230,6 +230,7 @@ pub enum FavoriteRef {
   Pod { name: String, namespace: String },
   Deployment { name: String, namespace: String },
   Service { name: String, namespace: String },
+  StatefulSet { name: String, namespace: String },
   Machine { id: String, label: String },
 }
 
@@ -242,7 +243,8 @@ impl FavoriteRef {
       | Self::Network { name, .. }
       | Self::Pod { name, .. }
       | Self::Deployment { name, .. }
-      | Self::Service { name, .. } => name,
+      | Self::Service { name, .. }
+      | Self::StatefulSet { name, .. } => name,
       Self::Machine { label, .. } => label,
     }
   }
@@ -256,6 +258,7 @@ impl FavoriteRef {
       Self::Pod { .. } => "Pod",
       Self::Deployment { .. } => "Deployment",
       Self::Service { .. } => "Service",
+      Self::StatefulSet { .. } => "StatefulSet",
       Self::Machine { .. } => "Machine",
     }
   }
