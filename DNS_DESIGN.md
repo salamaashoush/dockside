@@ -256,17 +256,27 @@ Each phase is independent. Each leaves the app working without the feature if th
 - Sharing the route map with `kubectl port-forward` style flows for k8s services (could come later as `*.svc.dockside.test`)
 - A CLI mode (`dockside dns ...`) — possible but separate
 
-## Open questions
+## Locked decisions
 
-1. **Suffix default**: `.dockside.test` (RFC-blessed, safest) vs `.dockside` (shorter, but unreserved and could theoretically be delegated by ICANN someday) vs `.dockside.dev` (HSTS preload). Recommend `.dockside.test`.
-2. **HTTPS-only mode**: should plain HTTP redirect to HTTPS by default, or serve both? Recommend "redirect to HTTPS unless container has `dockside.http_only=true` label", since HTTPS is preferred and free.
-3. **Privilege model for the helper**: spawn a separate small binary that does only the installs (auditable), or shell out via `osascript -e 'do shell script ... with administrator privileges'` / `pkexec` / RunAs? Recommend a separate `dockside-helper` binary with a narrow command surface — easier to review, easier to sign on macOS.
-4. **Auto-start of DNS server**: on every Dockside launch, or only when user opts in? Recommend opt-in plus `dns_autostart: bool` setting (default true once enabled).
-5. **Migration from any existing `/etc/hosts` workflow**: do we want a tool that reads the user's existing `/etc/hosts` entries for `*.dockside.local` and offers to migrate? Probably yes for adoption.
+1. **Suffix**: `.dockside.test`. Reasons: `.test` is RFC 6761 reserved (never delegated, no future-collision risk); `.dev` is on the Chromium HSTS preload list which forces HTTPS for every load and turns cert errors into hard failures with no "proceed anyway" — terrible first-run UX before the local CA is installed; `.local` is mDNS-reserved and broken on macOS as documented above. The Settings UI lets users override the suffix, but the validator rejects `.local`/`.localhost` and warns on HSTS-preloaded TLDs (`.dev`, `.app`).
+2. **Bundled reverse proxy is mandatory, not optional.** Same code path on Linux + macOS = same UX everywhere. DNS-only is rejected because it splits behavior between platforms.
+3. **HTTPS redirect**: plain HTTP redirects to HTTPS by default. Containers may opt out with `dockside.http_only=true`.
+4. **Privileged helper**: separate signed `dockside-helper` binary with narrow CLI surface. Each subcommand maps to one OS operation. Industry-standard invocation per platform:
+   - macOS: `osascript -e 'do shell script "...dockside-helper..." with administrator privileges'`. This is mkcert's pattern. Apple's `SMJobBless` is deprecated; `SMAppService` is overkill for one-shot installs.
+   - Linux: `pkexec ... dockside-helper ...` with a PolicyKit `.policy` file installed at `/usr/share/polkit-1/actions/dev.dockside.helper.policy`. Used by Tailscale, NetworkManager, systemd.
+   - Windows (later): UAC manifest with `requireAdministrator`, code-signed at release. Docker Desktop's pattern.
+5. **Auto-start**: `dns_autostart: bool` setting, defaults to true once the user has opted in once (so app restarts continue to serve without re-prompting).
+6. **`/etc/hosts` migration**: detect existing `*.dockside.*` entries on first run; offer one-click migration that comments them out with a marker.
 
-## Recommendation
+## Linux + macOS scope, single delivery
 
-Ship phases A → B → C as the v1 milestone over three commits. Phase D after that brings Linux + Windows to feature parity. Phase E is interleaved. Total time estimate: 4-5 focused sessions for full cross-platform coverage; v1 (macOS-only, plain HTTP) ships in 2 sessions.
+Implementation is a single push spanning DNS server, reverse proxy, TLS, helper binary, OS integration, and Settings UI for both Linux and macOS. Windows follows once those land. The work splits into the following commits in order, each independently buildable but all required for the feature to function:
+
+1. `feat(dns): hickory-based authoritative server + container RouteMap watcher`
+2. `feat(proxy): axum/hyper reverse proxy with platform-aware backend selection`
+3. `feat(tls): rcgen-backed local CA + HTTPS listener with on-demand leaf certs`
+4. `feat(helper): dockside-helper binary for privileged resolver + CA installs`
+5. `feat(settings): DNS toggle, suffix input, CA install button, route table tile`
 
 Sources cited inline below; full bibliography on request.
 - RFC 6761 (Special-Use Domain Names — `.test`, `.localhost`)
