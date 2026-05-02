@@ -311,7 +311,7 @@ impl ActivityMonitorView {
                         .container_stats
                         .iter()
                         .map(|stats| {
-                            let series = self
+                            let series: Vec<f64> = self
                                 .cpu_history_per
                                 .get(&stats.id)
                                 .map(|q| q.iter().copied().collect::<Vec<_>>())
@@ -359,13 +359,18 @@ impl ActivityMonitorView {
                             .text_right()
                             .child(format!("{:.1}", stats.cpu_percent)),
                     )
-                    .child(
+                    .child({
+                        let tooltip_text = sparkline_summary("CPU", &cpu_series, "%");
                         div()
+                            .id(gpui::SharedString::from(format!("cpu-spark-{}", stats.id)))
                             .w(px(40.))
                             .h(px(20.))
                             .ml(px(4.))
-                            .child(crate::ui::components::Sparkline::new(cpu_series, colors.link).max(100.0)),
-                    )
+                            .child(crate::ui::components::Sparkline::new(cpu_series, colors.link).max(100.0))
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(tooltip_text.clone()).build(window, cx)
+                            })
+                    })
                     .child(
                         div()
                             .w(px(100.))
@@ -407,7 +412,9 @@ impl ActivityMonitorView {
         Self::render_summary_card(
           "Total CPU:",
           format!("{:.1}%", self.stats.total_cpu_percent),
+          "summary-cpu",
           &self.cpu_history,
+          "%",
           colors.link,
           cx,
         ),
@@ -417,7 +424,9 @@ impl ActivityMonitorView {
         Self::render_summary_card(
           "Memory:",
           self.stats.display_total_memory(),
+          "summary-mem",
           &self.memory_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
+          "B",
           colors.primary,
           cx,
         ),
@@ -427,7 +436,9 @@ impl ActivityMonitorView {
         Self::render_summary_card(
           "Network:",
           self.stats.display_total_network(),
+          "summary-net",
           &self.network_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
+          "B/s",
           colors.accent,
           cx,
         ),
@@ -437,7 +448,9 @@ impl ActivityMonitorView {
         Self::render_summary_card(
           "Disk:",
           self.stats.display_total_disk(),
+          "summary-disk",
           &self.disk_history.iter().map(|&v| v as f64).collect::<Vec<_>>(),
+          "B/s",
           colors.success,
           cx,
         ),
@@ -447,7 +460,9 @@ impl ActivityMonitorView {
   fn render_summary_card(
     label: &'static str,
     value: String,
+    chart_id: &'static str,
     history: &[f64],
+    unit: &'static str,
     color: Hsla,
     cx: &Context<'_, Self>,
   ) -> impl IntoElement {
@@ -470,18 +485,28 @@ impl ActivityMonitorView {
           )
           .child(Label::new(value).text_color(colors.muted_foreground)),
       )
-      .child(
-        // Mini chart area
-        div().flex_1().mt(px(8.)).child(Self::render_mini_chart(history, color)),
-      )
+      .child(Self::render_mini_chart(chart_id, label, history, unit, color))
   }
 
-  fn render_mini_chart(history: &[f64], color: Hsla) -> impl IntoElement {
+  fn render_mini_chart(
+    chart_id: &'static str,
+    label: &'static str,
+    history: &[f64],
+    unit: &'static str,
+    color: Hsla,
+  ) -> impl IntoElement {
     let data: Vec<f64> = history.iter().rev().take(60).rev().copied().collect();
+    let tooltip_text = sparkline_summary(label, &data, unit);
     div()
+      .id(chart_id)
+      .flex_1()
+      .mt(px(8.))
       .w_full()
       .h_full()
       .child(crate::ui::components::Sparkline::new(data, color))
+      .tooltip(move |window, cx| {
+        gpui_component::tooltip::Tooltip::new(tooltip_text.clone()).build(window, cx)
+      })
   }
 
   /// Status breakdown badges: running / paused / exited container
@@ -552,6 +577,23 @@ impl ActivityMonitorView {
         .child(div().text_color(colors.muted_foreground).child("No running containers")),
     )
   }
+}
+
+/// One-line tooltip body for a sparkline: "CPU last 12.3% (min 0 / max
+/// 80 / avg 14)". `unit` is appended after each numeric value (e.g.
+/// "%"). `series` is allowed to be empty — returns "<label> no data".
+fn sparkline_summary(label: &str, series: &[f64], unit: &str) -> String {
+  if series.is_empty() {
+    return format!("{label} no data");
+  }
+  let last = *series.last().unwrap();
+  let min = series.iter().copied().fold(f64::INFINITY, f64::min);
+  let max = series.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+  #[allow(clippy::cast_precision_loss)]
+  let avg = series.iter().sum::<f64>() / series.len() as f64;
+  format!(
+    "{label} last {last:.1}{unit} (min {min:.1}{unit} / max {max:.1}{unit} / avg {avg:.1}{unit})"
+  )
 }
 
 fn format_bytes(bytes: u64) -> String {
