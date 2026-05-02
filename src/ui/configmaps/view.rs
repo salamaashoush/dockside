@@ -202,7 +202,7 @@ impl ConfigMapsView {
           .child(
             div()
               .flex_1()
-              .min_w_0()
+              .min_w(px(200.))
               .text_xs()
               .font_family("monospace")
               .text_color(colors.foreground)
@@ -276,7 +276,7 @@ impl Render for ConfigMapsView {
               .child("No configmaps in selected namespace."),
           )
         } else {
-          let mut list = v_flex().w_full();
+          let mut list = v_flex().w_full().min_w(px(700.));
           list = list.child(
             h_flex()
               .w_full()
@@ -288,7 +288,7 @@ impl Render for ConfigMapsView {
               .child(
                 div()
                   .flex_1()
-                  .min_w_0()
+                  .min_w(px(200.))
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAME"),
@@ -332,7 +332,7 @@ impl Render for ConfigMapsView {
         .id("configmaps-scroll")
         .flex_1()
         .min_h_0()
-        .overflow_y_scrollbar()
+        .overflow_scrollbar()
         .child(body),
     )
   }

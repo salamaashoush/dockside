@@ -288,7 +288,7 @@ impl StatefulSetDetail {
       .child(
         div()
           .flex_1()
-          .min_w_0()
+          .min_w(px(200.))
           .text_xs()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.muted_foreground)
@@ -357,7 +357,7 @@ impl StatefulSetDetail {
           .child(
             div()
               .flex_1()
-              .min_w_0()
+              .min_w(px(200.))
               .text_sm()
               .text_color(colors.foreground)
               .font_family("monospace")

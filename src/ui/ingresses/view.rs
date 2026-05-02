@@ -99,7 +99,7 @@ impl Render for IngressesView {
               .child("No ingresses in selected namespace."),
           )
         } else {
-          let mut list = v_flex().w_full().child(
+          let mut list = v_flex().w_full().min_w(px(900.)).child(
             h_flex()
               .w_full()
               .px(px(12.))
@@ -109,7 +109,7 @@ impl Render for IngressesView {
               .child(
                 div()
                   .flex_1()
-                  .min_w_0()
+                  .min_w(px(200.))
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAME"),
@@ -133,7 +133,7 @@ impl Render for IngressesView {
               .child(
                 div()
                   .flex_1()
-                  .min_w_0()
+                  .min_w(px(200.))
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("HOSTS"),
@@ -194,7 +194,7 @@ impl Render for IngressesView {
                 .child(
                   div()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(px(200.))
                     .text_xs()
                     .text_color(colors.foreground)
                     .text_ellipsis()
@@ -258,7 +258,7 @@ impl Render for IngressesView {
         .id("ingresses-scroll")
         .flex_1()
         .min_h_0()
-        .overflow_y_scrollbar()
+        .overflow_scrollbar()
         .child(body),
     )
   }

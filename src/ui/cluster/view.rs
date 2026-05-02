@@ -123,7 +123,7 @@ impl ClusterView {
             .justify_center()
             .child(div().text_sm().text_color(colors.muted_foreground).child("No nodes."));
         }
-        let mut list = v_flex().w_full().child(
+        let mut list = v_flex().w_full().min_w(px(960.)).child(
           h_flex()
             .w_full()
             .px(px(12.))
@@ -133,7 +133,7 @@ impl ClusterView {
             .child(
               div()
                 .flex_1()
-                .min_w_0()
+                .min_w(px(200.))
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("NAME"),
@@ -221,8 +221,12 @@ impl ClusterView {
               .child(
                 div()
                   .flex_1()
+                  .min_w(px(200.))
                   .text_sm()
                   .text_color(colors.foreground)
+                  .text_ellipsis()
+                  .overflow_hidden()
+                  .whitespace_nowrap()
                   .child(n.name.clone()),
               )
               .child(
@@ -297,7 +301,7 @@ impl ClusterView {
         }
         div()
           .size_full()
-          .child(div().id("nodes-scroll").size_full().overflow_y_scrollbar().child(list))
+          .child(div().id("nodes-scroll").size_full().overflow_scrollbar().child(list))
       }
     }
   }
@@ -320,7 +324,7 @@ impl ClusterView {
             .justify_center()
             .child(div().text_sm().text_color(colors.muted_foreground).child("No events."));
         }
-        let mut list = v_flex().w_full().child(
+        let mut list = v_flex().w_full().min_w(px(920.)).child(
           h_flex()
             .w_full()
             .px(px(12.))
@@ -362,7 +366,7 @@ impl ClusterView {
             .child(
               div()
                 .flex_1()
-                .min_w_0()
+                .min_w(px(220.))
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("MESSAGE"),
@@ -436,10 +440,12 @@ impl ClusterView {
               .child(
                 div()
                   .flex_1()
-                  .min_w_0()
+                  .min_w(px(220.))
                   .text_xs()
                   .text_color(colors.foreground)
-                  .whitespace_normal()
+                  .text_ellipsis()
+                  .overflow_hidden()
+                  .whitespace_nowrap()
                   .child(e.message.clone()),
               )
               .child(
@@ -462,7 +468,7 @@ impl ClusterView {
         }
         div()
           .size_full()
-          .child(div().id("events-scroll").size_full().overflow_y_scrollbar().child(list))
+          .child(div().id("events-scroll").size_full().overflow_scrollbar().child(list))
       }
     }
   }
