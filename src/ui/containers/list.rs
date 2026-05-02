@@ -174,7 +174,23 @@ impl ListDelegate for ContainerListDelegate {
               move |_, _, cx| {
                 services::open_container_files(id.clone(), cx);
               }
-            }));
+            }))
+            .item(PopupMenuItem::new("Upload File...").icon(IconName::ArrowUp).on_click({
+              let id = id.clone();
+              move |_, w, cx| {
+                crate::ui::containers::prompt_upload_to_container(id.clone(), w, cx);
+              }
+            }))
+            .item(
+              PopupMenuItem::new("Download File...")
+                .icon(IconName::ArrowDown)
+                .on_click({
+                  let id = id.clone();
+                  move |_, w, cx| {
+                    crate::ui::containers::prompt_download_from_container(id.clone(), w, cx);
+                  }
+                }),
+            );
         } else if paused {
           // Paused container actions
           menu = menu

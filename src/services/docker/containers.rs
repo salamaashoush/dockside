@@ -466,6 +466,94 @@ pub fn commit_container(
   .detach();
 }
 
+pub fn cp_to_container(id: String, src_path: std::path::PathBuf, dest_path: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Copying {} into container...", src_path.display()));
+  let disp = dispatcher(cx);
+  let client = docker_client();
+  let label = src_path.display().to_string();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    docker.cp_to_container(&id, &src_path, &dest_path).await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(())) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Copied {label} into container"),
+          });
+        });
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Copy to container failed: {e}"),
+          });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+pub fn cp_from_container(id: String, src_path: String, dest_dir: std::path::PathBuf, cx: &mut App) {
+  let task_id = start_task(cx, format!("Copying {src_path} from container..."));
+  let disp = dispatcher(cx);
+  let client = docker_client();
+  let dest_label = dest_dir.display().to_string();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    docker.cp_from_container(&id, &src_path, &dest_dir).await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(())) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Copied to {dest_label}"),
+          });
+        });
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Copy from container failed: {e}"),
+          });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn export_container(id: String, output_path: String, cx: &mut App) {
   let task_id = start_task(cx, "Exporting container...".to_string());
   let disp = dispatcher(cx);

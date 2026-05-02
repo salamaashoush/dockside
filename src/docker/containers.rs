@@ -3,9 +3,9 @@ use bollard::container::LogOutput;
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::models::{ContainerCreateBody, HostConfig};
 use bollard::query_parameters::{
-  CommitContainerOptions, CreateContainerOptions, KillContainerOptions, ListContainersOptions, LogsOptions,
-  RemoveContainerOptions, RenameContainerOptions, RestartContainerOptions, StartContainerOptions, StopContainerOptions,
-  TopOptionsBuilder,
+  CommitContainerOptions, CreateContainerOptions, DownloadFromContainerOptionsBuilder, KillContainerOptions,
+  ListContainersOptions, LogsOptions, RemoveContainerOptions, RenameContainerOptions, RestartContainerOptions,
+  StartContainerOptions, StopContainerOptions, TopOptionsBuilder, UploadToContainerOptionsBuilder,
 };
 use chrono::{DateTime, Utc};
 use futures::stream::StreamExt;
@@ -874,6 +874,74 @@ impl DockerClient {
       return finalize_file_read(fallback.stdout, MAX_READ_BYTES);
     }
     finalize_file_read(result.stdout, MAX_READ_BYTES)
+  }
+
+  /// Copy a host file or directory into a container at `dest_path`. The
+  /// content is wrapped into a tar stream and uploaded via the Docker
+  /// archive endpoint. `dest_path` must be an existing directory inside
+  /// the container; the source's basename becomes a child entry there.
+  pub async fn cp_to_container(&self, id: &str, src_path: &std::path::Path, dest_path: &str) -> Result<()> {
+    use std::io::Cursor;
+
+    let docker = self.client()?;
+    if !src_path.exists() {
+      return Err(anyhow!("Source path does not exist: {}", src_path.display()));
+    }
+    let src_name = src_path
+      .file_name()
+      .and_then(|s| s.to_str())
+      .ok_or_else(|| anyhow!("Source path has no name component"))?;
+
+    let mut tar_buf: Vec<u8> = Vec::new();
+    {
+      let mut tar = tar::Builder::new(Cursor::new(&mut tar_buf));
+      if src_path.is_dir() {
+        tar
+          .append_dir_all(src_name, src_path)
+          .map_err(|e| anyhow!("Failed to package directory: {e}"))?;
+      } else {
+        let mut file =
+          std::fs::File::open(src_path).map_err(|e| anyhow!("Failed to open {}: {e}", src_path.display()))?;
+        tar
+          .append_file(src_name, &mut file)
+          .map_err(|e| anyhow!("Failed to add file to archive: {e}"))?;
+      }
+      tar.finish().map_err(|e| anyhow!("Failed to finalize archive: {e}"))?;
+    }
+
+    let opts = UploadToContainerOptionsBuilder::default().path(dest_path).build();
+    docker
+      .upload_to_container(id, Some(opts), bollard::body_full(tar_buf.into()))
+      .await
+      .map_err(|e| anyhow!("Upload failed: {e}"))?;
+    Ok(())
+  }
+
+  /// Stream a tar archive of `src_path` from the container and unpack it
+  /// into `dest_dir` on the host. The archive root contains the resource
+  /// addressed by `src_path` (matching `docker cp` semantics).
+  pub async fn cp_from_container(&self, id: &str, src_path: &str, dest_dir: &std::path::Path) -> Result<()> {
+    use std::io::Cursor;
+
+    let docker = self.client()?;
+    if !dest_dir.is_dir() {
+      return Err(anyhow!("Destination is not a directory: {}", dest_dir.display()));
+    }
+
+    let opts = DownloadFromContainerOptionsBuilder::default().path(src_path).build();
+    let mut stream = docker.download_from_container(id, Some(opts));
+
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+      let bytes = chunk.map_err(|e| anyhow!("Download stream error: {e}"))?;
+      buf.extend_from_slice(&bytes);
+    }
+
+    let mut archive = tar::Archive::new(Cursor::new(buf));
+    archive
+      .unpack(dest_dir)
+      .map_err(|e| anyhow!("Failed to unpack archive into {}: {e}", dest_dir.display()))?;
+    Ok(())
   }
 
   /// Resolve a symlink to its absolute target path.
