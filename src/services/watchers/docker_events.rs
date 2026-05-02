@@ -1,3 +1,4 @@
+#![allow(unknown_lints, clippy::duration_suboptimal_units)]
 //! Docker events watcher
 //!
 //! Watches Docker daemon events via the Events API and emits resource change notifications.
@@ -30,7 +31,7 @@ impl Backoff {
   fn new() -> Self {
     Self {
       current: Duration::from_secs(1),
-      max: Duration::from_secs(60),
+      max: Duration::from_secs(60), // 1 minute cap on backoff
     }
   }
 

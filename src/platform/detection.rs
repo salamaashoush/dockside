@@ -1,5 +1,6 @@
 //! Platform detection logic
 
+#[cfg(target_os = "linux")]
 use std::path::Path;
 
 /// Supported platforms for Dockside

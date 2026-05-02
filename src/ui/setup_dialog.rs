@@ -110,11 +110,7 @@ pub fn check_k8s_api() -> (bool, Option<String>) {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn is_colima_installed() -> bool {
   if find_binary("colima").is_some() {
-    colima_cmd()
-      .arg("version")
-      .output()
-      .map(|o| o.status.success())
-      .unwrap_or(false)
+    colima_cmd().arg("version").output().is_ok_and(|o| o.status.success())
   } else {
     false
   }
@@ -131,8 +127,7 @@ pub fn is_docker_installed() -> bool {
     crate::utils::docker_cmd()
       .arg("--version")
       .output()
-      .map(|o| o.status.success())
-      .unwrap_or(false)
+      .is_ok_and(|o| o.status.success())
   } else {
     false
   }
@@ -163,8 +158,7 @@ pub fn is_docker_running() -> bool {
   crate::utils::docker_cmd()
     .arg("info")
     .output()
-    .map(|o| o.status.success())
-    .unwrap_or(false)
+    .is_ok_and(|o| o.status.success())
 }
 
 /// Check if Homebrew is installed (macOS only)

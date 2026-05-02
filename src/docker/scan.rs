@@ -88,8 +88,7 @@ pub fn trivy_available() -> bool {
   Command::new("trivy")
     .arg("--version")
     .output()
-    .map(|o| o.status.success())
-    .unwrap_or(false)
+    .is_ok_and(|o| o.status.success())
 }
 
 /// Sentinel error string the UI matches on to render the structured
@@ -208,8 +207,7 @@ pub fn hadolint_available() -> bool {
   Command::new("hadolint")
     .arg("--version")
     .output()
-    .map(|o| o.status.success())
-    .unwrap_or(false)
+    .is_ok_and(|o| o.status.success())
 }
 
 /// Sentinel error string the UI matches on to render the structured

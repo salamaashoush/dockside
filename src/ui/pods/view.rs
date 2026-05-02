@@ -240,29 +240,23 @@ impl PodsView {
 
     if let Some(pod) = self.selected_pod(cx) {
       match tab {
-        PodDetailTab::Terminal => {
-          if self.terminal_view.is_none() && matches!(pod.phase, PodPhase::Running) {
-            let container = self.pod_tab_state.selected_container.clone();
-            self.terminal_view = Some(cx.new(|cx| {
-              TerminalView::new(
-                TerminalSessionType::kubectl_exec(pod.name.clone(), pod.namespace.clone(), container, None),
-                window,
-                cx,
-              )
-            }));
-          }
+        PodDetailTab::Terminal if self.terminal_view.is_none() && matches!(pod.phase, PodPhase::Running) => {
+          let container = self.pod_tab_state.selected_container.clone();
+          self.terminal_view = Some(cx.new(|cx| {
+            TerminalView::new(
+              TerminalSessionType::kubectl_exec(pod.name.clone(), pod.namespace.clone(), container, None),
+              window,
+              cx,
+            )
+          }));
         }
-        PodDetailTab::Describe => {
-          if self.pod_tab_state.describe.is_empty() && !self.pod_tab_state.describe_loading {
-            self.pod_tab_state.describe_loading = true;
-            services::get_pod_describe(pod.name.clone(), pod.namespace.clone(), cx);
-          }
+        PodDetailTab::Describe if self.pod_tab_state.describe.is_empty() && !self.pod_tab_state.describe_loading => {
+          self.pod_tab_state.describe_loading = true;
+          services::get_pod_describe(pod.name.clone(), pod.namespace.clone(), cx);
         }
-        PodDetailTab::Yaml => {
-          if self.pod_tab_state.yaml.is_empty() && !self.pod_tab_state.yaml_loading {
-            self.pod_tab_state.yaml_loading = true;
-            services::get_pod_yaml(pod.name.clone(), pod.namespace.clone(), cx);
-          }
+        PodDetailTab::Yaml if self.pod_tab_state.yaml.is_empty() && !self.pod_tab_state.yaml_loading => {
+          self.pod_tab_state.yaml_loading = true;
+          services::get_pod_yaml(pod.name.clone(), pod.namespace.clone(), cx);
         }
         _ => {}
       }

@@ -148,7 +148,7 @@ impl DockerClient {
       });
     }
 
-    result.sort_by(|a, b| b.created.cmp(&a.created));
+    result.sort_by_key(|i| std::cmp::Reverse(i.created));
     Ok(result)
   }
 

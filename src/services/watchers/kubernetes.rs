@@ -1,3 +1,4 @@
+#![allow(unknown_lints, clippy::duration_suboptimal_units)]
 //! Kubernetes resource watchers
 //!
 //! Watches Kubernetes resources using the Watch API for real-time updates.

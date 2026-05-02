@@ -11,7 +11,7 @@ use gpui_component::{Icon, IconName};
 pub fn spinning_loader(size: Pixels, color: gpui::Hsla) -> impl IntoElement {
   Icon::new(IconName::Loader).size(size).text_color(color).with_animation(
     "spin",
-    Animation::new(Duration::from_millis(1000)).repeat(),
+    Animation::new(Duration::from_secs(1)).repeat(),
     |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
   )
 }
@@ -23,7 +23,7 @@ pub fn spinning_loader_circle(size: Pixels, color: gpui::Hsla) -> impl IntoEleme
     .text_color(color)
     .with_animation(
       "spin-circle",
-      Animation::new(Duration::from_millis(1000)).repeat(),
+      Animation::new(Duration::from_secs(1)).repeat(),
       |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
     )
 }
