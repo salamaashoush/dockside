@@ -20,6 +20,18 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
+      # libghostty-vt-sys vendors Ghostty's C core; Zig is required to
+      # build it on every platform.
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Install macOS dependencies
+        run: |
+          brew update
+          brew install pkg-config cmake
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -91,6 +103,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            cmake \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
@@ -101,6 +116,13 @@ jobs:
             libssl-dev \
             libvulkan-dev \
             libasound2-dev
+
+      # libghostty-vt-sys vendors Ghostty's C core; Zig is required to
+      # build it on every platform.
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
 
       - name: Cache cargo
         uses: actions/cache@v4
