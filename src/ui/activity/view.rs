@@ -533,33 +533,52 @@ impl ActivityMonitorView {
         exited += 1;
       }
     }
+    // Inline pill: dot + label + count on a single row. Looks closer
+    // to the toolbar status chips on Linear / GitHub than the chunky
+    // two-row card we had before.
     let badge = move |label: &'static str, count: usize, color: Hsla| -> gpui::Div {
-      v_flex()
+      let active = count > 0;
+      let dot_color = if active { color } else { colors.muted_foreground };
+      let label_color = if active { colors.foreground } else { colors.muted_foreground };
+      let count_color = if active { color } else { colors.muted_foreground };
+      let bg = if active { color.opacity(0.10) } else { colors.muted.opacity(0.4) };
+      let border = if active { color.opacity(0.35) } else { colors.border };
+      h_flex()
         .px(px(10.))
         .py(px(4.))
-        .gap(px(0.))
-        .rounded(px(6.))
-        .bg(if count > 0 { color.opacity(0.15) } else { colors.muted })
+        .gap(px(8.))
+        .items_center()
+        .rounded_full()
+        .border_1()
+        .border_color(border)
+        .bg(bg)
+        .child(
+          div()
+            .size(px(6.))
+            .rounded_full()
+            .bg(dot_color),
+        )
         .child(
           div()
             .text_xs()
-            .text_color(if count > 0 { color } else { colors.muted_foreground })
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(label_color)
             .child(label),
         )
         .child(
           div()
-            .text_sm()
+            .text_xs()
             .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(colors.foreground)
+            .text_color(count_color)
             .child(count.to_string()),
         )
     };
     h_flex()
-      .gap(px(8.))
+      .gap(px(6.))
       .items_center()
-      .child(badge("RUNNING", running, colors.success))
-      .child(badge("PAUSED", paused, colors.warning))
-      .child(badge("EXITED", exited, colors.muted_foreground))
+      .child(badge("Running", running, colors.success))
+      .child(badge("Paused", paused, colors.warning))
+      .child(badge("Exited", exited, colors.muted_foreground))
   }
 
   fn render_empty(cx: &Context<'_, Self>) -> impl IntoElement {
@@ -626,8 +645,9 @@ impl Render for ActivityMonitorView {
             .child(
                 h_flex()
                     .w_full()
-                    .h(px(52.))
-                    .px(px(16.))
+                    .h(px(56.))
+                    .px(px(20.))
+                    .gap(px(16.))
                     .items_center()
                     .justify_between()
                     .border_b_1()
