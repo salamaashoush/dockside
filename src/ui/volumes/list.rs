@@ -98,14 +98,40 @@ impl ListDelegate for VolumeListDelegate {
       .dropdown_menu({
         let name = name.clone();
         move |menu, _window, _cx| {
-          let name_for_delete = name.clone();
-          menu.item(
-            PopupMenuItem::new("Delete")
-              .icon(Icon::new(AppIcon::Trash))
-              .on_click(move |_, _, cx| {
-                services::delete_volume(name_for_delete.clone(), cx);
-              }),
-          )
+          let name_backup = name.clone();
+          let name_restore = name.clone();
+          let name_clone = name.clone();
+          let name_delete = name.clone();
+          menu
+            .item(
+              PopupMenuItem::new("Backup...")
+                .icon(IconName::ArrowDown)
+                .on_click(move |_, w, cx| {
+                  crate::ui::volumes::prompt_backup_volume(name_backup.clone(), w, cx);
+                }),
+            )
+            .item(
+              PopupMenuItem::new("Restore...")
+                .icon(IconName::ArrowUp)
+                .on_click(move |_, w, cx| {
+                  crate::ui::volumes::prompt_restore_volume(name_restore.clone(), w, cx);
+                }),
+            )
+            .item(
+              PopupMenuItem::new("Clone...")
+                .icon(Icon::new(AppIcon::Copy))
+                .on_click(move |_, w, cx| {
+                  crate::ui::volumes::prompt_clone_volume(name_clone.clone(), w, cx);
+                }),
+            )
+            .separator()
+            .item(
+              PopupMenuItem::new("Delete")
+                .icon(Icon::new(AppIcon::Trash))
+                .on_click(move |_, _, cx| {
+                  services::delete_volume(name_delete.clone(), cx);
+                }),
+            )
         }
       });
 

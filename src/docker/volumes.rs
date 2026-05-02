@@ -106,6 +106,205 @@ impl DockerClient {
     Ok(())
   }
 
+  /// Tar+gzip the volume contents into `<dest_dir>/<volume_name>-<ts>.tar.gz`
+  /// using a throw-away alpine container. Returns the absolute path of the
+  /// archive on success.
+  pub async fn backup_volume(&self, volume_name: &str, dest_dir: &std::path::Path) -> Result<std::path::PathBuf> {
+    let docker = self.client()?;
+    if !dest_dir.is_dir() {
+      anyhow::bail!("Destination is not a directory: {}", dest_dir.display());
+    }
+    let dest_str = dest_dir
+      .to_str()
+      .ok_or_else(|| anyhow::anyhow!("Destination path is not valid UTF-8"))?;
+    let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ");
+    let archive_name = format!("{volume_name}-{timestamp}.tar.gz");
+    let container_name = format!("docker-ui-vol-backup-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0));
+
+    let host_config = bollard::models::HostConfig {
+      binds: Some(vec![format!("{volume_name}:/data:ro"), format!("{dest_str}:/backup")]),
+      auto_remove: Some(true),
+      ..Default::default()
+    };
+
+    let cmd = vec![
+      "sh".to_string(),
+      "-c".to_string(),
+      format!("tar -czf /backup/{archive_name} -C /data ."),
+    ];
+
+    let config = ContainerCreateBody {
+      image: Some("alpine:latest".to_string()),
+      cmd: Some(cmd),
+      host_config: Some(host_config),
+      tty: Some(false),
+      ..Default::default()
+    };
+
+    docker
+      .create_container(
+        Some(CreateContainerOptions {
+          name: Some(container_name.clone()),
+          ..Default::default()
+        }),
+        config,
+      )
+      .await?;
+    docker
+      .start_container(
+        &container_name,
+        None::<bollard::query_parameters::StartContainerOptions>,
+      )
+      .await?;
+
+    let mut wait_stream =
+      docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
+    let mut exit_code: i64 = 0;
+    while let Some(item) = wait_stream.next().await {
+      if let Ok(resp) = item {
+        exit_code = resp.status_code;
+      }
+    }
+    if exit_code != 0 {
+      anyhow::bail!("Backup container exited with code {exit_code}");
+    }
+
+    Ok(dest_dir.join(&archive_name))
+  }
+
+  /// Restore a tar.gz archive into an existing volume. Existing files in the
+  /// volume are not removed first; the archive is unpacked over the top.
+  pub async fn restore_volume(&self, volume_name: &str, archive_path: &std::path::Path) -> Result<()> {
+    let docker = self.client()?;
+    if !archive_path.is_file() {
+      anyhow::bail!("Archive does not exist: {}", archive_path.display());
+    }
+    let parent = archive_path
+      .parent()
+      .ok_or_else(|| anyhow::anyhow!("Archive has no parent directory"))?;
+    let file_name = archive_path
+      .file_name()
+      .and_then(|s| s.to_str())
+      .ok_or_else(|| anyhow::anyhow!("Archive name is not valid UTF-8"))?;
+    let parent_str = parent
+      .to_str()
+      .ok_or_else(|| anyhow::anyhow!("Archive parent path is not valid UTF-8"))?;
+
+    let container_name = format!(
+      "docker-ui-vol-restore-{}",
+      Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    );
+
+    let host_config = bollard::models::HostConfig {
+      binds: Some(vec![format!("{volume_name}:/data"), format!("{parent_str}:/backup:ro")]),
+      auto_remove: Some(true),
+      ..Default::default()
+    };
+
+    let cmd = vec![
+      "sh".to_string(),
+      "-c".to_string(),
+      format!("tar -xzf /backup/{file_name} -C /data"),
+    ];
+
+    let config = ContainerCreateBody {
+      image: Some("alpine:latest".to_string()),
+      cmd: Some(cmd),
+      host_config: Some(host_config),
+      tty: Some(false),
+      ..Default::default()
+    };
+
+    docker
+      .create_container(
+        Some(CreateContainerOptions {
+          name: Some(container_name.clone()),
+          ..Default::default()
+        }),
+        config,
+      )
+      .await?;
+    docker
+      .start_container(
+        &container_name,
+        None::<bollard::query_parameters::StartContainerOptions>,
+      )
+      .await?;
+
+    let mut wait_stream =
+      docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
+    let mut exit_code: i64 = 0;
+    while let Some(item) = wait_stream.next().await {
+      if let Ok(resp) = item {
+        exit_code = resp.status_code;
+      }
+    }
+    if exit_code != 0 {
+      anyhow::bail!("Restore container exited with code {exit_code}");
+    }
+    Ok(())
+  }
+
+  /// Create `dst_name` as a fresh volume and copy the contents of `src_name`
+  /// into it via a throw-away container.
+  pub async fn clone_volume(&self, src_name: &str, dst_name: &str) -> Result<VolumeInfo> {
+    let docker = self.client()?;
+    let dst_volume = self.create_volume_with_opts(dst_name, "local", Vec::new()).await?;
+
+    let container_name = format!("docker-ui-vol-clone-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0));
+
+    let host_config = bollard::models::HostConfig {
+      binds: Some(vec![format!("{src_name}:/from:ro"), format!("{dst_name}:/to")]),
+      auto_remove: Some(true),
+      ..Default::default()
+    };
+
+    let config = ContainerCreateBody {
+      image: Some("alpine:latest".to_string()),
+      cmd: Some(vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        "cp -a /from/. /to/".to_string(),
+      ]),
+      host_config: Some(host_config),
+      tty: Some(false),
+      ..Default::default()
+    };
+
+    docker
+      .create_container(
+        Some(CreateContainerOptions {
+          name: Some(container_name.clone()),
+          ..Default::default()
+        }),
+        config,
+      )
+      .await?;
+    docker
+      .start_container(
+        &container_name,
+        None::<bollard::query_parameters::StartContainerOptions>,
+      )
+      .await?;
+
+    let mut wait_stream =
+      docker.wait_container(&container_name, None::<bollard::query_parameters::WaitContainerOptions>);
+    let mut exit_code: i64 = 0;
+    while let Some(item) = wait_stream.next().await {
+      if let Ok(resp) = item {
+        exit_code = resp.status_code;
+      }
+    }
+    if exit_code != 0 {
+      docker
+        .remove_volume(dst_name, Some(RemoveVolumeOptions { force: true }))
+        .await
+        .ok();
+      anyhow::bail!("Clone container exited with code {exit_code}");
+    }
+    Ok(dst_volume)
+  }
+
   pub async fn create_volume_with_opts(
     &self,
     name: &str,
