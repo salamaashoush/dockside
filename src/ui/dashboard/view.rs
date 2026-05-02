@@ -317,7 +317,7 @@ impl DashboardView {
         FavoriteRef::Image { .. } => Icon::new(AppIcon::Image),
         FavoriteRef::Volume { .. } => Icon::new(AppIcon::Volume),
         FavoriteRef::Network { .. } => Icon::new(AppIcon::Network),
-        FavoriteRef::Pod { .. } => Icon::new(AppIcon::Pod),
+        FavoriteRef::Pod { .. } | FavoriteRef::Job { .. } => Icon::new(AppIcon::Pod),
         FavoriteRef::Deployment { .. } | FavoriteRef::StatefulSet { .. } | FavoriteRef::DaemonSet { .. } => {
           Icon::new(AppIcon::Deployment)
         }

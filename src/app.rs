@@ -1267,6 +1267,9 @@ impl Render for DocksideApp {
           Selection::DaemonSet { name, namespace } => {
             crate::services::delete_daemonset(name, namespace, cx);
           }
+          Selection::Job { name, namespace } => {
+            crate::services::delete_job(name, namespace, cx);
+          }
           Selection::Machine(MachineId::Colima(name)) => {
             crate::services::delete_machine(name, cx);
           }

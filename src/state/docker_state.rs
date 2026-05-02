@@ -168,6 +168,16 @@ pub enum DaemonSetDetailTab {
   Yaml = 2,
 }
 
+/// Tab indices for job detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum JobDetailTab {
+  #[default]
+  Info = 0,
+  Pods = 1,
+  Yaml = 2,
+}
+
 /// Represents the currently selected item across all views
 /// This enables keyboard shortcuts to act on the selection
 #[derive(Clone, Debug, Default)]
@@ -195,6 +205,10 @@ pub enum Selection {
     namespace: String,
   },
   DaemonSet {
+    name: String,
+    namespace: String,
+  },
+  Job {
     name: String,
     namespace: String,
   },
@@ -376,6 +390,16 @@ pub enum StateChanged {
     name: String,
     namespace: String,
     tab: DaemonSetDetailTab,
+  },
+  JobYamlLoaded {
+    name: String,
+    namespace: String,
+    yaml: String,
+  },
+  JobTabRequest {
+    name: String,
+    namespace: String,
+    tab: JobDetailTab,
   },
   JobsUpdated,
   CronJobsUpdated,
@@ -728,6 +752,10 @@ impl DockerState {
       .daemonsets
       .iter()
       .find(|d| d.name == name && d.namespace == namespace)
+  }
+
+  pub fn get_job(&self, name: &str, namespace: &str) -> Option<&JobInfo> {
+    self.jobs.iter().find(|j| j.name == name && j.namespace == namespace)
   }
 
   // Navigation
