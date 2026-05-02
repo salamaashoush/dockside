@@ -1,11 +1,12 @@
-//! Image vulnerability scanning via Trivy.
+//! Image vulnerability scanning via Trivy + Dockerfile linting via Hadolint.
 //!
-//! Wraps the user's local `trivy` binary (https://aquasecurity.github.io/trivy)
-//! and parses its JSON output. We deliberately don't ship Trivy — if it isn't
-//! installed the UI shows an install hint.
+//! Wraps the user's local `trivy` and `hadolint` binaries and parses their
+//! JSON output. We deliberately don't ship either — if they aren't installed
+//! the UI shows a platform-aware install hint.
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -172,6 +173,136 @@ struct TrivyReport {
 #[serde(rename_all = "PascalCase")]
 struct TrivyResult {
   vulnerabilities: Option<Vec<TrivyVuln>>,
+}
+
+/// Build a platform-aware install hint for the `hadolint` binary.
+pub fn hadolint_install_hint() -> InstallHint {
+  let docs_url = "https://github.com/hadolint/hadolint#install";
+  #[cfg(target_os = "macos")]
+  let commands = vec!["brew install hadolint"];
+  #[cfg(target_os = "linux")]
+  let commands: Vec<&'static str> = {
+    let id = std::fs::read_to_string("/etc/os-release")
+      .ok()
+      .and_then(|s| {
+        s.lines()
+          .find_map(|l| l.strip_prefix("ID=").map(|v| v.trim_matches('"').to_lowercase()))
+      })
+      .unwrap_or_default();
+    match id.as_str() {
+      "arch" | "cachyos" | "manjaro" | "endeavouros" => vec!["sudo pacman -S hadolint"],
+      "alpine" => vec!["apk add hadolint"],
+      _ => vec![
+        "sudo wget -O /usr/local/bin/hadolint https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64",
+        "sudo chmod +x /usr/local/bin/hadolint",
+      ],
+    }
+  };
+  #[cfg(target_os = "windows")]
+  let commands = vec!["scoop install hadolint", "choco install hadolint"];
+  #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+  let commands = vec![];
+
+  InstallHint {
+    headline: "Hadolint not found in PATH",
+    commands,
+    docs_url,
+  }
+}
+
+/// True when `hadolint` is on PATH.
+pub fn hadolint_available() -> bool {
+  Command::new("hadolint")
+    .arg("--version")
+    .output()
+    .map(|o| o.status.success())
+    .unwrap_or(false)
+}
+
+/// Sentinel error string the UI matches on to render the structured
+/// install-hint widget instead of a raw error blob.
+pub const ERR_HADOLINT_NOT_INSTALLED: &str = "HADOLINT_NOT_INSTALLED";
+
+/// One Hadolint diagnostic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LintFinding {
+  pub line: u32,
+  pub column: u32,
+  pub code: String,
+  pub level: String,
+  pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LintReport {
+  pub error: usize,
+  pub warning: usize,
+  pub info: usize,
+  pub style: usize,
+  pub findings: Vec<LintFinding>,
+}
+
+/// Run `hadolint --format json <path>` and parse the result.
+pub fn lint_dockerfile(path: &Path) -> Result<LintReport> {
+  if !hadolint_available() {
+    return Err(anyhow!(ERR_HADOLINT_NOT_INSTALLED));
+  }
+  let output = Command::new("hadolint")
+    .args(["--format", "json", "--no-fail"])
+    .arg(path)
+    .output()
+    .map_err(|e| anyhow!("Failed to invoke hadolint: {e}"))?;
+
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  // Hadolint may exit non-zero when findings exist; only fail on a real
+  // run error (no JSON on stdout).
+  if stdout.trim().is_empty() {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    return Err(anyhow!("hadolint produced no output: {stderr}"));
+  }
+  let raw: Vec<HadolintEntry> =
+    serde_json::from_str(&stdout).map_err(|e| anyhow!("Failed to parse hadolint output: {e}"))?;
+
+  let mut report = LintReport::default();
+  for entry in raw {
+    let level = entry.level.unwrap_or_else(|| "warning".to_string());
+    match level.as_str() {
+      "error" => report.error += 1,
+      "info" => report.info += 1,
+      "style" => report.style += 1,
+      _ => report.warning += 1,
+    }
+    report.findings.push(LintFinding {
+      line: entry.line.unwrap_or(0),
+      column: entry.column.unwrap_or(0),
+      code: entry.code.unwrap_or_default(),
+      level,
+      message: entry.message.unwrap_or_default(),
+    });
+  }
+  // Sort by severity weight then line.
+  report.findings.sort_by(|a, b| {
+    let weight = |s: &str| match s {
+      "error" => 0,
+      "warning" => 1,
+      "info" => 2,
+      "style" => 3,
+      _ => 4,
+    };
+    weight(a.level.as_str())
+      .cmp(&weight(b.level.as_str()))
+      .then_with(|| a.line.cmp(&b.line))
+  });
+  Ok(report)
+}
+
+#[derive(Deserialize, Default)]
+struct HadolintEntry {
+  line: Option<u32>,
+  column: Option<u32>,
+  code: Option<String>,
+  level: Option<String>,
+  message: Option<String>,
 }
 
 #[derive(Deserialize, Default)]

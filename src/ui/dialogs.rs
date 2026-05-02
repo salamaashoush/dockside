@@ -13,9 +13,11 @@ use gpui_component::{
   v_flex,
 };
 
+use crate::docker::LintReport;
 use crate::services;
 use crate::ui::containers::CreateContainerDialog;
 use crate::ui::deployments::create_dialog::CreateDeploymentDialog;
+use crate::ui::images::LintReportDialog;
 use crate::ui::images::build_dialog::BuildImageDialog;
 use crate::ui::images::pull_dialog::PullImageDialog;
 use crate::ui::images::push_dialog::PushImageDialog;
@@ -84,11 +86,13 @@ pub fn open_registry_browser_dialog(window: &mut Window, cx: &mut App) {
   });
 }
 
-/// Opens the Build Image dialog with a Build button configured.
+/// Opens the Build Image dialog with Lint + Build buttons configured.
 /// On Build, the form dialog closes and a streaming output dialog
 /// opens with a libghostty-backed terminal viewer that follows the
 /// build log live (selection / copy / colors all work the same as
-/// container logs).
+/// container logs). Lint runs hadolint against the chosen Dockerfile
+/// in-place and surfaces the result inline; "View report" opens a
+/// detail dialog rendered by `LintReportDialog`.
 pub fn open_build_image_dialog(window: &mut Window, cx: &mut App) {
   let dialog_entity = cx.new(BuildImageDialog::new);
 
@@ -101,6 +105,7 @@ pub fn open_build_image_dialog(window: &mut Window, cx: &mut App) {
       .child(dialog_entity.clone())
       .footer(move |_dialog_state, _, _window, _cx| {
         let dialog_for_build = dialog_clone.clone();
+        let dialog_for_lint = dialog_clone.clone();
         vec![
           Button::new("build")
             .label("Build")
@@ -132,6 +137,40 @@ pub fn open_build_image_dialog(window: &mut Window, cx: &mut App) {
                 window.close_dialog(cx);
                 open_build_output_dialog(tag, log_stream, window, cx);
               }
+            })
+            .into_any_element(),
+          Button::new("lint")
+            .label("Lint")
+            .ghost()
+            .on_click({
+              let dialog = dialog_for_lint.clone();
+              move |_ev, _window, cx| {
+                BuildImageDialog::run_lint(&dialog, cx);
+              }
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
+/// Opens a non-modal viewer dialog for an existing `LintReport`. Caller
+/// supplies the source path (used as the dialog subtitle).
+pub fn open_lint_report_dialog(dockerfile: String, report: LintReport, window: &mut Window, cx: &mut App) {
+  let dialog_entity = cx.new(|cx| LintReportDialog::new(dockerfile, report, cx));
+
+  window.open_dialog(cx, move |dialog, _window, _cx| {
+    dialog
+      .title("Hadolint Report")
+      .min_w(px(820.))
+      .child(dialog_entity.clone())
+      .footer(move |_dialog_state, _, _window, _cx| {
+        vec![
+          Button::new("close")
+            .label("Close")
+            .ghost()
+            .on_click(|_ev, window, cx| {
+              window.close_dialog(cx);
             })
             .into_any_element(),
         ]

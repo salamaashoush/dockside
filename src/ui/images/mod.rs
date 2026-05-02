@@ -1,10 +1,13 @@
 pub mod build_dialog;
 mod detail;
+mod lint_dialog;
 mod list;
 pub mod pull_dialog;
 pub mod push_dialog;
 pub mod registry_dialog;
 pub mod tag_dialog;
 mod view;
+
+pub use lint_dialog::LintReportDialog;
 
 pub use view::ImagesView;
