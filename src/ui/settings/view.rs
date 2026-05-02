@@ -138,18 +138,6 @@ impl Category {
     }
   }
 
-  fn description(self) -> &'static str {
-    match self {
-      Self::General => "Refresh cadence and log limits",
-      Self::Appearance => "Theme and visual style",
-      Self::Terminal => "Font, cursor, scrollback",
-      Self::Docker => "Socket and connection",
-      Self::Kubernetes => "Pods, deployments, services",
-      Self::Colima => "VM management and cache",
-      Self::Editor => "External editor binding",
-    }
-  }
-
   fn icon(self) -> IconName {
     match self {
       Self::General => IconName::Settings,
@@ -439,39 +427,20 @@ impl SettingsView {
   // Layout primitives
   // ==========================================================================
 
-  /// Settings card — title, optional description, and a child column of rows.
-  fn render_card(
-    title: &'static str,
-    description: Option<&'static str>,
-    body: gpui::AnyElement,
-    cx: &Context<'_, Self>,
-  ) -> impl IntoElement {
+  /// Section header — small uppercase muted label above a group of rows.
+  fn render_section(title: &'static str, cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = cx.theme().colors;
-    v_flex()
+    div()
       .w_full()
-      .gap(px(16.))
-      .p(px(20.))
-      .mb(px(16.))
-      .rounded(px(10.))
-      .border_1()
-      .border_color(colors.border)
-      .bg(colors.sidebar)
-      .child(
-        v_flex()
-          .gap(px(4.))
-          .child(
-            Label::new(title)
-              .text_color(colors.foreground)
-              .font_weight(gpui::FontWeight::SEMIBOLD),
-          )
-          .when_some(description, |el, d| {
-            el.child(div().text_xs().text_color(colors.muted_foreground).child(d))
-          }),
-      )
-      .child(body)
+      .pt(px(20.))
+      .pb(px(8.))
+      .text_xs()
+      .font_weight(gpui::FontWeight::SEMIBOLD)
+      .text_color(colors.muted_foreground)
+      .child(title.to_uppercase())
   }
 
-  /// Row inside a card — label + description on the left, control on the right.
+  /// Bare row — label + description on the left, control on the right.
   fn render_row(
     label: &'static str,
     description: &'static str,
@@ -481,11 +450,11 @@ impl SettingsView {
     let colors = cx.theme().colors;
     h_flex()
       .w_full()
-      .py(px(12.))
+      .py(px(14.))
       .gap(px(24.))
       .items_center()
       .justify_between()
-      .border_t_1()
+      .border_b_1()
       .border_color(colors.border.opacity(0.4))
       .child(
         v_flex()
@@ -508,21 +477,12 @@ impl SettingsView {
       .w(px(220.))
       .h_full()
       .flex_shrink_0()
-      .py(px(16.))
+      .py(px(12.))
       .px(px(8.))
       .gap(px(2.))
       .border_r_1()
       .border_color(colors.border)
       .bg(colors.background)
-      .child(
-        div()
-          .px(px(12.))
-          .py(px(8.))
-          .text_xs()
-          .font_weight(gpui::FontWeight::SEMIBOLD)
-          .text_color(colors.muted_foreground)
-          .child("SETTINGS"),
-      )
       .children(Category::ALL.iter().map(|cat| {
         let cat = *cat;
         let is_active = cat == active;
@@ -550,6 +510,34 @@ impl SettingsView {
           .child(Icon::new(cat.icon()).size(px(14.)).text_color(fg))
           .child(div().text_sm().text_color(fg).child(cat.label()))
       }))
+      .child(div().flex_1())
+      // Footer actions pinned to the bottom of the sidebar.
+      .child(div().h_px().w_full().bg(colors.border.opacity(0.5)))
+      .child(
+        v_flex()
+          .pt(px(8.))
+          .gap(px(4.))
+          .child(
+            Button::new("flush-text")
+              .icon(Icon::new(IconName::Check))
+              .label("Save text fields")
+              .small()
+              .ghost()
+              .on_click(cx.listener(|this, _ev, _window, cx| {
+                this.save_text_inputs(cx);
+              })),
+          )
+          .child(
+            Button::new("reset-defaults")
+              .icon(Icon::new(AppIcon::Restart))
+              .label("Reset defaults")
+              .small()
+              .ghost()
+              .on_click(cx.listener(|this, _ev, window, cx| {
+                this.reset_to_defaults(window, cx);
+              })),
+          ),
+      )
   }
 
   // ==========================================================================
@@ -560,7 +548,7 @@ impl SettingsView {
     let container_input = self.container_refresh_input.clone().unwrap();
     let stats_input = self.stats_refresh_input.clone().unwrap();
     let log_input = self.log_lines_input.clone().unwrap();
-    let body = v_flex()
+    v_flex()
       .w_full()
       .child(Self::render_row(
         "Container refresh",
@@ -580,19 +568,12 @@ impl SettingsView {
         Input::new(&log_input).small().w_full(),
         cx,
       ))
-      .into_any_element();
-    Self::render_card(
-      "Refresh & limits",
-      Some("Polling cadence and history retention"),
-      body,
-      cx,
-    )
-    .into_any_element()
+      .into_any_element()
   }
 
   fn render_appearance(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let theme_select = self.theme_select.clone().unwrap();
-    let body = v_flex()
+    v_flex()
       .w_full()
       .child(Self::render_row(
         "Theme",
@@ -600,8 +581,7 @@ impl SettingsView {
         Select::new(&theme_select).w_full().small(),
         cx,
       ))
-      .into_any_element();
-    Self::render_card("Theme", Some("Visual style for windows and panels"), body, cx).into_any_element()
+      .into_any_element()
   }
 
   fn render_terminal(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
@@ -611,7 +591,7 @@ impl SettingsView {
     let cursor_select = self.cursor_style_select.clone().unwrap();
     let blink = self.settings_state.read(cx).settings.terminal_cursor_blink;
 
-    let body = v_flex()
+    v_flex()
       .w_full()
       .child(Self::render_row(
         "Font size",
@@ -652,13 +632,12 @@ impl SettingsView {
         )),
         cx,
       ))
-      .into_any_element();
-    Self::render_card("Terminal", Some("Embedded terminal appearance and behavior"), body, cx).into_any_element()
+      .into_any_element()
   }
 
   fn render_docker(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let socket_input = self.docker_socket_input.clone().unwrap();
-    let body = v_flex()
+    v_flex()
       .w_full()
       .child(Self::render_row(
         "Docker socket",
@@ -666,14 +645,12 @@ impl SettingsView {
         Input::new(&socket_input).small().w_full(),
         cx,
       ))
-      .into_any_element();
-    Self::render_card("Connection", Some("Where Dockside talks to the Docker daemon"), body, cx)
       .into_any_element()
   }
 
   fn render_kubernetes(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let enabled = self.settings_state.read(cx).settings.kubernetes_enabled;
-    let body = v_flex()
+    v_flex()
       .w_full()
       .child(Self::render_row(
         "Enable Kubernetes",
@@ -690,129 +667,93 @@ impl SettingsView {
           })),
         cx,
       ))
-      .into_any_element();
-    Self::render_card("Kubernetes", Some("Toggle the k8s panels"), body, cx).into_any_element()
+      .into_any_element()
   }
 
   fn render_colima(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
-    let colors = cx.theme().colors;
     let enabled = self.settings_state.read(cx).settings.colima_enabled;
     let cache_size = self.cache_size.clone();
     let is_pruning = self.is_pruning;
     let profile_input = self.colima_profile_input.clone().unwrap();
 
-    let toggle_card = Self::render_card(
-      "Colima",
-      Some("Manage Docker VMs with Colima"),
-      v_flex()
-        .w_full()
-        .child(Self::render_row(
-          "Enable Colima",
-          "Show the Machines view and Colima actions",
-          Switch::new("colima-enabled")
-            .checked(enabled)
-            .on_click(cx.listener(|this, checked: &bool, window, cx| {
-              if *checked && !crate::utils::is_colima_installed() {
-                this.show_colima_install_dialog(window, cx);
-                return;
-              }
-              this.settings_state.update(cx, |state, cx| {
-                state.settings.colima_enabled = *checked;
-                let _ = state.settings.save();
-                cx.emit(SettingsChanged::SettingsUpdated);
-              });
-              cx.notify();
-            })),
-          cx,
-        ))
-        .into_any_element(),
+    let mut col = v_flex().w_full().child(Self::render_row(
+      "Enable Colima",
+      "Show the Machines view and Colima actions",
+      Switch::new("colima-enabled")
+        .checked(enabled)
+        .on_click(cx.listener(|this, checked: &bool, window, cx| {
+          if *checked && !crate::utils::is_colima_installed() {
+            this.show_colima_install_dialog(window, cx);
+            return;
+          }
+          this.settings_state.update(cx, |state, cx| {
+            state.settings.colima_enabled = *checked;
+            let _ = state.settings.save();
+            cx.emit(SettingsChanged::SettingsUpdated);
+          });
+          cx.notify();
+        })),
       cx,
-    )
-    .into_any_element();
+    ));
 
     if !enabled {
-      return v_flex().w_full().child(toggle_card).into_any_element();
+      return col.into_any_element();
     }
 
-    let detail_card = Self::render_card(
-      "VM defaults",
-      Some("Used when creating new Colima profiles"),
-      v_flex()
-        .w_full()
-        .child(Self::render_row(
-          "Default profile",
-          "Profile name used when no other is specified",
-          Input::new(&profile_input).small().w_full(),
-          cx,
-        ))
-        .child(Self::render_row(
-          "Default template",
-          "YAML template seeded into new profiles",
-          Button::new("edit-template")
-            .icon(Icon::new(AppIcon::Edit))
-            .label("Edit")
-            .small()
-            .ghost()
-            .on_click(cx.listener(|this, _ev, window, cx| {
-              this.open_template_editor(window, cx);
-            })),
-          cx,
-        ))
-        .into_any_element(),
-      cx,
-    )
-    .into_any_element();
+    col = col
+      .child(Self::render_section("VM defaults", cx))
+      .child(Self::render_row(
+        "Default profile",
+        "Profile name used when no other is specified",
+        Input::new(&profile_input).small().w_full(),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Default template",
+        "YAML template seeded into new profiles",
+        Button::new("edit-template")
+          .icon(Icon::new(AppIcon::Edit))
+          .label("Edit")
+          .small()
+          .ghost()
+          .on_click(cx.listener(|this, _ev, window, cx| {
+            this.open_template_editor(window, cx);
+          })),
+        cx,
+      ))
+      .child(Self::render_section("Cache", cx))
+      .child(Self::render_row(
+        "Disk usage",
+        "Total cache size on disk",
+        h_flex()
+          .gap(px(8.))
+          .items_center()
+          .justify_end()
+          .child(
+            div()
+              .text_sm()
+              .text_color(cx.theme().colors.foreground)
+              .child(cache_size),
+          )
+          .child(
+            Button::new("prune-cache")
+              .label(if is_pruning { "Pruning..." } else { "Prune" })
+              .small()
+              .ghost()
+              .disabled(is_pruning)
+              .on_click(cx.listener(|this, _ev, _window, cx| {
+                this.prune_cache(cx);
+              })),
+          ),
+        cx,
+      ));
 
-    let cache_card = Self::render_card(
-      "Cache",
-      Some("Downloaded VM images and assets"),
-      h_flex()
-        .w_full()
-        .py(px(12.))
-        .gap(px(24.))
-        .items_center()
-        .justify_between()
-        .border_t_1()
-        .border_color(colors.border.opacity(0.4))
-        .child(
-          v_flex()
-            .flex_1()
-            .gap(px(2.))
-            .child(Label::new("Disk usage").text_color(colors.foreground))
-            .child(div().text_xs().text_color(colors.muted_foreground).child("Total cache size on disk")),
-        )
-        .child(
-          h_flex()
-            .gap(px(8.))
-            .items_center()
-            .child(div().text_sm().text_color(colors.foreground).child(cache_size))
-            .child(
-              Button::new("prune-cache")
-                .label(if is_pruning { "Pruning..." } else { "Prune" })
-                .small()
-                .ghost()
-                .disabled(is_pruning)
-                .on_click(cx.listener(|this, _ev, _window, cx| {
-                  this.prune_cache(cx);
-                })),
-            ),
-        )
-        .into_any_element(),
-      cx,
-    )
-    .into_any_element();
-
-    v_flex()
-      .w_full()
-      .child(toggle_card)
-      .child(detail_card)
-      .child(cache_card)
-      .into_any_element()
+    col.into_any_element()
   }
 
   fn render_editor(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let editor_select = self.editor_select.clone().unwrap();
-    let body = v_flex()
+    v_flex()
       .w_full()
       .child(Self::render_row(
         "External editor",
@@ -820,8 +761,7 @@ impl SettingsView {
         Select::new(&editor_select).w_full().small(),
         cx,
       ))
-      .into_any_element();
-    Self::render_card("Editor", Some("How files open from inside the app"), body, cx).into_any_element()
+      .into_any_element()
   }
 
   // ==========================================================================
@@ -978,63 +918,11 @@ impl Render for SettingsView {
       Category::Editor => self.render_editor(cx),
     };
 
-    let active = self.active;
-    let header = h_flex()
-      .w_full()
-      .h(px(56.))
-      .flex_shrink_0()
-      .px(px(24.))
-      .gap(px(16.))
-      .items_center()
-      .justify_between()
-      .border_b_1()
-      .border_color(colors.border)
-      .child(
-        v_flex()
-          .gap(px(2.))
-          .child(
-            Label::new(active.label())
-              .text_color(colors.foreground)
-              .font_weight(gpui::FontWeight::SEMIBOLD),
-          )
-          .child(
-            div()
-              .text_xs()
-              .text_color(colors.muted_foreground)
-              .child(active.description()),
-          ),
-      )
-      .child(
-        h_flex()
-          .gap(px(8.))
-          .child(
-            Button::new("flush-text")
-              .icon(Icon::new(IconName::Check))
-              .label("Save text fields")
-              .small()
-              .ghost()
-              .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.save_text_inputs(cx);
-              })),
-          )
-          .child(
-            Button::new("reset-defaults")
-              .icon(Icon::new(AppIcon::Restart))
-              .label("Reset")
-              .small()
-              .ghost()
-              .on_click(cx.listener(|this, _ev, window, cx| {
-                this.reset_to_defaults(window, cx);
-              })),
-          ),
-      );
-
     let pane = v_flex()
       .flex_1()
       .h_full()
       .min_w(px(0.))
       .bg(colors.background)
-      .child(header)
       .child(
         div()
           .id("settings-scroll")
