@@ -113,6 +113,7 @@ enum Category {
   Kubernetes,
   Colima,
   Editor,
+  Dns,
 }
 
 impl Category {
@@ -124,6 +125,7 @@ impl Category {
     Self::Kubernetes,
     Self::Colima,
     Self::Editor,
+    Self::Dns,
   ];
 
   fn label(self) -> &'static str {
@@ -135,6 +137,7 @@ impl Category {
       Self::Kubernetes => "Kubernetes",
       Self::Colima => "Colima",
       Self::Editor => "Editor",
+      Self::Dns => "Local DNS",
     }
   }
 
@@ -143,7 +146,7 @@ impl Category {
       Self::General => IconName::Settings,
       Self::Appearance => IconName::Palette,
       Self::Terminal => IconName::SquareTerminal,
-      Self::Docker => IconName::Globe,
+      Self::Docker | Self::Dns => IconName::Globe,
       Self::Kubernetes => IconName::LayoutDashboard,
       Self::Colima => IconName::Frame,
       Self::Editor => IconName::Inspector,
@@ -177,6 +180,7 @@ pub struct SettingsView {
   colima_cpus_input: Option<Entity<InputState>>,
   colima_memory_input: Option<Entity<InputState>>,
   colima_disk_input: Option<Entity<InputState>>,
+  dns_suffix_input: Option<Entity<InputState>>,
   initialized: bool,
   last_theme_index: Option<usize>,
   cache_size: String,
@@ -209,6 +213,7 @@ impl SettingsView {
       colima_cpus_input: None,
       colima_memory_input: None,
       colima_disk_input: None,
+      dns_suffix_input: None,
       initialized: false,
       last_theme_index: None,
       cache_size,
@@ -347,6 +352,11 @@ impl SettingsView {
       Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.colima_default_memory_gb.to_string())));
     self.colima_disk_input =
       Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.colima_default_disk_gb.to_string())));
+    self.dns_suffix_input = Some(cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("dockside.test")
+        .default_value(&settings.dns_suffix)
+    }));
 
     // Auto-save every text input on change. No "Apply" button anywhere.
     let inputs = [
@@ -365,6 +375,7 @@ impl SettingsView {
       self.colima_cpus_input.clone(),
       self.colima_memory_input.clone(),
       self.colima_disk_input.clone(),
+      self.dns_suffix_input.clone(),
     ];
     for input in inputs.into_iter().flatten() {
       cx.subscribe(&input, |this, _state, ev: &InputEvent, cx| {
@@ -461,6 +472,15 @@ impl SettingsView {
       .as_ref()
       .and_then(|i| i.read(cx).text().to_string().parse::<u32>().ok())
       .unwrap_or(60);
+    let dns_suffix = self.dns_suffix_input.as_ref().map_or_else(
+      || "dockside.test".to_string(),
+      |i| i.read(cx).text().to_string().trim().to_string(),
+    );
+    let dns_suffix = if dns_suffix.is_empty() {
+      "dockside.test".to_string()
+    } else {
+      dns_suffix
+    };
 
     self.settings_state.update(cx, |state, cx| {
       state.settings.docker_socket = docker_socket;
@@ -478,6 +498,7 @@ impl SettingsView {
       state.settings.colima_default_cpus = colima_cpus;
       state.settings.colima_default_memory_gb = colima_memory;
       state.settings.colima_default_disk_gb = colima_disk;
+      state.settings.dns_suffix = dns_suffix;
       let _ = state.settings.save();
       cx.emit(SettingsChanged::SettingsUpdated);
     });
@@ -843,6 +864,109 @@ impl SettingsView {
       .into_any_element()
   }
 
+  fn render_dns(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    let settings = self.settings_state.read(cx).settings.clone();
+    let dns_mgr = crate::services::dns::manager(cx);
+    let dns_running = dns_mgr.is_running();
+    let dns_port = dns_mgr.bound_port();
+    let route_count = dns_mgr.route_map().map_or(0, |m| m.read().distinct_container_count());
+    let proxy_mgr = crate::services::proxy::manager(cx);
+    let proxy_running = proxy_mgr.is_running();
+    let proxy_ports = proxy_mgr.bound_ports();
+    let suffix_input = self.dns_suffix_input.clone().unwrap();
+    let suffix_for_helper = settings.dns_suffix.clone();
+    let suffix_for_uninstall = settings.dns_suffix.clone();
+    let suffix_for_status = settings.dns_suffix.clone();
+
+    let dns_label = match (dns_running, dns_port) {
+      (true, Some(p)) => format!("running :{p}"),
+      (true, None) => "running".to_string(),
+      (false, _) => "stopped".to_string(),
+    };
+    let proxy_label = match (proxy_running, proxy_ports) {
+      (true, Some((http, Some(https)))) => format!("running :{http}/:{https}"),
+      (true, Some((http, None))) => format!("running :{http} (HTTP-only)"),
+      (true, _) => "running".to_string(),
+      (false, _) => "stopped".to_string(),
+    };
+    let status_line = format!(
+      "DNS: {dns_label}, proxy: {proxy_label}, suffix: *.{suffix_for_status}, routed containers: {route_count}"
+    );
+
+    v_flex()
+      .w_full()
+      .child(Self::render_row(
+        "Enable *.dockside.test resolution",
+        "Run a local DNS server + reverse proxy on this machine. Toggling on installs a per-domain resolver via the privileged helper (you'll be prompted for your password).",
+        Switch::new("dns-enabled").checked(settings.dns_enabled).on_click(cx.listener({
+          let port = settings.dns_port;
+          move |this, checked: &bool, _window, cx| {
+            let suffix = this.settings_state.read(cx).settings.dns_suffix.clone();
+            let new_state = *checked;
+            this.settings_state.update(cx, |state, cx| {
+              state.settings.dns_enabled = new_state;
+              let _ = state.settings.save();
+              cx.emit(SettingsChanged::SettingsUpdated);
+            });
+            crate::services::apply_dns_settings(cx);
+            if new_state {
+              if let Err(e) = crate::services::install_dns_resolver(&suffix, port) {
+                tracing::warn!("dns: install_dns_resolver failed: {e}");
+              }
+            } else if let Err(e) = crate::services::uninstall_dns_resolver(&suffix) {
+              tracing::warn!("dns: uninstall_dns_resolver failed: {e}");
+            }
+            cx.notify();
+          }
+        })),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Suffix",
+        "Wildcard host suffix. `.test` is RFC 6761; avoid `.local` (mDNS).",
+        Input::new(&suffix_input).small().w_full(),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Status",
+        "Live status of the resolver and reverse proxy.",
+        Label::new(SharedString::from(status_line)),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Install HTTPS root certificate",
+        "Trust dockside-issued leaf certificates so the browser shows a green lock for `https://*.dockside.test`. Runs `security add-trusted-cert` (macOS) or `update-ca-certificates` (Linux) via the privileged helper.",
+        Button::new("dns-install-ca")
+          .label("Install root CA")
+          .small()
+          .on_click(cx.listener(|_this, _ev, _w, cx| {
+            if let Err(e) = crate::services::install_local_ca() {
+              tracing::warn!("dns: install_local_ca failed: {e}");
+            }
+            cx.notify();
+          })),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Remove HTTPS root certificate",
+        "Reverse the install above.",
+        Button::new("dns-uninstall-ca")
+          .label("Remove root CA")
+          .ghost()
+          .small()
+          .on_click(cx.listener(move |_this, _ev, _w, cx| {
+            let _ = &suffix_for_helper;
+            let _ = &suffix_for_uninstall;
+            if let Err(e) = crate::services::uninstall_local_ca() {
+              tracing::warn!("dns: uninstall_local_ca failed: {e}");
+            }
+            cx.notify();
+          })),
+        cx,
+      ))
+      .into_any_element()
+  }
+
   fn render_colima(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let enabled = self.settings_state.read(cx).settings.colima_enabled;
     let cache_size = self.cache_size.clone();
@@ -1132,6 +1256,7 @@ impl Render for SettingsView {
       Category::Kubernetes => self.render_kubernetes(cx),
       Category::Colima => self.render_colima(cx),
       Category::Editor => self.render_editor(cx),
+      Category::Dns => self.render_dns(cx),
     };
 
     let pane = v_flex().flex_1().h_full().min_w(px(0.)).bg(colors.background).child(

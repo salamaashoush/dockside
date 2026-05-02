@@ -13,10 +13,15 @@ keywords = ["docker", "kubernetes", "colima", "containers", "devtools"]
 categories = ["development-tools", "command-line-utilities", "gui"]
 authors = ["salamaashoush"]
 exclude = [".github/", "scripts/", "*.md", "justfile", ".gitignore"]
+default-run = "dockside"
 
 [[bin]]
 name = "dockside"
 path = "src/main.rs"
+
+[[bin]]
+name = "dockside-helper"
+path = "src/bin/dockside_helper.rs"
 
 [dependencies]
 gpui = "0.2"
@@ -50,6 +55,23 @@ which = "8"
 url = "2.5.8"
 hex = "0.4"
 base64 = "0.22.1"
+
+# Local DNS server (*.dockside.test). hickory-proto for wire format only;
+# we hand-roll the UDP+TCP listeners on tokio.
+hickory-proto = "0.26"
+
+# Reverse proxy + TLS (loopback HTTPS for *.dockside.test)
+axum = { version = "0.8", features = ["ws", "http2"] }
+hyper = { version = "1", features = ["http1", "http2", "client", "server"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "server", "tokio"] }
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rustls-pemfile = "2"
+rcgen = { version = "0.13", features = ["x509-parser"] }
+time = "0.3"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+async-trait = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
