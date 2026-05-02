@@ -1,13 +1,14 @@
 //! Tabbed wrapper for k8s config resources: `ConfigMaps`, `Secrets`.
 
-use gpui::{Context, Entity, Render, Styled, Window, div, prelude::*};
+use gpui::{Context, Entity, Render, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Selectable,
+  Selectable, h_flex,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
   v_flex,
 };
 
+use crate::ui::components::render_namespace_selector;
 use crate::ui::configmaps::ConfigMapsView;
 use crate::ui::secrets::SecretsView;
 
@@ -66,7 +67,16 @@ impl Render for ConfigResourcesView {
 
     v_flex()
       .size_full()
-      .child(div().w_full().border_b_1().border_color(colors.border).child(tab_bar))
+      .child(
+        h_flex()
+          .w_full()
+          .items_center()
+          .flex_shrink_0()
+          .border_b_1()
+          .border_color(colors.border)
+          .child(tab_bar)
+          .child(h_flex().pr(px(12.)).child(render_namespace_selector(cx))),
+      )
       .child(div().flex_1().min_h_0().child(body))
   }
 }

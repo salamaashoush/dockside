@@ -563,46 +563,6 @@ impl PodList {
           .child(format!("No pods match \"{}\"", self.search_query)),
       )
   }
-
-  fn render_namespace_selector(&self, cx: &mut Context<'_, Self>) -> impl IntoElement {
-    let _colors = cx.theme().colors;
-    let state = self.docker_state.read(cx);
-    let selected = state.selected_namespace.clone();
-    let namespaces = state.namespaces.clone();
-
-    let display = if selected == "all" {
-      "All".to_string()
-    } else {
-      selected.clone()
-    };
-
-    Button::new("namespace-selector")
-      .label(display)
-      .ghost()
-      .compact()
-      .dropdown_menu(move |menu, _window, _cx| {
-        let mut menu = menu.item(PopupMenuItem::new("All Namespaces").on_click({
-          move |_, _, cx| {
-            services::set_namespace("all".to_string(), cx);
-          }
-        }));
-
-        if !namespaces.is_empty() {
-          menu = menu.separator();
-          for ns in &namespaces {
-            let ns_clone = ns.clone();
-            menu = menu.item(PopupMenuItem::new(ns.clone()).on_click({
-              let ns = ns_clone.clone();
-              move |_, _, cx| {
-                services::set_namespace(ns.clone(), cx);
-              }
-            }));
-          }
-        }
-
-        menu
-      })
-  }
 }
 
 impl gpui::EventEmitter<PodListEvent> for PodList {}
@@ -665,7 +625,6 @@ impl Render for PodList {
         h_flex()
           .items_center()
           .gap(px(8.))
-          .child(self.render_namespace_selector(cx))
           .child(
             Button::new("search")
               .icon(Icon::new(AppIcon::Search))

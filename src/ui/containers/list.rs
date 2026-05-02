@@ -665,43 +665,50 @@ impl Render for ContainerList {
             .child(format!("{bulk_count} selected")),
         )
         .child(
-          Button::new("bulk-start")
-            .label("Start")
-            .icon(Icon::new(AppIcon::Play))
-            .ghost()
-            .xsmall()
-            .on_click(|_, _, cx| services::bulk_action_containers("start", cx)),
-        )
-        .child(
-          Button::new("bulk-stop")
-            .label("Stop")
-            .icon(Icon::new(AppIcon::Stop))
-            .ghost()
-            .xsmall()
-            .on_click(|_, _, cx| services::bulk_action_containers("stop", cx)),
-        )
-        .child(
-          Button::new("bulk-restart")
-            .label("Restart")
-            .icon(Icon::new(AppIcon::Restart))
-            .ghost()
-            .xsmall()
-            .on_click(|_, _, cx| services::bulk_action_containers("restart", cx)),
-        )
-        .child(
-          Button::new("bulk-delete")
-            .label("Delete")
-            .icon(Icon::new(AppIcon::Trash))
-            .ghost()
-            .xsmall()
-            .on_click(|_, _, cx| services::bulk_action_containers("delete", cx)),
-        )
-        .child(
           Button::new("bulk-clear")
             .label("Clear")
             .ghost()
             .xsmall()
             .on_click(|_, _, cx| services::clear_container_bulk_selection(cx)),
+        )
+        .child(
+          Button::new("bulk-actions")
+            .label("Actions")
+            .icon(IconName::Ellipsis)
+            .primary()
+            .xsmall()
+            .dropdown_menu(|menu, _, _| {
+              menu
+                .item(
+                  PopupMenuItem::new("Start")
+                    .icon(Icon::new(AppIcon::Play))
+                    .on_click(|_, _, cx| {
+                      services::bulk_action_containers("start", cx);
+                    }),
+                )
+                .item(
+                  PopupMenuItem::new("Stop")
+                    .icon(Icon::new(AppIcon::Stop))
+                    .on_click(|_, _, cx| {
+                      services::bulk_action_containers("stop", cx);
+                    }),
+                )
+                .item(
+                  PopupMenuItem::new("Restart")
+                    .icon(Icon::new(AppIcon::Restart))
+                    .on_click(|_, _, cx| {
+                      services::bulk_action_containers("restart", cx);
+                    }),
+                )
+                .separator()
+                .item(
+                  PopupMenuItem::new("Delete")
+                    .icon(Icon::new(AppIcon::Trash))
+                    .on_click(|_, _, cx| {
+                      services::bulk_action_containers("delete", cx);
+                    }),
+                )
+            }),
         )
     });
 
