@@ -1,6 +1,6 @@
 use gpui::{App, Entity, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, Selectable, Sizable,
+  Icon, Selectable,
   button::{Button, ButtonVariants},
   h_flex,
   input::InputState,
@@ -480,8 +480,9 @@ impl VolumeDetail {
         let name = volume_name_for_delete.clone();
         Button::new("delete")
           .icon(Icon::new(AppIcon::Trash))
+          .label("Delete")
           .ghost()
-          .small()
+          .compact()
           .on_click(move |_ev, window, cx| {
             if let Some(ref cb) = on_delete {
               cb(&name, window, cx);

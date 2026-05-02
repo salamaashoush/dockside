@@ -6,6 +6,7 @@ use gpui_component::{
   input::{Input, InputState},
   label::Label,
   list::{List, ListDelegate, ListEvent, ListItem, ListState},
+  menu::{DropdownMenu, PopupMenuItem},
   theme::ActiveTheme,
   v_flex,
 };
@@ -227,13 +228,14 @@ impl ListDelegate for ImageListDelegate {
     let row = ix.row;
     let section = ix.section;
 
+    let menu_id = id.clone();
     let item = ListItem::new(ix)
       .py(px(6.))
       .rounded(px(6.))
       .selected(is_selected)
       .child(item_content)
       .suffix(move |_, _| {
-        let id = id.clone();
+        let id = menu_id.clone();
         div()
           .size(px(28.))
           .flex_shrink_0()
@@ -241,12 +243,22 @@ impl ListDelegate for ImageListDelegate {
           .items_center()
           .justify_center()
           .child(
-            Button::new(SharedString::from(format!("delete-{section}-{row}")))
-              .icon(Icon::new(AppIcon::Trash))
+            Button::new(SharedString::from(format!("img-menu-{section}-{row}")))
+              .icon(IconName::Ellipsis)
               .ghost()
               .xsmall()
-              .on_click(move |_ev, _window, cx| {
-                services::delete_image(id.clone(), cx);
+              .dropdown_menu({
+                let id = id.clone();
+                move |menu, _window, _cx| {
+                  let id_for_delete = id.clone();
+                  menu.item(
+                    PopupMenuItem::new("Delete")
+                      .icon(Icon::new(AppIcon::Trash))
+                      .on_click(move |_, _, cx| {
+                        services::delete_image(id_for_delete.clone(), cx);
+                      }),
+                  )
+                }
               }),
           )
       });
@@ -541,6 +553,7 @@ impl Render for ImageList {
           )
           .child(
             Button::new("browse")
+              .icon(Icon::new(IconName::ExternalLink))
               .label("Browse")
               .ghost()
               .compact()
@@ -550,6 +563,7 @@ impl Render for ImageList {
           )
           .child(
             Button::new("build")
+              .icon(Icon::new(IconName::Frame))
               .label("Build")
               .ghost()
               .compact()
@@ -560,6 +574,7 @@ impl Render for ImageList {
           .child(
             Button::new("pull")
               .icon(Icon::new(AppIcon::Plus))
+              .label("Pull")
               .ghost()
               .compact()
               .on_click(cx.listener(|_this, _ev, _window, cx| {
@@ -568,6 +583,7 @@ impl Render for ImageList {
           )
           .child(
             Button::new("load")
+              .icon(Icon::new(IconName::Inbox))
               .label("Load")
               .ghost()
               .compact()
@@ -577,6 +593,7 @@ impl Render for ImageList {
           )
           .child(
             Button::new("scan-all")
+              .icon(Icon::new(IconName::Eye))
               .label("Scan all")
               .ghost()
               .compact()

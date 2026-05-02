@@ -1059,8 +1059,9 @@ impl ContainerDetail {
             el.child(
               Button::new("start")
                 .icon(Icon::new(AppIcon::Play))
+                .label("Start")
                 .ghost()
-                .small()
+                .compact()
                 .on_click(move |_ev, window, cx| {
                   if let Some(ref cb) = on_start {
                     cb(&id, window, cx);
@@ -1074,8 +1075,9 @@ impl ContainerDetail {
             el.child(
               Button::new("stop")
                 .icon(Icon::new(AppIcon::Stop))
+                .label("Stop")
                 .ghost()
-                .small()
+                .compact()
                 .on_click(move |_ev, window, cx| {
                   if let Some(ref cb) = on_stop {
                     cb(&id, window, cx);
@@ -1088,8 +1090,9 @@ impl ContainerDetail {
             let id = container_id_for_restart.clone();
             Button::new("restart")
               .icon(Icon::new(AppIcon::Restart))
+              .label("Restart")
               .ghost()
-              .small()
+              .compact()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_restart {
                   cb(&id, window, cx);
@@ -1101,8 +1104,9 @@ impl ContainerDetail {
             let id = container_id_for_delete.clone();
             Button::new("delete")
               .icon(Icon::new(AppIcon::Trash))
+              .label("Delete")
               .ghost()
-              .small()
+              .compact()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_delete {
                   cb(&id, window, cx);

@@ -1,6 +1,6 @@
 use gpui::{App, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, Selectable, Sizable,
+  Icon, Selectable,
   button::{Button, ButtonVariants},
   h_flex,
   scroll::ScrollableElement,
@@ -770,9 +770,10 @@ impl ImageDetail {
             let on_scan = self.on_scan.clone();
             let id = image_id_for_delete.clone();
             Button::new("image-scan")
+              .icon(Icon::new(gpui_component::IconName::Eye))
               .label("Scan")
               .ghost()
-              .small()
+              .compact()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_scan {
                   cb(&id, window, cx);
@@ -783,9 +784,10 @@ impl ImageDetail {
             let on_save = self.on_save.clone();
             let id = image_id_for_delete.clone();
             Button::new("image-save")
+              .icon(Icon::new(gpui_component::IconName::Inbox))
               .label("Save")
               .ghost()
-              .small()
+              .compact()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_save {
                   cb(&id, window, cx);
@@ -796,9 +798,10 @@ impl ImageDetail {
             let on_tag = self.on_tag.clone();
             let id = image_id_for_delete.clone();
             Button::new("image-tag")
+              .icon(Icon::new(AppIcon::Edit))
               .label("Tag")
               .ghost()
-              .small()
+              .compact()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_tag {
                   cb(&id, window, cx);
@@ -809,9 +812,10 @@ impl ImageDetail {
             let on_push = self.on_push.clone();
             let id = image_id_for_delete.clone();
             Button::new("image-push")
+              .icon(Icon::new(gpui_component::IconName::ArrowUp))
               .label("Push")
               .ghost()
-              .small()
+              .compact()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_push {
                   cb(&id, window, cx);
@@ -823,8 +827,9 @@ impl ImageDetail {
             let id = image_id_for_delete.clone();
             Button::new("delete")
               .icon(Icon::new(AppIcon::Trash))
+              .label("Delete")
               .ghost()
-              .small()
+              .compact()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_delete {
                   cb(&id, window, cx);

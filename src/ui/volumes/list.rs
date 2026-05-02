@@ -6,6 +6,7 @@ use gpui_component::{
   input::{Input, InputState},
   label::Label,
   list::{List, ListDelegate, ListEvent, ListItem, ListState},
+  menu::{DropdownMenu, PopupMenuItem},
   theme::ActiveTheme,
   v_flex,
 };
@@ -91,12 +92,22 @@ impl ListDelegate for VolumeListDelegate {
     let name = volume_name.clone();
     let row = ix.row;
 
-    let delete_button = Button::new(("delete", row))
-      .icon(Icon::new(AppIcon::Trash))
+    let menu_button = Button::new(("vol-menu", row))
+      .icon(IconName::Ellipsis)
       .ghost()
       .xsmall()
-      .on_click(move |_ev, _window, cx| {
-        services::delete_volume(name.clone(), cx);
+      .dropdown_menu({
+        let name = name.clone();
+        move |menu, _window, _cx| {
+          let name_for_delete = name.clone();
+          menu.item(
+            PopupMenuItem::new("Delete")
+              .icon(Icon::new(AppIcon::Trash))
+              .on_click(move |_, _, cx| {
+                services::delete_volume(name_for_delete.clone(), cx);
+              }),
+          )
+        }
       });
 
     let item_content = h_flex()
@@ -139,7 +150,7 @@ impl ListDelegate for VolumeListDelegate {
               .child(size_text),
           ),
       )
-      .child(div().flex_shrink_0().child(delete_button));
+      .child(div().flex_shrink_0().child(menu_button));
 
     let item = ListItem::new(ix)
       .py(px(6.))
@@ -437,6 +448,7 @@ impl Render for VolumeList {
           .child(
             Button::new("add")
               .icon(Icon::new(AppIcon::Plus))
+              .label("Create")
               .ghost()
               .compact()
               .on_click(cx.listener(|_this, _ev, _window, cx| {

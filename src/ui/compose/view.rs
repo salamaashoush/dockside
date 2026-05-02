@@ -1,9 +1,10 @@
 use gpui::{Context, Entity, Render, SharedString, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, Sizable,
+  Icon, IconName, Sizable,
   button::{Button, ButtonVariants},
   h_flex,
   label::Label,
+  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   theme::ActiveTheme,
   v_flex,
@@ -199,81 +200,99 @@ impl ComposeView {
                             .text_color(status_color)
                             .child(project.status_display()),
                     )
-                    // Action buttons (shown on hover would be nice, but always visible for now)
+                    // YAML toggle stays inline (UI state, not action) so
+                    // its visual state mirrors the open block underneath.
                     .child(
-                        h_flex()
-                            .gap(px(4.))
-                            .child(
-                                Button::new(SharedString::from(format!("up-{}", project_name_for_up.clone())))
-                                    .icon(AppIcon::Play)
-                                    .xsmall()
-                                    .ghost()
-                                    .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                                        services::compose_up(
-                                            project_name_for_up.clone(),
-                                            working_dir_up.clone(),
-                                            config_files_up.clone(),
-                                            cx,
-                                        );
-                                    })),
-                            )
-                            .child(
-                                Button::new(SharedString::from(format!("down-{}", project_name_for_down.clone())))
-                                    .icon(AppIcon::Stop)
-                                    .xsmall()
-                                    .ghost()
-                                    .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                                        services::compose_down(
-                                            project_name_for_down.clone(),
-                                            working_dir_down.clone(),
-                                            config_files_down.clone(),
-                                            cx,
-                                        );
-                                    })),
-                            )
-                            .child(
-                                Button::new(SharedString::from(format!("restart-{}", project_name_for_restart.clone())))
-                                    .icon(AppIcon::Restart)
-                                    .xsmall()
-                                    .ghost()
-                                    .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                                        services::compose_restart(
-                                            project_name_for_restart.clone(),
-                                            working_dir_restart.clone(),
-                                            config_files_restart.clone(),
-                                            cx,
-                                        );
-                                    })),
-                            )
-                            .child(
-                                Button::new(SharedString::from(format!("watch-{}", project_name_for_watch.clone())))
-                                    .label("Watch")
-                                    .xsmall()
-                                    .ghost()
-                                    .on_click(cx.listener(move |_this, _ev, window, cx| {
-                                        crate::ui::dialogs::open_compose_watch_dialog(
-                                            project_name_for_watch.clone(),
-                                            working_dir_watch.clone(),
-                                            config_files_watch.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                    })),
-                            )
-                            .child(
-                                Button::new(SharedString::from(format!("yaml-{}", project_name_for_yaml.clone())))
-                                    .label("YAML")
-                                    .xsmall()
-                                    .when(yaml_visible, Button::primary)
-                                    .when(!yaml_visible, ButtonVariants::ghost)
-                                    .on_click(cx.listener({
-                                        let path = yaml_path.clone();
-                                        let name = project_name_for_yaml.clone();
-                                        move |this, _ev, _window, cx| {
-                                            this.toggle_yaml(&name, path.clone(), cx);
-                                        }
-                                    })),
-                            ),
+                        Button::new(SharedString::from(format!("yaml-{}", project_name_for_yaml.clone())))
+                            .icon(Icon::new(AppIcon::Files))
+                            .label("YAML")
+                            .xsmall()
+                            .when(yaml_visible, Button::primary)
+                            .when(!yaml_visible, ButtonVariants::ghost)
+                            .on_click(cx.listener({
+                                let path = yaml_path.clone();
+                                let name = project_name_for_yaml.clone();
+                                move |this, _ev, _window, cx| {
+                                    this.toggle_yaml(&name, path.clone(), cx);
+                                }
+                            })),
+                    )
+                    // Single Ellipsis menu collapses Start/Stop/Restart/Watch
+                    // into one consistent dropdown so the project header
+                    // matches the per-row action UX in the other lists.
+                    .child(
+                        Button::new(SharedString::from(format!("compose-menu-{project_name}")))
+                            .icon(IconName::Ellipsis)
+                            .xsmall()
+                            .ghost()
+                            .dropdown_menu({
+                                let name_up = project_name_for_up.clone();
+                                let name_down = project_name_for_down.clone();
+                                let name_restart = project_name_for_restart.clone();
+                                let name_watch = project_name_for_watch.clone();
+                                let wdir_up = working_dir_up.clone();
+                                let cf_up = config_files_up.clone();
+                                let wdir_down = working_dir_down.clone();
+                                let cf_down = config_files_down.clone();
+                                let wdir_restart = working_dir_restart.clone();
+                                let cf_restart = config_files_restart.clone();
+                                let wdir_watch = working_dir_watch.clone();
+                                let cf_watch = config_files_watch.clone();
+                                move |menu, _window, _cx| {
+                                    let name_up = name_up.clone();
+                                    let name_down = name_down.clone();
+                                    let name_restart = name_restart.clone();
+                                    let name_watch = name_watch.clone();
+                                    let wdir_up = wdir_up.clone();
+                                    let cf_up = cf_up.clone();
+                                    let wdir_down = wdir_down.clone();
+                                    let cf_down = cf_down.clone();
+                                    let wdir_restart = wdir_restart.clone();
+                                    let cf_restart = cf_restart.clone();
+                                    let wdir_watch = wdir_watch.clone();
+                                    let cf_watch = cf_watch.clone();
+                                    menu.item(
+                                        PopupMenuItem::new("Start")
+                                            .icon(Icon::new(AppIcon::Play))
+                                            .on_click(move |_, _, cx| {
+                                                services::compose_up(name_up.clone(), wdir_up.clone(), cf_up.clone(), cx);
+                                            }),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new("Stop")
+                                            .icon(Icon::new(AppIcon::Stop))
+                                            .on_click(move |_, _, cx| {
+                                                services::compose_down(name_down.clone(), wdir_down.clone(), cf_down.clone(), cx);
+                                            }),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new("Restart")
+                                            .icon(Icon::new(AppIcon::Restart))
+                                            .on_click(move |_, _, cx| {
+                                                services::compose_restart(
+                                                    name_restart.clone(),
+                                                    wdir_restart.clone(),
+                                                    cf_restart.clone(),
+                                                    cx,
+                                                );
+                                            }),
+                                    )
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("Watch")
+                                            .icon(Icon::new(AppIcon::Refresh))
+                                            .on_click(move |_, window, cx| {
+                                                crate::ui::dialogs::open_compose_watch_dialog(
+                                                    name_watch.clone(),
+                                                    wdir_watch.clone(),
+                                                    cf_watch.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            }),
+                                    )
+                                }
+                            }),
                     ),
             )
             // Services list (when expanded)
@@ -445,8 +464,9 @@ impl Render for ComposeView {
                             .gap(px(8.))
                             .child(
                                 Button::new("refresh-compose")
-                                    .icon(AppIcon::Restart)
-                                    .small()
+                                    .icon(Icon::new(AppIcon::Refresh))
+                                    .label("Refresh")
+                                    .compact()
                                     .ghost()
                                     .on_click(cx.listener(|_this, _ev, _window, cx| {
                                         services::refresh_containers(cx);

@@ -1,6 +1,6 @@
 use gpui::{App, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, Selectable, Sizable,
+  Icon, Selectable,
   button::{Button, ButtonVariants},
   h_flex,
   scroll::ScrollableElement,
@@ -500,8 +500,9 @@ impl NetworkDetail {
           h_flex().gap(px(8.)).child(
             Button::new("delete")
               .icon(Icon::new(AppIcon::Trash))
+              .label("Delete")
               .ghost()
-              .small()
+              .compact()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_delete {
                   cb(&id, window, cx);

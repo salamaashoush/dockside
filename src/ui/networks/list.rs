@@ -6,6 +6,7 @@ use gpui_component::{
   input::{Input, InputState},
   label::Label,
   list::{List, ListDelegate, ListEvent, ListItem, ListState},
+  menu::{DropdownMenu, PopupMenuItem},
   theme::ActiveTheme,
   v_flex,
 };
@@ -196,12 +197,22 @@ impl ListDelegate for NetworkListDelegate {
           .items_center()
           .justify_center()
           .child(
-            Button::new(SharedString::from(format!("delete-{section}-{row}")))
-              .icon(Icon::new(AppIcon::Trash))
+            Button::new(SharedString::from(format!("net-menu-{section}-{row}")))
+              .icon(IconName::Ellipsis)
               .ghost()
               .xsmall()
-              .on_click(move |_ev, _window, cx| {
-                services::delete_network(id.clone(), cx);
+              .dropdown_menu({
+                let id = id.clone();
+                move |menu, _window, _cx| {
+                  let id_for_delete = id.clone();
+                  menu.item(
+                    PopupMenuItem::new("Delete")
+                      .icon(Icon::new(AppIcon::Trash))
+                      .on_click(move |_, _, cx| {
+                        services::delete_network(id_for_delete.clone(), cx);
+                      }),
+                  )
+                }
               }),
           )
       });
@@ -493,6 +504,7 @@ impl Render for NetworkList {
           .child(
             Button::new("create")
               .icon(Icon::new(AppIcon::Plus))
+              .label("Create")
               .ghost()
               .compact()
               .on_click(cx.listener(|_this, _ev, _window, cx| {

@@ -624,6 +624,7 @@ impl Render for MachineList {
             el.child(
               Button::new("add")
                 .icon(Icon::new(AppIcon::Plus))
+                .label("Create")
                 .ghost()
                 .compact()
                 .on_click(cx.listener(|_this, _ev, _window, cx| {
