@@ -45,6 +45,101 @@ pub fn refresh_configmaps(cx: &mut App) {
   .detach();
 }
 
+pub fn get_configmap_yaml(name: String, namespace: String, cx: &mut App) {
+  let state = docker_state(cx);
+  let name_clone = name.clone();
+  let namespace_clone = namespace.clone();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.get_configmap_yaml(&name, &namespace).await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    let yaml = match result {
+      Ok(y) => y,
+      Err(e) => format!("Error: {e}"),
+    };
+    cx.update(|cx| {
+      state.update(cx, |_state, cx| {
+        cx.emit(StateChanged::ConfigMapYamlLoaded {
+          name: name_clone,
+          namespace: namespace_clone,
+          yaml,
+        });
+      });
+    })
+  })
+  .detach();
+}
+
+pub fn apply_configmap_yaml(name: String, namespace: String, yaml: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Applying configmap '{name}'..."));
+  let disp = dispatcher(cx);
+  let label = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.apply_configmap_yaml(&name, &namespace, &yaml).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("ConfigMap '{label}' applied"),
+          });
+        });
+        refresh_configmaps(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to apply configmap '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+pub fn apply_configmap_data(name: String, namespace: String, entries: Vec<(String, String)>, cx: &mut App) {
+  let task_id = start_task(cx, format!("Updating configmap '{name}'..."));
+  let disp = dispatcher(cx);
+  let label = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.patch_configmap_data(&name, &namespace, &entries).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("ConfigMap '{label}' updated"),
+          });
+        });
+        refresh_configmaps(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to update configmap '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn delete_configmap(name: String, namespace: String, cx: &mut App) {
   let task_id = start_task(cx, format!("Deleting configmap '{name}'..."));
   let disp = dispatcher(cx);

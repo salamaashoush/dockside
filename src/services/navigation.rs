@@ -272,6 +272,40 @@ pub fn open_pvc_yaml(name: String, namespace: String, cx: &mut App) {
   super::kubernetes::get_pvc_yaml(name, namespace, cx);
 }
 
+pub fn open_secret_yaml(name: String, namespace: String, cx: &mut App) {
+  let state = docker_state(cx);
+  state.update(cx, |state, cx| {
+    state.set_view(CurrentView::Secrets);
+    state.set_selection(crate::state::Selection::Secret {
+      name: name.clone(),
+      namespace: namespace.clone(),
+    });
+    cx.emit(StateChanged::SecretTabRequest {
+      name: name.clone(),
+      namespace: namespace.clone(),
+      tab: crate::state::SecretDetailTab::Yaml,
+    });
+  });
+  super::kubernetes::get_secret_yaml(name, namespace, cx);
+}
+
+pub fn open_configmap_yaml(name: String, namespace: String, cx: &mut App) {
+  let state = docker_state(cx);
+  state.update(cx, |state, cx| {
+    state.set_view(CurrentView::ConfigMaps);
+    state.set_selection(crate::state::Selection::ConfigMap {
+      name: name.clone(),
+      namespace: namespace.clone(),
+    });
+    cx.emit(StateChanged::ConfigMapTabRequest {
+      name: name.clone(),
+      namespace: namespace.clone(),
+      tab: crate::state::ConfigMapDetailTab::Yaml,
+    });
+  });
+  super::kubernetes::get_configmap_yaml(name, namespace, cx);
+}
+
 pub fn open_deployment_yaml(name: String, namespace: String, cx: &mut App) {
   let state = docker_state(cx);
   state.update(cx, |_state, cx| {

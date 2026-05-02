@@ -476,11 +476,23 @@ impl KubeClient {
     Ok(())
   }
 
-  #[allow(dead_code)]
   pub async fn get_secret_yaml(&self, name: &str, namespace: &str) -> Result<String> {
     let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
     let s = api.get(name).await.context(format!("Failed to get secret {name}"))?;
     serde_yaml::to_string(&s).context("Failed to serialize secret to YAML")
+  }
+
+  pub async fn apply_secret_yaml(&self, name: &str, namespace: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut s: Secret = serde_yaml::from_str(yaml_str).context("Failed to parse secret YAML")?;
+    s.metadata.name = Some(name.to_string());
+    s.metadata.namespace = Some(namespace.to_string());
+    let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .replace(name, &PostParams::default(), &s)
+      .await
+      .with_context(|| format!("Failed to apply secret {name}"))?;
+    Ok(())
   }
 
   /// Read raw secret data as `(key, base64-encoded-value)` pairs.
@@ -534,11 +546,38 @@ impl KubeClient {
     Ok(())
   }
 
-  #[allow(dead_code)]
   pub async fn get_configmap_yaml(&self, name: &str, namespace: &str) -> Result<String> {
     let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
     let cm = api.get(name).await.context(format!("Failed to get configmap {name}"))?;
     serde_yaml::to_string(&cm).context("Failed to serialize configmap to YAML")
+  }
+
+  pub async fn apply_configmap_yaml(&self, name: &str, namespace: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut cm: ConfigMap = serde_yaml::from_str(yaml_str).context("Failed to parse configmap YAML")?;
+    cm.metadata.name = Some(name.to_string());
+    cm.metadata.namespace = Some(namespace.to_string());
+    let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .replace(name, &PostParams::default(), &cm)
+      .await
+      .with_context(|| format!("Failed to apply configmap {name}"))?;
+    Ok(())
+  }
+
+  /// Replace the `data` field of a `ConfigMap` via a JSON merge patch.
+  /// `entries` keys absent from the existing `ConfigMap` are added; existing
+  /// keys are overwritten. Keys not present in `entries` are removed because
+  /// JSON merge replaces the whole `data` object.
+  pub async fn patch_configmap_data(&self, name: &str, namespace: &str, entries: &[(String, String)]) -> Result<()> {
+    let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+    let map: std::collections::BTreeMap<String, String> = entries.iter().cloned().collect();
+    let patch = json!({ "data": map });
+    api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to patch configmap {name}"))?;
+    Ok(())
   }
 
   // ========================================================================

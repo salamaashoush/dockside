@@ -206,6 +206,28 @@ pub enum PvcDetailTab {
   Yaml = 1,
 }
 
+/// Tab indices for Secret detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum SecretDetailTab {
+  #[default]
+  Info = 0,
+  Data = 1,
+  Yaml = 2,
+  Events = 3,
+}
+
+/// Tab indices for `ConfigMap` detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum ConfigMapDetailTab {
+  #[default]
+  Info = 0,
+  Data = 1,
+  Yaml = 2,
+  Events = 3,
+}
+
 /// Represents the currently selected item across all views
 /// This enables keyboard shortcuts to act on the selection
 #[derive(Clone, Debug, Default)]
@@ -249,6 +271,14 @@ pub enum Selection {
     namespace: String,
   },
   Pvc {
+    name: String,
+    namespace: String,
+  },
+  Secret {
+    name: String,
+    namespace: String,
+  },
+  ConfigMap {
     name: String,
     namespace: String,
   },
@@ -396,11 +426,15 @@ pub enum StateChanged {
 
   // Secrets
   SecretsUpdated,
-  #[allow(dead_code)]
   SecretYamlLoaded {
     name: String,
     namespace: String,
     yaml: String,
+  },
+  SecretTabRequest {
+    name: String,
+    namespace: String,
+    tab: SecretDetailTab,
   },
   SecretEntriesLoaded {
     name: String,
@@ -471,6 +505,11 @@ pub enum StateChanged {
     namespace: String,
     tab: PvcDetailTab,
   },
+  ConfigMapTabRequest {
+    name: String,
+    namespace: String,
+    tab: ConfigMapDetailTab,
+  },
   JobsUpdated,
   CronJobsUpdated,
   IngressesUpdated,
@@ -480,7 +519,6 @@ pub enum StateChanged {
 
   // ConfigMaps
   ConfigMapsUpdated,
-  #[allow(dead_code)]
   ConfigMapYamlLoaded {
     name: String,
     namespace: String,
@@ -844,6 +882,17 @@ impl DockerState {
 
   pub fn get_pvc(&self, name: &str, namespace: &str) -> Option<&PvcInfo> {
     self.pvcs.iter().find(|p| p.name == name && p.namespace == namespace)
+  }
+
+  pub fn get_secret(&self, name: &str, namespace: &str) -> Option<&SecretInfo> {
+    self.secrets.iter().find(|s| s.name == name && s.namespace == namespace)
+  }
+
+  pub fn get_configmap(&self, name: &str, namespace: &str) -> Option<&ConfigMapInfo> {
+    self
+      .configmaps
+      .iter()
+      .find(|c| c.name == name && c.namespace == namespace)
   }
 
   // Navigation

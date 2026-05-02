@@ -322,6 +322,7 @@ impl DashboardView {
           Icon::new(AppIcon::Deployment)
         }
         FavoriteRef::Service { .. } | FavoriteRef::Ingress { .. } => Icon::new(AppIcon::Service),
+        FavoriteRef::Secret { .. } | FavoriteRef::ConfigMap { .. } => Icon::new(AppIcon::Settings),
         FavoriteRef::Machine { .. } => Icon::new(AppIcon::Machine),
       };
       let label = fav.label().to_string();

@@ -1290,6 +1290,12 @@ impl Render for DocksideApp {
           Selection::Pvc { name, namespace } => {
             crate::services::delete_pvc(name, namespace, cx);
           }
+          Selection::Secret { name, namespace } => {
+            crate::services::delete_secret(name, namespace, cx);
+          }
+          Selection::ConfigMap { name, namespace } => {
+            crate::services::delete_configmap(name, namespace, cx);
+          }
           Selection::Machine(MachineId::Colima(name)) => {
             crate::services::delete_machine(name, cx);
           }

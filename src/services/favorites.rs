@@ -168,6 +168,28 @@ pub fn open_favorite(item: &FavoriteRef, cx: &mut App) {
         cx.emit(StateChanged::SelectionChanged);
       });
     }
+    FavoriteRef::Secret { name, namespace } => {
+      state.update(cx, |s, cx| {
+        s.set_view(CurrentView::Secrets);
+        s.set_selection(Selection::Secret {
+          name: name.clone(),
+          namespace: namespace.clone(),
+        });
+        cx.emit(StateChanged::ViewChanged);
+        cx.emit(StateChanged::SelectionChanged);
+      });
+    }
+    FavoriteRef::ConfigMap { name, namespace } => {
+      state.update(cx, |s, cx| {
+        s.set_view(CurrentView::ConfigMaps);
+        s.set_selection(Selection::ConfigMap {
+          name: name.clone(),
+          namespace: namespace.clone(),
+        });
+        cx.emit(StateChanged::ViewChanged);
+        cx.emit(StateChanged::SelectionChanged);
+      });
+    }
     FavoriteRef::Machine { id, .. } => {
       use crate::colima::MachineId;
       let parsed = if id == "host" {
