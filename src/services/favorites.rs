@@ -113,6 +113,17 @@ pub fn open_favorite(item: &FavoriteRef, cx: &mut App) {
         cx.emit(StateChanged::SelectionChanged);
       });
     }
+    FavoriteRef::DaemonSet { name, namespace } => {
+      state.update(cx, |s, cx| {
+        s.set_view(CurrentView::DaemonSets);
+        s.set_selection(Selection::DaemonSet {
+          name: name.clone(),
+          namespace: namespace.clone(),
+        });
+        cx.emit(StateChanged::ViewChanged);
+        cx.emit(StateChanged::SelectionChanged);
+      });
+    }
     FavoriteRef::Machine { id, .. } => {
       use crate::colima::MachineId;
       let parsed = if id == "host" {

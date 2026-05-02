@@ -74,3 +74,66 @@ pub fn delete_daemonset(name: String, namespace: String, cx: &mut App) {
 pub fn rollout_restart_daemonset(name: String, namespace: String, cx: &mut App) {
   super::statefulsets::rollout_restart_kind("DaemonSet", name, namespace, cx);
 }
+
+pub fn get_daemonset_yaml(name: String, namespace: String, cx: &mut App) {
+  let state = docker_state(cx);
+  let name_clone = name.clone();
+  let namespace_clone = namespace.clone();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.get_daemonset_yaml(&name, &namespace).await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    let yaml = match result {
+      Ok(y) => y,
+      Err(e) => format!("Error: {e}"),
+    };
+
+    cx.update(|cx| {
+      state.update(cx, |_state, cx| {
+        cx.emit(StateChanged::DaemonSetYamlLoaded {
+          name: name_clone,
+          namespace: namespace_clone,
+          yaml,
+        });
+      });
+    })
+  })
+  .detach();
+}
+
+pub fn apply_daemonset_yaml(name: String, namespace: String, yaml: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Applying daemonset '{name}'..."));
+  let disp = dispatcher(cx);
+  let label = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.apply_daemonset_yaml(&name, &namespace, &yaml).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("DaemonSet '{label}' applied"),
+          });
+        });
+        refresh_daemonsets(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to apply daemonset '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}

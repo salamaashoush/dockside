@@ -158,6 +158,16 @@ pub enum StatefulSetDetailTab {
   Yaml = 2,
 }
 
+/// Tab indices for daemonset detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum DaemonSetDetailTab {
+  #[default]
+  Info = 0,
+  Pods = 1,
+  Yaml = 2,
+}
+
 /// Represents the currently selected item across all views
 /// This enables keyboard shortcuts to act on the selection
 #[derive(Clone, Debug, Default)]
@@ -181,6 +191,10 @@ pub enum Selection {
     namespace: String,
   },
   StatefulSet {
+    name: String,
+    namespace: String,
+  },
+  DaemonSet {
     name: String,
     namespace: String,
   },
@@ -353,6 +367,16 @@ pub enum StateChanged {
     tab: StatefulSetDetailTab,
   },
   DaemonSetsUpdated,
+  DaemonSetYamlLoaded {
+    name: String,
+    namespace: String,
+    yaml: String,
+  },
+  DaemonSetTabRequest {
+    name: String,
+    namespace: String,
+    tab: DaemonSetDetailTab,
+  },
   JobsUpdated,
   CronJobsUpdated,
   IngressesUpdated,
@@ -697,6 +721,13 @@ impl DockerState {
       .statefulsets
       .iter()
       .find(|s| s.name == name && s.namespace == namespace)
+  }
+
+  pub fn get_daemonset(&self, name: &str, namespace: &str) -> Option<&DaemonSetInfo> {
+    self
+      .daemonsets
+      .iter()
+      .find(|d| d.name == name && d.namespace == namespace)
   }
 
   // Navigation

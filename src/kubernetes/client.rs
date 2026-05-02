@@ -777,6 +777,25 @@ impl KubeClient {
     Ok(())
   }
 
+  pub async fn get_daemonset_yaml(&self, name: &str, namespace: &str) -> Result<String> {
+    let api: Api<DaemonSet> = Api::namespaced(self.client.clone(), namespace);
+    let d = api.get(name).await.context(format!("Failed to get daemonset {name}"))?;
+    serde_yaml::to_string(&d).context("Failed to serialize daemonset to YAML")
+  }
+
+  pub async fn apply_daemonset_yaml(&self, name: &str, namespace: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut d: DaemonSet = serde_yaml::from_str(yaml_str).context("Failed to parse daemonset YAML")?;
+    d.metadata.name = Some(name.to_string());
+    d.metadata.namespace = Some(namespace.to_string());
+    let api: Api<DaemonSet> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .replace(name, &PostParams::default(), &d)
+      .await
+      .with_context(|| format!("Failed to apply daemonset {name}"))?;
+    Ok(())
+  }
+
   /// Rollback a Deployment to its previous revision. Walks owned
   /// `ReplicaSet`s, finds the one whose `deployment.kubernetes.io/revision`
   /// annotation is `current - 1`, and patches the deployment's pod

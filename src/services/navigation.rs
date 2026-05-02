@@ -187,6 +187,23 @@ pub fn open_statefulset_yaml(name: String, namespace: String, cx: &mut App) {
   super::kubernetes::get_statefulset_yaml(name, namespace, cx);
 }
 
+pub fn open_daemonset_yaml(name: String, namespace: String, cx: &mut App) {
+  let state = docker_state(cx);
+  state.update(cx, |state, cx| {
+    state.set_view(CurrentView::DaemonSets);
+    state.set_selection(crate::state::Selection::DaemonSet {
+      name: name.clone(),
+      namespace: namespace.clone(),
+    });
+    cx.emit(StateChanged::DaemonSetTabRequest {
+      name: name.clone(),
+      namespace: namespace.clone(),
+      tab: crate::state::DaemonSetDetailTab::Yaml,
+    });
+  });
+  super::kubernetes::get_daemonset_yaml(name, namespace, cx);
+}
+
 pub fn open_deployment_yaml(name: String, namespace: String, cx: &mut App) {
   let state = docker_state(cx);
   state.update(cx, |_state, cx| {
