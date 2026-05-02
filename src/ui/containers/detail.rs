@@ -398,7 +398,47 @@ impl ContainerDetail {
               .child(div().text_sm().text_color(colors.foreground).child(status_text)),
           ),
       )
-      .child(info_row("Ports", container.display_ports()))
+      .child({
+        let row = h_flex()
+          .w_full()
+          .py(px(12.))
+          .justify_between()
+          .items_center()
+          .border_b_1()
+          .border_color(colors.border)
+          .child(div().text_sm().text_color(colors.muted_foreground).child("Ports"));
+
+        let published: Vec<_> = container.ports.iter().filter(|p| p.public_port.is_some()).collect();
+        if published.is_empty() {
+          row.child(div().text_sm().text_color(colors.foreground).child("—".to_string()))
+        } else {
+          let mut chips = h_flex().gap(px(6.)).items_center();
+          for p in &published {
+            let pub_port = p.public_port.unwrap();
+            let priv_port = p.private_port;
+            let proto = p.protocol.clone();
+            let label = format!("{pub_port}:{priv_port}/{proto}");
+            let openable = is_running && proto.eq_ignore_ascii_case("tcp");
+            if openable {
+              let url = format!("http://localhost:{pub_port}");
+              let id = ("port-open", usize::from(priv_port));
+              chips = chips.child(
+                Button::new(id)
+                  .label(label)
+                  .icon(IconName::ExternalLink)
+                  .ghost()
+                  .xsmall()
+                  .on_click(move |_, _, cx| {
+                    cx.open_url(&url);
+                  }),
+              );
+            } else {
+              chips = chips.child(div().text_xs().text_color(colors.foreground).child(label));
+            }
+          }
+          row.child(chips)
+        }
+      })
       .when(container.command.is_some(), |el| {
         el.child(info_row("Command", container.command.clone().unwrap_or_default()))
       })

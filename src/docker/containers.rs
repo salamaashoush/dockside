@@ -173,15 +173,6 @@ impl ContainerInfo {
   pub fn short_id(&self) -> &str {
     if self.id.len() >= 12 { &self.id[..12] } else { &self.id }
   }
-
-  pub fn display_ports(&self) -> String {
-    self
-      .ports
-      .iter()
-      .filter_map(|p| p.public_port.map(|pub_port| format!("{}:{}", pub_port, p.private_port)))
-      .collect::<Vec<_>>()
-      .join(", ")
-  }
 }
 
 /// Extras pulled from a full container inspect — surfaced on the Info tab.
@@ -1190,53 +1181,6 @@ mod tests {
   }
 
   #[test]
-  fn test_container_info_display_ports() {
-    let container = ContainerInfo {
-      id: "abc123".to_string(),
-      name: "test".to_string(),
-      image: "nginx".to_string(),
-      image_id: "sha256:abc".to_string(),
-      state: ContainerState::Running,
-      status: "Up 5 minutes".to_string(),
-      created: None,
-      ports: vec![
-        PortMapping {
-          private_port: 80,
-          public_port: Some(8080),
-          protocol: "tcp".to_string(),
-          ip: Some("0.0.0.0".to_string()),
-        },
-        PortMapping {
-          private_port: 443,
-          public_port: Some(8443),
-          protocol: "tcp".to_string(),
-          ip: None,
-        },
-        PortMapping {
-          private_port: 53,
-          public_port: None, // No public port
-          protocol: "udp".to_string(),
-          ip: None,
-        },
-      ],
-      labels: HashMap::new(),
-      command: None,
-      size_rw: None,
-      size_root_fs: None,
-      volumes_used: vec![],
-      networks_used: vec![],
-    };
-    assert_eq!(container.display_ports(), "8080:80, 8443:443");
-
-    // Test with no ports
-    let no_ports = ContainerInfo {
-      ports: vec![],
-      ..container.clone()
-    };
-    assert_eq!(no_ports.display_ports(), "");
-  }
-
-  #[test]
   fn test_container_file_entry_display_size() {
     // Directory shows "-"
     let dir = ContainerFileEntry {
@@ -1345,34 +1289,6 @@ mod tests {
       networks_used: vec![],
     };
     assert_eq!(container.short_id(), "123456789012");
-  }
-
-  #[test]
-  fn test_container_display_ports_internal_only() {
-    // Container with internal port but no public port (common for linked containers)
-    let container = ContainerInfo {
-      id: "abc123".to_string(),
-      name: "internal-only".to_string(),
-      image: "redis".to_string(),
-      image_id: "sha256:abc".to_string(),
-      state: ContainerState::Running,
-      status: "Up".to_string(),
-      created: None,
-      ports: vec![PortMapping {
-        private_port: 6379,
-        public_port: None,
-        protocol: "tcp".to_string(),
-        ip: None,
-      }],
-      labels: HashMap::new(),
-      command: None,
-      size_rw: None,
-      size_root_fs: None,
-      volumes_used: vec![],
-      networks_used: vec![],
-    };
-    // Should return empty string when no public ports
-    assert_eq!(container.display_ports(), "");
   }
 
   #[test]
