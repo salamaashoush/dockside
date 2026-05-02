@@ -1,6 +1,6 @@
 [package]
 name = "dockside"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.93"
 description = "A native desktop application for managing Docker containers, images, volumes, networks, and Kubernetes resources via Colima"

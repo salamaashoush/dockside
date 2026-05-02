@@ -2,6 +2,86 @@
 
 All notable changes to Dockside will be documented in this file.
 
+## [0.3.0] - 2026-05-02
+
+### Bug Fixes
+
+- Improve container process discovery for minimal containers by @salamaashoush
+- **machines**: Always expose Machines view; show Host on every platform by @salamaashoush
+- **machines**: Host stats now populate; load free / df / ps locally by @salamaashoush
+- **scan**: Structured install hint with copy buttons; jump to Vulns tab by @salamaashoush
+- **scan**: Center the Vulnerabilities install/error panel by @salamaashoush
+- **compose**: Chdir + -f config from container labels by @salamaashoush
+- **compose**: Kill watch child on output dialog close by @salamaashoush
+
+### Documentation
+
+- README — drop Windows/Intel mac, point to scripts/install.sh + install-deps.sh, list real release assets by @salamaashoush
+
+### Features
+
+- Add cross-platform abstraction module by @salamaashoush
+- Add platform-specific UI adaptations by @salamaashoush
+- Add host management, Docker daemon config, and UI improvements by @salamaashoush
+- Terminal grid + TUI fixes, k8s/colima as optional features, settings UX by @salamaashoush
+- **terminal**: Mouse text selection with scroll-aware highlight by @salamaashoush
+- **containers,images**: Live log streaming + image layer inspector by @salamaashoush
+- **containers**: Per-container Stats tab + health/exit/mounts on Info by @salamaashoush
+- **images**: Tag + push, streaming pull progress by @salamaashoush
+- **create,prune**: Resource limits + labels, system df breakdown by @salamaashoush
+- **terminal,containers**: Unified log viewer via libghostty TerminalSource by @salamaashoush
+- **pods**: Unify k8s log viewer through libghostty TerminalSource by @salamaashoush
+- **images**: Build dialog + streaming bollard build_image by @salamaashoush
+- **logs,build,create**: Batch chunks, build output viewer, healthcheck by @salamaashoush
+- **images**: Vulnerability scan via Trivy by @salamaashoush
+- **images**: Registry browser via Docker Hub search by @salamaashoush
+- **charts,search,scan**: Smooth sparklines, find bar, platform errors by @salamaashoush
+- **build,scan**: Hadolint Dockerfile lint with platform-aware install hint by @salamaashoush
+- **prune**: BuildKit build cache pruning by @salamaashoush
+- **images**: Save/load image tarball by @salamaashoush
+- **containers**: Add Author field to commit dialog by @salamaashoush
+- **activity**: Per-row CPU sparkline + status breakdown badges by @salamaashoush
+- **compose**: Docker compose watch with profile picker by @salamaashoush
+- **build**: Debounced auto-lint on Dockerfile field edits by @salamaashoush
+- **activity**: Hover tooltips on sparklines by @salamaashoush
+- **build**: Browse button + native folder picker for context_dir by @salamaashoush
+- **containers**: Hover tooltips on Stats tab sparklines by @salamaashoush
+- **compose**: Inline YAML viewer by @salamaashoush
+- **images**: Scan all toolbar button by @salamaashoush
+- **volumes**: Used By section on detail tab by @salamaashoush
+- **settings**: More options + auto-save text inputs + theme tracker by @salamaashoush
+- **settings**: Wire kubeconfig path, default platform, terminal font, colima defaults by @salamaashoush
+
+### Miscellaneous Tasks
+
+- Add multi-platform builds for Linux and Windows by @salamaashoush
+- Add Linux-specific GTK dependency by @salamaashoush
+- Drop snapshot log path and trim unused fields by @salamaashoush
+- Clippy clean by @salamaashoush
+- Drop Windows targets — release ships macOS arm64 + Linux x86_64 only by @salamaashoush
+- Install dependencies on every supported platform by @salamaashoush
+
+### Refactor
+
+- Update Docker client for cross-platform runtime support by @salamaashoush
+- Update utilities and services for cross-platform support by @salamaashoush
+- Wire cross-platform abstraction into UI and clean up dead code by @salamaashoush
+- **terminal**: Replace alacritty_terminal with libghostty-vt by @salamaashoush
+
+### Testing
+
+- Hadolint parser, compose label extraction, build-cache prune by @salamaashoush
+
+### Ui
+
+- Standardize action UX across views by @salamaashoush
+- Collapse detail toolbars to Ellipsis dropdown menu by @salamaashoush
+- Collapse every list toolbar into a single Ellipsis dropdown by @salamaashoush
+- **activity**: Pill-style status chips in title bar by @salamaashoush
+- **images**: Inline Scan button on empty Vulnerabilities tab by @salamaashoush
+- **settings**: Full revamp — sidebar nav + cards + auto-save by @salamaashoush
+- **settings**: Drop second header + cards; flat rows + sidebar footer actions by @salamaashoush
+
 ## [0.2.0] - 2026-01-08
 
 ### Bug Fixes
