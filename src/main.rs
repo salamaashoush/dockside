@@ -159,6 +159,14 @@ fn main() {
     .with(tracing_subscriber::fmt::layer())
     .init();
 
+  // Install the default rustls crypto provider (ring) for the whole process
+  // before any TLS code runs (kube client, hyper-rustls, our own reverse
+  // proxy). rustls 0.23 stopped picking a provider automatically when
+  // multiple are linked; failing to install one panics on first use.
+  rustls::crypto::ring::default_provider()
+    .install_default()
+    .expect("install default rustls CryptoProvider");
+
   let app = gpui::Application::new().with_assets(Assets);
 
   // Handle dock icon click when no windows are open (macOS-specific)
