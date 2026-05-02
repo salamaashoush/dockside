@@ -158,6 +158,10 @@ pub struct ContainerInfo {
   pub command: Option<String>,
   pub size_rw: Option<i64>,
   pub size_root_fs: Option<i64>,
+  /// Names of volumes (named, not bind/tmpfs) mounted into the container.
+  /// Pulled from the daemon's container list response so the Volumes
+  /// view can cross-reference without an inspect-per-container.
+  pub volumes_used: Vec<String>,
 }
 
 impl ContainerInfo {
@@ -267,6 +271,20 @@ impl DockerClient {
 
       let created = container.created.and_then(|ts| DateTime::from_timestamp(ts, 0));
 
+      let volumes_used: Vec<String> = container
+        .mounts
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|m| {
+          // Only named volumes are useful as cross-references on the
+          // Volumes view. Bind / tmpfs mounts go into the source path
+          // directly and aren't tied to a Volume object.
+          let kind = m.typ.map(|t| format!("{t:?}")).unwrap_or_default().to_lowercase();
+          if kind == "volume" { m.name } else { None }
+        })
+        .collect();
+
       result.push(ContainerInfo {
         id,
         name,
@@ -280,6 +298,7 @@ impl DockerClient {
         command: container.command,
         size_rw: container.size_rw,
         size_root_fs: container.size_root_fs,
+        volumes_used,
       });
     }
 
@@ -1144,6 +1163,7 @@ mod tests {
       command: None,
       size_rw: None,
       size_root_fs: None,
+      volumes_used: vec![],
     };
     assert_eq!(container.short_id(), "abc123def456");
 
@@ -1189,6 +1209,7 @@ mod tests {
       command: None,
       size_rw: None,
       size_root_fs: None,
+      volumes_used: vec![],
     };
     assert_eq!(container.display_ports(), "8080:80, 8443:443");
 
@@ -1305,6 +1326,7 @@ mod tests {
       command: None,
       size_rw: None,
       size_root_fs: None,
+      volumes_used: vec![],
     };
     assert_eq!(container.short_id(), "123456789012");
   }
@@ -1330,6 +1352,7 @@ mod tests {
       command: None,
       size_rw: None,
       size_root_fs: None,
+      volumes_used: vec![],
     };
     // Should return empty string when no public ports
     assert_eq!(container.display_ports(), "");

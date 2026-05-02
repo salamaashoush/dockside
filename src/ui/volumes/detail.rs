@@ -50,6 +50,7 @@ pub struct VolumeDetail {
   active_tab: usize,
   volume_state: Option<VolumeTabState>,
   file_content_editor: Option<Entity<InputState>>,
+  used_by: Vec<String>,
   on_delete: Option<VolumeActionCallback>,
   on_tab_change: Option<TabChangeCallback>,
   on_navigate_path: Option<FileNavigateCallback>,
@@ -65,6 +66,7 @@ impl VolumeDetail {
       active_tab: 0,
       volume_state: None,
       file_content_editor: None,
+      used_by: Vec::new(),
       on_delete: None,
       on_tab_change: None,
       on_navigate_path: None,
@@ -72,6 +74,11 @@ impl VolumeDetail {
       on_close_file_viewer: None,
       on_symlink_click: None,
     }
+  }
+
+  pub fn used_by(mut self, containers: Vec<String>) -> Self {
+    self.used_by = containers;
+    self
   }
 
   pub fn volume(mut self, volume: Option<VolumeInfo>) -> Self {
@@ -168,7 +175,7 @@ impl VolumeDetail {
       )
   }
 
-  fn render_info_tab(volume: &VolumeInfo, cx: &App) -> gpui::Div {
+  fn render_info_tab(&self, volume: &VolumeInfo, cx: &App) -> gpui::Div {
     let _colors = &cx.theme().colors;
 
     // Basic info rows
@@ -198,6 +205,43 @@ impl VolumeDetail {
                 ],
                 cx,
             ))
+            .when(!self.used_by.is_empty(), |el| {
+                el.child(Self::render_used_by_section(&self.used_by, cx))
+            })
+  }
+
+  fn render_used_by_section(containers: &[String], cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+    v_flex()
+      .gap(px(1.))
+      .child(
+        div()
+          .py(px(8.))
+          .text_sm()
+          .font_weight(gpui::FontWeight::MEDIUM)
+          .text_color(colors.foreground)
+          .child("Used By"),
+      )
+      .child(
+        v_flex()
+          .bg(colors.background)
+          .rounded(px(8.))
+          .overflow_hidden()
+          .children(containers.iter().enumerate().map(|(i, name)| {
+            let mut row = h_flex()
+              .w_full()
+              .px(px(16.))
+              .py(px(10.))
+              .items_center()
+              .gap(px(8.))
+              .child(Icon::new(AppIcon::Container).text_color(colors.secondary_foreground))
+              .child(div().text_sm().text_color(colors.foreground).child(name.clone()));
+            if i > 0 {
+              row = row.border_t_1().border_color(colors.border);
+            }
+            row
+          })),
+      )
   }
 
   fn render_section(header: Option<&str>, rows: Vec<(&str, String)>, cx: &App) -> gpui::Div {
@@ -462,7 +506,7 @@ impl VolumeDetail {
       );
     } else {
       // Info tab with scroll container
-      let content = Self::render_info_tab(volume, cx);
+      let content = self.render_info_tab(volume, cx);
       result = result.child(
         div()
           .id("volume-detail-scroll")

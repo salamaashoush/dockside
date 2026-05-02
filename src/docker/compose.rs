@@ -148,6 +148,7 @@ mod tests {
       command: None,
       size_rw: None,
       size_root_fs: None,
+      volumes_used: vec![],
     }
   }
 

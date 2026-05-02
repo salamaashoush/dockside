@@ -323,12 +323,30 @@ impl Render for VolumesView {
     let file_content_editor = self.file_content_editor.clone();
     let has_selection = selected_volume.is_some();
 
+    // Cross-reference containers that mount the selected volume so the
+    // detail panel can show a Used By list. We already have the full
+    // container list in docker_state; volumes_used (named volumes
+    // only) is populated from the container list response.
+    let used_by: Vec<String> = if let Some(ref vol) = selected_volume {
+      self
+        .docker_state
+        .read(cx)
+        .containers
+        .iter()
+        .filter(|c| c.volumes_used.iter().any(|v| v == &vol.name))
+        .map(|c| c.name.clone())
+        .collect()
+    } else {
+      Vec::new()
+    };
+
     // Build detail panel
     let detail = VolumeDetail::new()
       .volume(selected_volume)
       .active_tab(active_tab)
       .volume_state(self.volume_tab_state.clone())
       .file_content_editor(file_content_editor)
+      .used_by(used_by)
       .on_tab_change(cx.listener(|this, tab: &usize, _window, cx| {
         this.on_tab_change(*tab, cx);
       }))
