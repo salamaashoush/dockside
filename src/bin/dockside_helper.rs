@@ -219,7 +219,9 @@ fn install_resolver_linux(suffix: &str, port: u16) -> anyhow::Result<()> {
     let path = PathBuf::from(format!("/etc/NetworkManager/dnsmasq.d/dockside-{suffix}.conf"));
     let body = format!("server=/{suffix}/127.0.0.1#{port}\n");
     write_root_file(&path, body.as_bytes(), 0o644)?;
-    let _ = std::process::Command::new("nmcli").args(["general", "reload"]).status();
+    if let Some(nmcli) = find_tool(&["/usr/bin/nmcli", "/bin/nmcli"]) {
+      let _ = std::process::Command::new(nmcli).args(["general", "reload"]).status();
+    }
     println!("installed {}", path.display());
     return Ok(());
   }
@@ -233,9 +235,11 @@ fn install_resolver_linux(suffix: &str, port: u16) -> anyhow::Result<()> {
   let path = dir.join(format!("dockside-{suffix}.conf"));
   let body = format!("[Resolve]\nDNS=127.0.0.1:{port}\nDomains=~{suffix}\n");
   write_root_file(&path, body.as_bytes(), 0o644)?;
-  let _ = std::process::Command::new("systemctl")
-    .args(["restart", "systemd-resolved"])
-    .status();
+  if let Some(systemctl) = find_tool(&["/usr/bin/systemctl", "/bin/systemctl"]) {
+    let _ = std::process::Command::new(systemctl)
+      .args(["restart", "systemd-resolved"])
+      .status();
+  }
   println!("installed {}", path.display());
   Ok(())
 }
@@ -252,49 +256,60 @@ fn uninstall_resolver_linux(suffix: &str) -> anyhow::Result<()> {
       println!("removed {}", candidate.display());
     }
   }
-  let _ = std::process::Command::new("systemctl")
-    .args(["restart", "systemd-resolved"])
-    .status();
-  let _ = std::process::Command::new("nmcli").args(["general", "reload"]).status();
+  if let Some(systemctl) = find_tool(&["/usr/bin/systemctl", "/bin/systemctl"]) {
+    let _ = std::process::Command::new(systemctl)
+      .args(["restart", "systemd-resolved"])
+      .status();
+  }
+  if let Some(nmcli) = find_tool(&["/usr/bin/nmcli", "/bin/nmcli"]) {
+    let _ = std::process::Command::new(nmcli).args(["general", "reload"]).status();
+  }
   Ok(())
 }
 
 #[cfg(target_os = "linux")]
 fn install_ca_linux(pem_path: &std::path::Path) -> anyhow::Result<()> {
   use std::path::Path;
-  // Detect distro CA tooling. Arch / Fedora / RHEL / openSUSE ship
-  // `update-ca-trust` reading `/etc/ca-certificates/trust-source/anchors/`.
-  // Debian / Ubuntu ship `update-ca-certificates` reading
-  // `/usr/local/share/ca-certificates/`.
-  if Path::new("/etc/ca-certificates/trust-source/anchors").is_dir() || which_exists("update-ca-trust") {
+  // pkexec sanitises PATH; do NOT rely on `which`. Probe absolute paths
+  // that match where each distro family installs the trust-store updater.
+  if let Some(tool) = find_tool(&[
+    "/usr/bin/update-ca-trust",
+    "/usr/sbin/update-ca-trust",
+    "/sbin/update-ca-trust",
+  ]) {
     let dest_dir = Path::new("/etc/ca-certificates/trust-source/anchors");
     std::fs::create_dir_all(dest_dir)?;
     let dest = dest_dir.join("dockside.crt");
     std::fs::copy(pem_path, &dest)?;
-    let status = std::process::Command::new("update-ca-trust").arg("extract").status()?;
+    let status = std::process::Command::new(&tool).arg("extract").status()?;
     if !status.success() {
-      anyhow::bail!("`update-ca-trust extract` exited with {status}");
+      anyhow::bail!("`{} extract` exited with {status}", tool.display());
     }
     println!("installed CA at {} (Arch/Fedora/RHEL family)", dest.display());
     return Ok(());
   }
 
-  if which_exists("update-ca-certificates") {
+  if let Some(tool) = find_tool(&[
+    "/usr/sbin/update-ca-certificates",
+    "/usr/bin/update-ca-certificates",
+    "/sbin/update-ca-certificates",
+  ]) {
     let dest_dir = Path::new("/usr/local/share/ca-certificates");
     std::fs::create_dir_all(dest_dir)?;
     let dest = dest_dir.join("dockside.crt");
     std::fs::copy(pem_path, &dest)?;
-    let status = std::process::Command::new("update-ca-certificates").status()?;
+    let status = std::process::Command::new(&tool).status()?;
     if !status.success() {
-      anyhow::bail!("`update-ca-certificates` exited with {status}");
+      anyhow::bail!("`{}` exited with {status}", tool.display());
     }
     println!("installed CA at {} (Debian/Ubuntu family)", dest.display());
     return Ok(());
   }
 
   anyhow::bail!(
-    "neither `update-ca-trust` nor `update-ca-certificates` is on PATH — \
-     install ca-certificates package or copy {} into your system trust store manually",
+    "no system trust-store updater found at the usual paths \
+     (/usr/bin/update-ca-trust, /usr/sbin/update-ca-certificates) — install \
+     the `ca-certificates` package or copy {} into your trust store manually",
     pem_path.display()
   );
 }
@@ -314,22 +329,33 @@ fn uninstall_ca_linux() -> anyhow::Result<()> {
     }
   }
   if removed {
-    if which_exists("update-ca-trust") {
-      let _ = std::process::Command::new("update-ca-trust").arg("extract").status();
+    if let Some(tool) = find_tool(&[
+      "/usr/bin/update-ca-trust",
+      "/usr/sbin/update-ca-trust",
+      "/sbin/update-ca-trust",
+    ]) {
+      let _ = std::process::Command::new(&tool).arg("extract").status();
     }
-    if which_exists("update-ca-certificates") {
-      let _ = std::process::Command::new("update-ca-certificates").status();
+    if let Some(tool) = find_tool(&[
+      "/usr/sbin/update-ca-certificates",
+      "/usr/bin/update-ca-certificates",
+      "/sbin/update-ca-certificates",
+    ]) {
+      let _ = std::process::Command::new(&tool).status();
     }
   }
   Ok(())
 }
 
 #[cfg(target_os = "linux")]
-fn which_exists(name: &str) -> bool {
-  let Ok(path) = std::env::var("PATH") else {
-    return false;
-  };
-  path.split(':').any(|p| std::path::Path::new(p).join(name).is_file())
+fn find_tool(candidates: &[&str]) -> Option<PathBuf> {
+  for path in candidates {
+    let p = std::path::Path::new(path);
+    if p.is_file() {
+      return Some(p.to_path_buf());
+    }
+  }
+  None
 }
 
 #[cfg(unix)]

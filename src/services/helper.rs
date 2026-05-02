@@ -40,6 +40,7 @@ pub fn run_privileged(args: &[&str]) -> Result<String> {
   let helper_str = helper
     .to_str()
     .ok_or_else(|| anyhow::anyhow!("helper path is not valid UTF-8"))?;
+  tracing::info!("dns helper: invoking {helper_str:?} {args:?}");
 
   #[cfg(target_os = "macos")]
   {
