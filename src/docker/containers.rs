@@ -123,11 +123,11 @@ pub struct ContainerCreateConfig {
   pub hostname: Option<String>,
   /// User-supplied labels (key, value).
   pub labels: Vec<(String, String)>,
-  /// Number of CPU cores allowed (e.g. 1.5 → 1,500,000,000 NanoCPUs).
+  /// Number of CPU cores allowed (e.g. 1.5 → 1,500,000,000 `NanoCPUs`).
   pub cpus: Option<f64>,
   /// Hard memory cap in bytes.
   pub memory_bytes: Option<i64>,
-  /// Memory + swap cap in bytes (Docker uses memory_bytes + swap; -1 = unlimited).
+  /// Memory + swap cap in bytes (Docker uses `memory_bytes` + swap; -1 = unlimited).
   pub memory_swap_bytes: Option<i64>,
   /// Max number of pids inside the container.
   pub pids_limit: Option<i64>,
@@ -497,6 +497,7 @@ impl DockerClient {
     // Resource limits.
     if let Some(cpus) = cfg.cpus {
       // 1 CPU = 1_000_000_000 NanoCPUs.
+      #[allow(clippy::cast_possible_truncation)]
       let nano = (cpus * 1_000_000_000.0) as i64;
       if nano > 0 {
         host_config.nano_cpus = Some(nano);

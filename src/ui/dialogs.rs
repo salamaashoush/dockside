@@ -173,7 +173,7 @@ pub fn open_build_image_dialog(window: &mut Window, cx: &mut App) {
                   opts.platform.as_docker_arg().map(String::from),
                   opts.no_cache,
                   opts.pull,
-                  log_stream.clone(),
+                  &log_stream,
                   cx,
                 );
                 window.close_dialog(cx);

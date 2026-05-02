@@ -57,7 +57,7 @@ pub struct ContainerTabState {
   pub file_content_loading: bool,
   /// Error when loading file content failed
   pub file_content_error: Option<String>,
-  /// Structured extras from container inspect (health, restart_count, etc).
+  /// Structured extras from container inspect (health, `restart_count`, etc).
   pub container_extras: Option<crate::docker::ContainerExtras>,
   /// Latest container stats sample (None if not yet loaded / unavailable).
   pub stats_latest: Option<crate::docker::ContainerStats>,

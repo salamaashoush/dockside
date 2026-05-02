@@ -38,6 +38,7 @@ fn parse_size_bytes(s: &str) -> Option<i64> {
   if n <= 0.0 {
     return None;
   }
+  #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
   let bytes = (n * mul as f64) as i64;
   Some(bytes)
 }
@@ -560,7 +561,11 @@ impl CreateContainerDialog {
           .as_ref()
           .and_then(|s| s.read(cx).text().to_string().parse::<f64>().ok())
           .filter(|n| *n > 0.0)
-          .map(|n| (n * 1_000_000_000.0) as i64)
+          .map(|n| {
+            #[allow(clippy::cast_possible_truncation)]
+            let v = (n * 1_000_000_000.0) as i64;
+            v
+          })
       },
       healthcheck_timeout_ns: {
         self
@@ -568,7 +573,11 @@ impl CreateContainerDialog {
           .as_ref()
           .and_then(|s| s.read(cx).text().to_string().parse::<f64>().ok())
           .filter(|n| *n > 0.0)
-          .map(|n| (n * 1_000_000_000.0) as i64)
+          .map(|n| {
+            #[allow(clippy::cast_possible_truncation)]
+            let v = (n * 1_000_000_000.0) as i64;
+            v
+          })
       },
       healthcheck_start_period_ns: {
         self
@@ -576,7 +585,11 @@ impl CreateContainerDialog {
           .as_ref()
           .and_then(|s| s.read(cx).text().to_string().parse::<f64>().ok())
           .filter(|n| *n > 0.0)
-          .map(|n| (n * 1_000_000_000.0) as i64)
+          .map(|n| {
+            #[allow(clippy::cast_possible_truncation)]
+            let v = (n * 1_000_000_000.0) as i64;
+            v
+          })
       },
       healthcheck_retries: {
         self

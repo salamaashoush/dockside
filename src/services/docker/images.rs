@@ -78,6 +78,7 @@ pub fn delete_image(id: String, cx: &mut App) {
 /// returning it so the caller can hand the same stream to a viewer
 /// entity. The build runs on the tokio runtime; errors and completion
 /// notifications go through the existing task / dispatcher pipeline.
+#[allow(clippy::too_many_arguments)]
 pub fn build_image(
   context_dir: String,
   dockerfile: String,
@@ -87,7 +88,7 @@ pub fn build_image(
   platform: Option<String>,
   no_cache: bool,
   pull: bool,
-  log_stream: std::sync::Arc<crate::terminal::LogStream>,
+  log_stream: &std::sync::Arc<crate::terminal::LogStream>,
   cx: &mut App,
 ) {
   let task_id = start_task(cx, format!("Building {tag}..."));

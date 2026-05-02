@@ -98,24 +98,24 @@ impl Element for Sparkline {
     if self.data.len() < 2 {
       return;
     }
-    let n = self.data.len();
+    let count = self.data.len();
     let max = self
       .max_override
       .unwrap_or_else(|| self.data.iter().copied().fold(0.0_f64, f64::max).max(1e-6));
-    let w = f32::from(bounds.size.width);
-    let h = f32::from(bounds.size.height);
+    let width = f32::from(bounds.size.width);
+    let height = f32::from(bounds.size.height);
     let pad = 2.0_f32;
-    let plot_h = (h - pad * 2.0).max(1.0);
-    let plot_w = (w - pad).max(1.0);
+    let plot_h = (height - pad * 2.0).max(1.0);
+    let plot_w = (width - pad).max(1.0);
     let origin_x = f32::from(bounds.origin.x) + pad / 2.0;
     let origin_y = f32::from(bounds.origin.y) + pad;
     let baseline_y = origin_y + plot_h;
 
     #[allow(clippy::cast_precision_loss)]
-    let step = if n > 1 { plot_w / (n - 1) as f32 } else { 0.0 };
+    let step = if count > 1 { plot_w / (count - 1) as f32 } else { 0.0 };
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     let pt = |i: usize, v: f64| -> Point<Pixels> {
-      #[allow(clippy::cast_precision_loss)]
       let x = origin_x + step * i as f32;
       let normalized = (v / max).clamp(0.0, 1.0) as f32;
       let y = origin_y + plot_h * (1.0 - normalized);
@@ -128,7 +128,9 @@ impl Element for Sparkline {
     for (i, &v) in self.data.iter().enumerate() {
       fill_builder.line_to(pt(i, v));
     }
-    fill_builder.line_to(point(px(origin_x + step * (n.saturating_sub(1)) as f32), px(baseline_y)));
+    #[allow(clippy::cast_precision_loss)]
+    let last_x = origin_x + step * count.saturating_sub(1) as f32;
+    fill_builder.line_to(point(px(last_x), px(baseline_y)));
     fill_builder.line_to(point(px(origin_x), px(baseline_y)));
     if let Ok(path) = fill_builder.build() {
       window.paint_path(path, Background::from(self.fill));

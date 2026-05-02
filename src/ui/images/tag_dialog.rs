@@ -52,8 +52,7 @@ impl TagImageDialog {
     let tag = self
       .tag_input
       .as_ref()
-      .map(|s| s.read(cx).text().to_string())
-      .unwrap_or_else(|| "latest".to_string());
+      .map_or_else(|| "latest".to_string(), |s| s.read(cx).text().to_string());
     TagImageOptions {
       source: self.source.clone(),
       repo,

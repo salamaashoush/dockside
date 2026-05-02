@@ -366,7 +366,7 @@ impl Render for PruneDialog {
             .w_full()
             .max_h(px(500.))
             .overflow_y_scrollbar()
-            .when_some(disk_section, |el, section| el.child(section))
+            .when_some(disk_section, ParentElement::child)
             // Header description
             .child(
                 div()

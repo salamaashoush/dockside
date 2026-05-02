@@ -71,7 +71,7 @@ pub struct TerminalGrid {
   pub selection: Option<GridSelection>,
   /// Selection highlight color (translucent overlay).
   pub selection_color: Hsla,
-  /// Per-cell-range search match highlights (row, col_start, col_end inclusive).
+  /// Per-cell-range search match highlights (row, `col_start`, `col_end` inclusive).
   pub search_matches: Vec<(u16, u16, u16)>,
   /// Highlight color for search matches.
   pub search_match_color: Hsla,

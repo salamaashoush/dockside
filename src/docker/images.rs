@@ -57,10 +57,6 @@ pub struct PullProgressEvent {
 }
 
 fn format_push_event(info: &bollard::models::PushImageInfo) -> String {
-  let id_part = match &info.progress_detail {
-    Some(_) => String::new(),
-    None => String::new(),
-  };
   let status = info.status.clone().unwrap_or_default();
   let progress = info.progress.clone().unwrap_or_default();
   let mut out = status;
@@ -69,12 +65,6 @@ fn format_push_event(info: &bollard::models::PushImageInfo) -> String {
       out.push(' ');
     }
     out.push_str(&progress);
-  }
-  if !id_part.is_empty() {
-    if !out.is_empty() {
-      out.push(' ');
-    }
-    out.push_str(&id_part);
   }
   out
 }
@@ -241,6 +231,7 @@ impl DockerClient {
   ///
   /// `context_dir` is the build root (everything under it is shipped).
   /// `dockerfile` is relative to the context (e.g. `Dockerfile`).
+  #[allow(clippy::too_many_arguments)]
   pub async fn build_image_with_progress<F>(
     &self,
     context_dir: &Path,

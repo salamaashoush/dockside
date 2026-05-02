@@ -296,7 +296,7 @@ impl TerminalView {
 
   /// Forward a wheel scroll into libghostty's viewport.
   /// `delta > 0` = scroll up (reveal history) — libghostty wants negative.
-  /// Also updates the view-scroll counter so selection abs_row math stays
+  /// Also updates the view-scroll counter so selection `abs_row` math stays
   /// in sync with what libghostty actually shows.
   fn scroll(&mut self, delta: i32, _max_scroll: usize) {
     if let Some(terminal) = &self.terminal

@@ -192,8 +192,7 @@ impl Render for ImagesView {
         let source = this
           .selected_image(cx)
           .as_ref()
-          .map(|img| img.display_name())
-          .unwrap_or_else(|| id.to_string());
+          .map_or_else(|| id.to_string(), ImageInfo::display_name);
         open_tag_image_dialog(source, window, cx);
       }))
       .on_push(cx.listener(|this, _id: &str, window, cx| {
@@ -201,8 +200,10 @@ impl Render for ImagesView {
           let display = img.display_name();
           let (image, tag) = display
             .rsplit_once(':')
-            .map(|(i, t)| (i.to_string(), t.to_string()))
-            .unwrap_or_else(|| (display, "latest".to_string()));
+            .map_or_else(
+              || (display.clone(), "latest".to_string()),
+              |(i, t)| (i.to_string(), t.to_string()),
+            );
           open_push_image_dialog(image, tag, window, cx);
         }
       }))

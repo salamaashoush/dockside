@@ -54,7 +54,7 @@ impl LogStream {
     thread::Builder::new()
       .name("dockside-log-stream".into())
       .spawn(move || {
-        let _ = run_actor(cmd_rx, cols, rows, &term_content, &term_max_scroll);
+        let _ = run_actor(&cmd_rx, cols, rows, &term_content, &term_max_scroll);
         term_shutdown.store(true, Ordering::SeqCst);
       })
       .map_err(|e| anyhow!("failed to spawn log stream thread: {e}"))?;
@@ -112,7 +112,7 @@ impl Drop for LogStream {
 }
 
 fn run_actor(
-  cmd_rx: mpsc::Receiver<Cmd>,
+  cmd_rx: &mpsc::Receiver<Cmd>,
   initial_cols: u16,
   initial_rows: u16,
   content: &Arc<Mutex<TerminalContent>>,
@@ -160,10 +160,7 @@ fn run_actor(
   // produce a single snapshot showing the final state.
   let mut shutdown = false;
   while !shutdown {
-    let first = match cmd_rx.recv() {
-      Ok(c) => c,
-      Err(_) => break,
-    };
+    let Ok(first) = cmd_rx.recv() else { break };
     let mut batch: Vec<Cmd> = vec![first];
     while let Ok(more) = cmd_rx.try_recv() {
       batch.push(more);

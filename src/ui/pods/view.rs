@@ -288,7 +288,7 @@ impl PodsView {
     let pod_name = pod.name.clone();
     let namespace = pod.namespace.clone();
     let container = self.pod_tab_state.selected_container.clone();
-    let max_lines = settings_state(cx).read(cx).settings.max_log_lines as i64;
+    let max_lines: i64 = i64::try_from(settings_state(cx).read(cx).settings.max_log_lines).unwrap_or(i64::MAX);
     let target = self.logs_stream.clone();
     let tokio_handle = services::Tokio::runtime_handle();
 
