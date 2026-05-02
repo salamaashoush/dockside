@@ -172,88 +172,10 @@ jobs:
           name: Dockside-linux-x86_64
           path: Dockside-*.tar.gz
 
-  build-windows:
-    name: Build Windows App
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: windows-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            windows-x86_64-cargo-
-
-      - name: Build
-        run: cargo build --release --target x86_64-pc-windows-msvc
-
-      - name: Create Windows package
-        shell: pwsh
-        run: |
-          $VERSION = $env:GITHUB_REF -replace 'refs/tags/', ''
-
-          # Create package directory
-          New-Item -ItemType Directory -Force -Path "Dockside-$VERSION-windows-x86_64"
-
-          # Copy binary
-          Copy-Item "target/x86_64-pc-windows-msvc/release/dockside.exe" "Dockside-$VERSION-windows-x86_64/"
-
-          # Copy themes
-          Copy-Item -Recurse "themes" "Dockside-$VERSION-windows-x86_64/"
-
-          # Copy assets
-          New-Item -ItemType Directory -Force -Path "Dockside-$VERSION-windows-x86_64/assets"
-          Copy-Item "assets/icon.png" "Dockside-$VERSION-windows-x86_64/assets/"
-
-          # Create README
-          @"
-          # Dockside for Windows
-
-          ## Installation
-
-          1. Extract this archive
-          2. Run dockside.exe
-
-          ## Requirements
-
-          - Docker running in WSL2 with TCP port exposed
-          - Or Docker Desktop installed
-
-          ## WSL2 Docker Setup
-
-          1. Install Docker in your WSL2 distro (e.g., Ubuntu)
-          2. Edit /etc/docker/daemon.json to add:
-             {"hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2375"]}
-          3. Restart Docker: sudo systemctl restart docker
-          4. Dockside will automatically detect and connect
-
-          "@ | Out-File -FilePath "Dockside-$VERSION-windows-x86_64/README.md" -Encoding utf8
-
-          # Package
-          Compress-Archive -Path "Dockside-$VERSION-windows-x86_64" -DestinationPath "Dockside-$VERSION-windows-x86_64.zip"
-
-      - name: Upload Windows package
-        uses: actions/upload-artifact@v4
-        with:
-          name: Dockside-windows-x86_64
-          path: Dockside-*.zip
-
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build-macos, build-linux, build-windows]
+    needs: [build-macos, build-linux]
     permissions:
       contents: write
     steps:
@@ -289,12 +211,6 @@ jobs:
                 echo "### Linux (x86_64)"
                 echo ""
                 echo "Download \`Dockside-vX.X.X-linux-x86_64.tar.gz\`, extract, and run \`./dockside\`."
-                echo ""
-                echo "### Windows (x86_64)"
-                echo ""
-                echo "Download \`Dockside-vX.X.X-windows-x86_64.zip\`, extract, and run \`dockside.exe\`."
-                echo ""
-                echo "**Note:** Windows requires Docker running in WSL2 with TCP port exposed. See the included README for setup instructions."
                 echo ""
                 echo "### Build from Source"
                 echo ""

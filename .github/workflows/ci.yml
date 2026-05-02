@@ -22,8 +22,6 @@ jobs:
             target: aarch64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
 
     steps:
       - uses: actions/checkout@v4
@@ -51,10 +49,7 @@ jobs:
             libasound2-dev
 
       # Zig is required by libghostty-vt-sys to build the vendored Ghostty C library.
-      # Only Linux + macOS use libghostty (Windows uses a placeholder UI for the terminal),
-      # so we skip Zig install on the Windows runner.
       - name: Install Zig
-        if: matrix.os != 'windows-latest'
         uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
