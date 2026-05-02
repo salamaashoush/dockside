@@ -3,7 +3,7 @@ use gpui_component::{
   Disableable, Icon, IconName, IndexPath, Sizable, WindowExt,
   button::{Button, ButtonVariants},
   h_flex,
-  input::{Input, InputState},
+  input::{Input, InputEvent, InputState},
   label::Label,
   scroll::ScrollableElement,
   select::{Select, SelectItem, SelectState},
@@ -163,13 +163,20 @@ pub struct SettingsView {
   editor_select: Option<Entity<SelectState<Vec<EditorOption>>>>,
   cursor_style_select: Option<Entity<SelectState<Vec<CursorStyleOption>>>>,
   docker_socket_input: Option<Entity<InputState>>,
+  default_platform_input: Option<Entity<InputState>>,
   colima_profile_input: Option<Entity<InputState>>,
   container_refresh_input: Option<Entity<InputState>>,
   stats_refresh_input: Option<Entity<InputState>>,
   log_lines_input: Option<Entity<InputState>>,
   font_size_input: Option<Entity<InputState>>,
   line_height_input: Option<Entity<InputState>>,
+  font_family_input: Option<Entity<InputState>>,
   scrollback_lines_input: Option<Entity<InputState>>,
+  kubeconfig_input: Option<Entity<InputState>>,
+  default_namespace_input: Option<Entity<InputState>>,
+  colima_cpus_input: Option<Entity<InputState>>,
+  colima_memory_input: Option<Entity<InputState>>,
+  colima_disk_input: Option<Entity<InputState>>,
   initialized: bool,
   last_theme_index: Option<usize>,
   cache_size: String,
@@ -188,13 +195,20 @@ impl SettingsView {
       editor_select: None,
       cursor_style_select: None,
       docker_socket_input: None,
+      default_platform_input: None,
       colima_profile_input: None,
       container_refresh_input: None,
       stats_refresh_input: None,
       log_lines_input: None,
       font_size_input: None,
       line_height_input: None,
+      font_family_input: None,
       scrollback_lines_input: None,
+      kubeconfig_input: None,
+      default_namespace_input: None,
+      colima_cpus_input: None,
+      colima_memory_input: None,
+      colima_disk_input: None,
       initialized: false,
       last_theme_index: None,
       cache_size,
@@ -304,6 +318,59 @@ impl SettingsView {
       Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.terminal_line_height.to_string())));
     self.scrollback_lines_input =
       Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.terminal_scrollback_lines.to_string())));
+    self.font_family_input = Some(cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("System mono")
+        .default_value(&settings.terminal_font_family)
+    }));
+    self.default_platform_input = Some(cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("linux/amd64")
+        .default_value(&settings.default_pull_platform)
+    }));
+    self.kubeconfig_input = Some(cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("~/.kube/config")
+        .default_value(&settings.kubeconfig_path)
+    }));
+    self.default_namespace_input = Some(cx.new(|cx| {
+      InputState::new(window, cx)
+        .placeholder("default")
+        .default_value(&settings.default_namespace)
+    }));
+    self.colima_cpus_input =
+      Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.colima_default_cpus.to_string())));
+    self.colima_memory_input =
+      Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.colima_default_memory_gb.to_string())));
+    self.colima_disk_input =
+      Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.colima_default_disk_gb.to_string())));
+
+    // Auto-save every text input on change. No "Apply" button anywhere.
+    let inputs = [
+      self.docker_socket_input.clone(),
+      self.colima_profile_input.clone(),
+      self.container_refresh_input.clone(),
+      self.stats_refresh_input.clone(),
+      self.log_lines_input.clone(),
+      self.font_size_input.clone(),
+      self.line_height_input.clone(),
+      self.scrollback_lines_input.clone(),
+      self.font_family_input.clone(),
+      self.default_platform_input.clone(),
+      self.kubeconfig_input.clone(),
+      self.default_namespace_input.clone(),
+      self.colima_cpus_input.clone(),
+      self.colima_memory_input.clone(),
+      self.colima_disk_input.clone(),
+    ];
+    for input in inputs.into_iter().flatten() {
+      cx.subscribe(&input, |this, _state, ev: &InputEvent, cx| {
+        if matches!(ev, InputEvent::Change) {
+          this.save_text_inputs(cx);
+        }
+      })
+      .detach();
+    }
 
     self.initialized = true;
   }
@@ -353,6 +420,45 @@ impl SettingsView {
       .and_then(|i| i.read(cx).text().to_string().parse::<usize>().ok())
       .unwrap_or(10_000);
 
+    let font_family = self
+      .font_family_input
+      .as_ref()
+      .map(|i| i.read(cx).text().to_string())
+      .unwrap_or_default();
+    let default_platform = self
+      .default_platform_input
+      .as_ref()
+      .map(|i| i.read(cx).text().to_string())
+      .unwrap_or_default();
+    let kubeconfig = self
+      .kubeconfig_input
+      .as_ref()
+      .map(|i| i.read(cx).text().to_string())
+      .unwrap_or_default();
+    let default_namespace = {
+      let v = self
+        .default_namespace_input
+        .as_ref()
+        .map(|i| i.read(cx).text().to_string())
+        .unwrap_or_default();
+      if v.is_empty() { "default".to_string() } else { v }
+    };
+    let colima_cpus = self
+      .colima_cpus_input
+      .as_ref()
+      .and_then(|i| i.read(cx).text().to_string().parse::<u32>().ok())
+      .unwrap_or(2);
+    let colima_memory = self
+      .colima_memory_input
+      .as_ref()
+      .and_then(|i| i.read(cx).text().to_string().parse::<u32>().ok())
+      .unwrap_or(4);
+    let colima_disk = self
+      .colima_disk_input
+      .as_ref()
+      .and_then(|i| i.read(cx).text().to_string().parse::<u32>().ok())
+      .unwrap_or(60);
+
     self.settings_state.update(cx, |state, cx| {
       state.settings.docker_socket = docker_socket;
       state.settings.default_colima_profile = colima_profile;
@@ -362,6 +468,13 @@ impl SettingsView {
       state.settings.terminal_font_size = font_size;
       state.settings.terminal_line_height = line_height;
       state.settings.terminal_scrollback_lines = scrollback_lines;
+      state.settings.terminal_font_family = font_family;
+      state.settings.default_pull_platform = default_platform;
+      state.settings.kubeconfig_path = kubeconfig;
+      state.settings.default_namespace = default_namespace;
+      state.settings.colima_default_cpus = colima_cpus;
+      state.settings.colima_default_memory_gb = colima_memory;
+      state.settings.colima_default_disk_gb = colima_disk;
       let _ = state.settings.save();
       cx.emit(SettingsChanged::SettingsUpdated);
     });
@@ -392,6 +505,13 @@ impl SettingsView {
     self.font_size_input = None;
     self.line_height_input = None;
     self.scrollback_lines_input = None;
+    self.font_family_input = None;
+    self.default_platform_input = None;
+    self.kubeconfig_input = None;
+    self.default_namespace_input = None;
+    self.colima_cpus_input = None;
+    self.colima_memory_input = None;
+    self.colima_disk_input = None;
     self.ensure_initialized(window, cx);
     cx.notify();
   }
@@ -511,32 +631,18 @@ impl SettingsView {
           .child(div().text_sm().text_color(fg).child(cat.label()))
       }))
       .child(div().flex_1())
-      // Footer actions pinned to the bottom of the sidebar.
       .child(div().h_px().w_full().bg(colors.border.opacity(0.5)))
       .child(
-        v_flex()
-          .pt(px(8.))
-          .gap(px(4.))
-          .child(
-            Button::new("flush-text")
-              .icon(Icon::new(IconName::Check))
-              .label("Save text fields")
-              .small()
-              .ghost()
-              .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.save_text_inputs(cx);
-              })),
-          )
-          .child(
-            Button::new("reset-defaults")
-              .icon(Icon::new(AppIcon::Restart))
-              .label("Reset defaults")
-              .small()
-              .ghost()
-              .on_click(cx.listener(|this, _ev, window, cx| {
-                this.reset_to_defaults(window, cx);
-              })),
-          ),
+        div().pt(px(8.)).child(
+          Button::new("reset-defaults")
+            .icon(Icon::new(AppIcon::Restart))
+            .label("Reset defaults")
+            .small()
+            .ghost()
+            .on_click(cx.listener(|this, _ev, window, cx| {
+              this.reset_to_defaults(window, cx);
+            })),
+        ),
       )
   }
 
@@ -548,6 +654,8 @@ impl SettingsView {
     let container_input = self.container_refresh_input.clone().unwrap();
     let stats_input = self.stats_refresh_input.clone().unwrap();
     let log_input = self.log_lines_input.clone().unwrap();
+    let confirm = self.settings_state.read(cx).settings.confirm_destructive;
+    let notify = self.settings_state.read(cx).settings.show_notifications;
     v_flex()
       .w_full()
       .child(Self::render_row(
@@ -566,6 +674,36 @@ impl SettingsView {
         "Max log lines",
         "Maximum number of log lines to display",
         Input::new(&log_input).small().w_full(),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Confirm destructive actions",
+        "Prompt before delete / prune / kill operations",
+        Switch::new("confirm-destructive").checked(confirm).on_click(cx.listener(
+          |this, checked: &bool, _window, cx| {
+            this.settings_state.update(cx, |state, cx| {
+              state.settings.confirm_destructive = *checked;
+              let _ = state.settings.save();
+              cx.emit(SettingsChanged::SettingsUpdated);
+            });
+            cx.notify();
+          },
+        )),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Show notifications",
+        "Surface OS notifications when background tasks finish",
+        Switch::new("show-notifications").checked(notify).on_click(cx.listener(
+          |this, checked: &bool, _window, cx| {
+            this.settings_state.update(cx, |state, cx| {
+              state.settings.show_notifications = *checked;
+              let _ = state.settings.save();
+              cx.emit(SettingsChanged::SettingsUpdated);
+            });
+            cx.notify();
+          },
+        )),
         cx,
       ))
       .into_any_element()
@@ -589,10 +727,17 @@ impl SettingsView {
     let line_input = self.line_height_input.clone().unwrap();
     let scroll_input = self.scrollback_lines_input.clone().unwrap();
     let cursor_select = self.cursor_style_select.clone().unwrap();
+    let font_family_input = self.font_family_input.clone().unwrap();
     let blink = self.settings_state.read(cx).settings.terminal_cursor_blink;
 
     v_flex()
       .w_full()
+      .child(Self::render_row(
+        "Font family",
+        "Override terminal font family (empty = system mono)",
+        Input::new(&font_family_input).small().w_full(),
+        cx,
+      ))
       .child(Self::render_row(
         "Font size",
         "Pixel size for terminal glyphs",
@@ -637,6 +782,7 @@ impl SettingsView {
 
   fn render_docker(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let socket_input = self.docker_socket_input.clone().unwrap();
+    let platform_input = self.default_platform_input.clone().unwrap();
     v_flex()
       .w_full()
       .child(Self::render_row(
@@ -645,11 +791,19 @@ impl SettingsView {
         Input::new(&socket_input).small().w_full(),
         cx,
       ))
+      .child(Self::render_row(
+        "Default pull platform",
+        "Default --platform argument for image pulls (empty = host arch)",
+        Input::new(&platform_input).small().w_full(),
+        cx,
+      ))
       .into_any_element()
   }
 
   fn render_kubernetes(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let enabled = self.settings_state.read(cx).settings.kubernetes_enabled;
+    let kubeconfig_input = self.kubeconfig_input.clone().unwrap();
+    let namespace_input = self.default_namespace_input.clone().unwrap();
     v_flex()
       .w_full()
       .child(Self::render_row(
@@ -665,6 +819,18 @@ impl SettingsView {
             });
             cx.notify();
           })),
+        cx,
+      ))
+      .child(Self::render_row(
+        "kubeconfig path",
+        "Override path to the kubeconfig file (empty = standard discovery)",
+        Input::new(&kubeconfig_input).small().w_full(),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Default namespace",
+        "Namespace selected on first load",
+        Input::new(&namespace_input).small().w_full(),
         cx,
       ))
       .into_any_element()
@@ -700,12 +866,34 @@ impl SettingsView {
       return col.into_any_element();
     }
 
+    let cpus_input = self.colima_cpus_input.clone().unwrap();
+    let memory_input = self.colima_memory_input.clone().unwrap();
+    let disk_input = self.colima_disk_input.clone().unwrap();
+
     col = col
       .child(Self::render_section("VM defaults", cx))
       .child(Self::render_row(
         "Default profile",
         "Profile name used when no other is specified",
         Input::new(&profile_input).small().w_full(),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Default CPUs",
+        "CPU count for new Colima profiles",
+        Input::new(&cpus_input).small().w_full(),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Default memory (GiB)",
+        "RAM allocated to new Colima profiles",
+        Input::new(&memory_input).small().w_full(),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Default disk (GiB)",
+        "Disk allocated to new Colima profiles",
+        Input::new(&disk_input).small().w_full(),
         cx,
       ))
       .child(Self::render_row(
@@ -753,12 +941,28 @@ impl SettingsView {
 
   fn render_editor(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let editor_select = self.editor_select.clone().unwrap();
+    let wait_close = self.settings_state.read(cx).settings.editor_wait_close;
     v_flex()
       .w_full()
       .child(Self::render_row(
         "External editor",
         "Editor used when opening container or volume files remotely",
         Select::new(&editor_select).w_full().small(),
+        cx,
+      ))
+      .child(Self::render_row(
+        "Wait for editor to close",
+        "Block the calling task until the editor process exits",
+        Switch::new("editor-wait").checked(wait_close).on_click(cx.listener(
+          |this, checked: &bool, _window, cx| {
+            this.settings_state.update(cx, |state, cx| {
+              state.settings.editor_wait_close = *checked;
+              let _ = state.settings.save();
+              cx.emit(SettingsChanged::SettingsUpdated);
+            });
+            cx.notify();
+          },
+        )),
         cx,
       ))
       .into_any_element()

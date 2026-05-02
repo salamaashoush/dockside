@@ -166,10 +166,13 @@ fn main() {
         Theme::global_mut(cx).apply_config(&theme_config);
       }
 
-      // Also set up file watcher for hot reload (callback updates if theme files change)
-      let theme_name_for_watch = SharedString::from(saved_theme_name.clone());
-      if let Err(err) = ThemeRegistry::watch_dir(themes_dir, cx, move |cx| {
-        if let Some(theme) = ThemeRegistry::global(cx).themes().get(&theme_name_for_watch).cloned() {
+      // Also set up file watcher for hot reload — the callback re-reads
+      // the *current* settings every time so it tracks theme changes
+      // made through the Settings view.
+      if let Err(err) = ThemeRegistry::watch_dir(themes_dir, cx, |cx| {
+        let current = AppSettings::load().theme.theme_name().to_string();
+        let key = SharedString::from(current);
+        if let Some(theme) = ThemeRegistry::global(cx).themes().get(&key).cloned() {
           Theme::global_mut(cx).apply_config(&theme);
           cx.refresh_windows();
         }

@@ -251,8 +251,54 @@ pub struct AppSettings {
   pub terminal_cursor_blink: bool,
   /// Terminal scrollback lines
   pub terminal_scrollback_lines: usize,
+  /// Optional terminal font family override (empty = system mono).
+  #[serde(default)]
+  pub terminal_font_family: String,
   /// External editor for opening files
   pub external_editor: ExternalEditor,
+  /// Wait for external editor process to close before reporting done.
+  #[serde(default)]
+  pub editor_wait_close: bool,
+  /// Prompt before destructive actions (delete container, prune, etc.).
+  #[serde(default = "default_true")]
+  pub confirm_destructive: bool,
+  /// Show desktop notifications for completed background tasks.
+  #[serde(default = "default_true")]
+  pub show_notifications: bool,
+  /// Default platform passed to `docker pull` (empty = host arch).
+  #[serde(default)]
+  pub default_pull_platform: String,
+  /// Override path for `kubeconfig` (empty = standard discovery).
+  #[serde(default)]
+  pub kubeconfig_path: String,
+  /// Default Kubernetes namespace selected on first load.
+  #[serde(default = "default_namespace")]
+  pub default_namespace: String,
+  /// Default CPU count for new Colima profiles.
+  #[serde(default = "default_colima_cpus")]
+  pub colima_default_cpus: u32,
+  /// Default memory (GiB) for new Colima profiles.
+  #[serde(default = "default_colima_memory")]
+  pub colima_default_memory_gb: u32,
+  /// Default disk size (GiB) for new Colima profiles.
+  #[serde(default = "default_colima_disk")]
+  pub colima_default_disk_gb: u32,
+}
+
+fn default_true() -> bool {
+  true
+}
+fn default_namespace() -> String {
+  "default".to_string()
+}
+fn default_colima_cpus() -> u32 {
+  2
+}
+fn default_colima_memory() -> u32 {
+  4
+}
+fn default_colima_disk() -> u32 {
+  60
 }
 
 /// Default value for `colima_enabled` based on platform
@@ -285,7 +331,17 @@ impl Default for AppSettings {
       terminal_cursor_style: TerminalCursorStyle::default(),
       terminal_cursor_blink: true,
       terminal_scrollback_lines: 10000,
+      terminal_font_family: String::new(),
       external_editor: ExternalEditor::default(),
+      editor_wait_close: false,
+      confirm_destructive: true,
+      show_notifications: true,
+      default_pull_platform: String::new(),
+      kubeconfig_path: String::new(),
+      default_namespace: "default".to_string(),
+      colima_default_cpus: 2,
+      colima_default_memory_gb: 4,
+      colima_default_disk_gb: 60,
     }
   }
 }
@@ -462,7 +518,17 @@ mod tests {
       terminal_cursor_style: TerminalCursorStyle::Underline,
       terminal_cursor_blink: false,
       terminal_scrollback_lines: 5000,
+      terminal_font_family: String::new(),
       external_editor: ExternalEditor::Cursor,
+      editor_wait_close: false,
+      confirm_destructive: true,
+      show_notifications: true,
+      default_pull_platform: String::new(),
+      kubeconfig_path: String::new(),
+      default_namespace: "default".to_string(),
+      colima_default_cpus: 2,
+      colima_default_memory_gb: 4,
+      colima_default_disk_gb: 60,
     };
 
     assert_eq!(settings.theme, ThemeName::GruvboxDark);
