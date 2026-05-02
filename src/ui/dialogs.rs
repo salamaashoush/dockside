@@ -220,6 +220,93 @@ pub fn open_lint_report_dialog(dockerfile: String, report: LintReport, window: &
   });
 }
 
+/// Open a profile prompt for `docker compose watch <project>`. On
+/// Start the prompt closes and a `compose_watch` background task
+/// kicks off, streaming output into a fresh `LogStream` rendered via
+/// `open_build_output_dialog` (the same libghostty-backed terminal
+/// viewer used for build logs).
+pub fn open_compose_watch_dialog(project: String, window: &mut Window, cx: &mut App) {
+  use gpui_component::input::{Input, InputState};
+  let profile_input = cx.new(|cx| InputState::new(window, cx).placeholder("Profile (optional)"));
+
+  window.open_dialog(cx, move |dialog, _window, cx| {
+    let _colors = cx.theme().colors;
+    let project = project.clone();
+    let profile_input_clone = profile_input.clone();
+    dialog
+      .title(format!("Watch '{project}'"))
+      .min_w(px(420.))
+      .child(
+        v_flex()
+          .gap(px(12.))
+          .p(px(8.))
+          .child(
+            div()
+              .text_sm()
+              .child("Run `docker compose watch` against the project — Ctrl-C / closing the output dialog stops the stream."),
+          )
+          .child(Input::new(&profile_input).w_full()),
+      )
+      .footer(move |_dialog_state, _, _window, _cx| {
+        let project = project.clone();
+        let profile = profile_input_clone.clone();
+        vec![
+          Button::new("start-watch")
+            .label("Start")
+            .primary()
+            .on_click(move |_ev, window, cx| {
+              let profile_text = profile.read(cx).text().to_string();
+              let profile_opt = if profile_text.trim().is_empty() {
+                None
+              } else {
+                Some(profile_text.trim().to_string())
+              };
+              let log_stream = match crate::terminal::LogStream::new(120, 40) {
+                Ok(s) => std::sync::Arc::new(s),
+                Err(_) => return,
+              };
+              services::compose_watch(project.clone(), profile_opt, &log_stream, cx);
+              window.close_dialog(cx);
+              open_compose_watch_output_dialog(project.clone(), log_stream, window, cx);
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
+fn open_compose_watch_output_dialog(
+  project: String,
+  log_stream: std::sync::Arc<crate::terminal::LogStream>,
+  window: &mut Window,
+  cx: &mut App,
+) {
+  let view = cx.new(|cx| crate::terminal::TerminalView::for_log_stream(log_stream, cx));
+  window.open_dialog(cx, move |dialog, _window, _cx| {
+    dialog
+      .title(format!("Watching {project}"))
+      .min_w(px(900.))
+      .min_h(px(520.))
+      .child(
+        v_flex()
+          .w_full()
+          .h(px(480.))
+          .child(div().size_full().child(view.clone())),
+      )
+      .footer(move |_dialog_state, _, _window, _cx| {
+        vec![
+          Button::new("close")
+            .label("Close")
+            .ghost()
+            .on_click(|_ev, window, cx| {
+              window.close_dialog(cx);
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
 /// Show streaming build output in a dialog. Holds a `TerminalView`
 /// driven by the supplied `LogStream`.
 pub fn open_build_output_dialog(

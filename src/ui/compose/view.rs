@@ -82,6 +82,7 @@ impl ComposeView {
     let project_name_for_up = project_name.clone();
     let project_name_for_down = project_name.clone();
     let project_name_for_restart = project_name.clone();
+    let project_name_for_watch = project_name.clone();
 
     let status_color = if project.is_all_running() {
       colors.success
@@ -172,6 +173,19 @@ impl ComposeView {
                                     .ghost()
                                     .on_click(cx.listener(move |_this, _ev, _window, cx| {
                                         services::compose_restart(project_name_for_restart.clone(), cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(SharedString::from(format!("watch-{}", project_name_for_watch.clone())))
+                                    .label("Watch")
+                                    .xsmall()
+                                    .ghost()
+                                    .on_click(cx.listener(move |_this, _ev, window, cx| {
+                                        crate::ui::dialogs::open_compose_watch_dialog(
+                                            project_name_for_watch.clone(),
+                                            window,
+                                            cx,
+                                        );
                                     })),
                             ),
                     ),
