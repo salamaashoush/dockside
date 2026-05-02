@@ -1,6 +1,6 @@
 use gpui::{App, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, IconName, Selectable,
+  Icon, IconName, Selectable, Sizable,
   button::{Button, ButtonVariants},
   h_flex,
   menu::{DropdownMenu, PopupMenuItem},
@@ -137,10 +137,8 @@ impl NetworkDetail {
       }
     }
 
-    // Connected containers section
-    if !network.containers.is_empty() {
-      content = content.child(Self::render_containers_section(network, cx));
-    }
+    // Connected containers section (always rendered so user can attach)
+    content = content.child(Self::render_containers_section(network, cx));
 
     // Labels section if not empty
     if !network.labels.is_empty() {
@@ -219,16 +217,62 @@ impl NetworkDetail {
 
   fn render_containers_section(network: &NetworkInfo, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
+    let network_id = network.id.clone();
+    let connected_ids: std::collections::HashSet<String> = network.containers.keys().cloned().collect();
+
+    // All containers from global state minus those already attached
+    let docker = crate::state::docker_state(cx).read(cx);
+    let mut available: Vec<(String, String)> = docker
+      .containers
+      .iter()
+      .filter(|c| !connected_ids.contains(&c.id))
+      .map(|c| (c.id.clone(), c.name.clone()))
+      .collect();
+    available.sort_by(|a, b| a.1.cmp(&b.1));
+
+    let connect_button = {
+      let net_id_for_menu = network_id.clone();
+      Button::new("network-connect-menu")
+        .label("Connect Container")
+        .icon(IconName::Plus)
+        .ghost()
+        .xsmall()
+        .dropdown_menu(move |menu, _window, _cx| {
+          let mut menu = menu;
+          if available.is_empty() {
+            menu = menu.item(PopupMenuItem::new("(no containers available)"));
+          } else {
+            for (cid, cname) in &available {
+              let net = net_id_for_menu.clone();
+              let id = cid.clone();
+              let label = cname.clone();
+              menu = menu.item(PopupMenuItem::new(label).icon(Icon::new(AppIcon::Container)).on_click(
+                move |_, _, cx| {
+                  crate::services::connect_container_to_network(net.clone(), id.clone(), cx);
+                },
+              ));
+            }
+          }
+          menu
+        })
+    };
 
     v_flex()
       .gap(px(1.))
       .child(
-        div()
+        h_flex()
+          .w_full()
           .py(px(8.))
-          .text_sm()
-          .font_weight(gpui::FontWeight::MEDIUM)
-          .text_color(colors.foreground)
-          .child("Connected Containers"),
+          .items_center()
+          .justify_between()
+          .child(
+            div()
+              .text_sm()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(colors.foreground)
+              .child("Connected Containers"),
+          )
+          .child(connect_button),
       )
       .child(
         v_flex()
@@ -257,17 +301,30 @@ impl NetworkDetail {
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(colors.muted_foreground)
                                     .child("IPv4 Address"),
-                            ),
+                            )
+                            .child(div().w(px(80.))),
                     )
+                    .when(network.containers.is_empty(), |el| el.child(
+                      div()
+                        .px(px(16.))
+                        .py(px(12.))
+                        .text_sm()
+                        .text_color(colors.muted_foreground)
+                        .child("No containers attached"),
+                    ))
                     // Container rows
                     .children(network.containers.iter().enumerate().map(|(i, (id, container))| {
                         let name = container.name.clone().unwrap_or_else(|| id[..12.min(id.len())].to_string());
                         let ip = container.ipv4_address.clone().unwrap_or_else(|| "-".to_string());
+                        let cid = id.clone();
+                        let net = network_id.clone();
+                        let row_btn_id = ("net-disconnect", i);
 
                         let mut row = h_flex()
                             .w_full()
                             .px(px(16.))
                             .py(px(10.))
+                            .items_center()
                             .child(
                                 h_flex()
                                     .flex_1()
@@ -289,6 +346,17 @@ impl NetworkDetail {
                                     .text_sm()
                                     .text_color(colors.secondary_foreground)
                                     .child(ip),
+                            )
+                            .child(
+                              div().w(px(80.)).flex().justify_end().child(
+                                Button::new(row_btn_id)
+                                  .label("Disconnect")
+                                  .ghost()
+                                  .xsmall()
+                                  .on_click(move |_, _, cx| {
+                                    crate::services::disconnect_container_from_network(net.clone(), cid.clone(), false, cx);
+                                  }),
+                              ),
                             );
 
                         if i > 0 {

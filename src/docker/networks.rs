@@ -130,6 +130,31 @@ impl DockerClient {
     Ok(())
   }
 
+  pub async fn connect_container_to_network(&self, network_id: &str, container_id: &str) -> Result<()> {
+    let docker = self.client()?;
+    let req = bollard::models::NetworkConnectRequest {
+      container: Some(container_id.to_string()),
+      endpoint_config: None,
+    };
+    docker.connect_network(network_id, req).await?;
+    Ok(())
+  }
+
+  pub async fn disconnect_container_from_network(
+    &self,
+    network_id: &str,
+    container_id: &str,
+    force: bool,
+  ) -> Result<()> {
+    let docker = self.client()?;
+    let req = bollard::models::NetworkDisconnectRequest {
+      container: Some(container_id.to_string()),
+      force: Some(force),
+    };
+    docker.disconnect_network(network_id, req).await?;
+    Ok(())
+  }
+
   pub async fn create_network(&self, name: &str, enable_ipv6: bool, subnet: Option<&str>) -> Result<NetworkInfo> {
     let docker = self.client()?;
 

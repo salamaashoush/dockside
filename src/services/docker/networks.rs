@@ -75,6 +75,92 @@ pub fn create_network(name: String, enable_ipv6: bool, subnet: Option<String>, c
   .detach();
 }
 
+pub fn connect_container_to_network(network_id: String, container_id: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Connecting container to network {network_id}..."));
+  let disp = dispatcher(cx);
+  let client = docker_client();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    docker.connect_container_to_network(&network_id, &container_id).await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(())) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: "Container connected".to_string(),
+          });
+        });
+        refresh_networks(cx);
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+pub fn disconnect_container_from_network(network_id: String, container_id: String, force: bool, cx: &mut App) {
+  let task_id = start_task(cx, format!("Disconnecting container from network {network_id}..."));
+  let disp = dispatcher(cx);
+  let client = docker_client();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    docker
+      .disconnect_container_from_network(&network_id, &container_id, force)
+      .await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(())) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: "Container disconnected".to_string(),
+          });
+        });
+        refresh_networks(cx);
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn delete_network(id: String, cx: &mut App) {
   let task_id = start_task(cx, "Deleting network...".to_string());
   let disp = dispatcher(cx);
