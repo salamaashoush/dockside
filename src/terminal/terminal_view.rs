@@ -87,8 +87,9 @@ fn viewport_to_abs(col: u16, viewport_row: u16, view_scroll: i32) -> AbsCell {
 
 /// A functional terminal view with full keyboard and color support
 pub struct TerminalView {
-  terminal: Option<PtyTerminal>,
-  session_type: TerminalSessionType,
+  terminal: Option<Arc<dyn super::TerminalSource>>,
+  /// Session type for PTY-backed views; `None` for log-stream views.
+  session_type: Option<TerminalSessionType>,
   focus_handle: FocusHandle,
   font_size: f32,
   line_height: f32,
@@ -135,7 +136,7 @@ impl TerminalView {
 
     let mut view = Self {
       terminal: None,
-      session_type,
+      session_type: Some(session_type),
       focus_handle,
       font_size,
       line_height,
@@ -165,11 +166,15 @@ impl TerminalView {
   }
 
   pub fn connect(&mut self, cx: &mut Context<'_, Self>) {
-    match PtyTerminal::new(&self.session_type) {
+    let Some(session_type) = self.session_type.clone() else {
+      // Log-stream views don't reconnect — the source is already set.
+      return;
+    };
+    match PtyTerminal::new(&session_type) {
       Ok(terminal) => {
         self.is_connected = true;
         self.error = None;
-        self.terminal = Some(terminal);
+        self.terminal = Some(Arc::new(terminal));
       }
       Err(e) => {
         self.error = Some(e.to_string());
@@ -177,6 +182,43 @@ impl TerminalView {
       }
     }
     cx.notify();
+  }
+
+  /// Build a `TerminalView` that renders an external libghostty-backed
+  /// `LogStream`. No PTY, no session type, no input — just the same
+  /// grid + selection / scroll / drag-extend behaviour the interactive
+  /// terminal has.
+  pub fn for_log_stream(stream: Arc<crate::terminal::LogStream>, cx: &mut Context<'_, Self>) -> Self {
+    let focus_handle = cx.focus_handle();
+    let settings = &settings_state(cx).read(cx).settings;
+    let font_size = settings.terminal_font_size;
+    let line_height = font_size * settings.terminal_line_height;
+    let cursor_style = settings.terminal_cursor_style;
+    let char_width = font_size * 0.6;
+
+    let view = Self {
+      terminal: Some(stream),
+      session_type: None,
+      focus_handle,
+      font_size,
+      line_height,
+      char_width,
+      cursor_style,
+      is_connected: true,
+      error: None,
+      scroll_offset: 0,
+      last_size: (80, 24),
+      cursor_visible_phase: true,
+      selection: None,
+      grid_metrics: Arc::new(Mutex::new(None)),
+      view_scroll: 0,
+      last_drag_pos: None,
+      drag_scroll_running: false,
+    };
+
+    Self::start_polling(cx);
+    Self::start_cursor_blink(cx);
+    view
   }
 
   /// Toggle `cursor_visible_phase` every ~500 ms. The render path inspects
@@ -707,7 +749,7 @@ impl Render for TerminalView {
     });
 
     // Custom GPUI element handles the actual cell grid.
-    let on_resize = self.terminal.as_ref().map(PtyTerminal::resize_callback);
+    let on_resize = self.terminal.as_ref().map(|t| t.resize_callback());
     let selection_color = colors.selection;
     let selection_color = if selection_color.a >= 0.95 {
       // If theme reports an opaque selection swatch, drop alpha so glyphs

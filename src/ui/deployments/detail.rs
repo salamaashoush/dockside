@@ -590,7 +590,7 @@ impl Render for DeploymentDetail {
     {
       let yaml_clone = self.yaml_content.clone();
       editor.update(cx, |state, cx| {
-        state.replace(&yaml_clone, window, cx);
+        state.set_value(yaml_clone.clone(), window, cx);
       });
       self.last_synced_yaml = self.yaml_content.clone();
     }

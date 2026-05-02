@@ -658,7 +658,7 @@ impl Render for MachinesView {
       if !logs.is_empty() && !self.machine_tab_state.logs_loading && self.last_synced_logs != *logs {
         let logs_clone = logs.clone();
         editor.update(cx, |state, cx| {
-          state.replace(&logs_clone, window, cx);
+          state.set_value(logs_clone.clone(), window, cx);
         });
         self.last_synced_logs = logs.clone();
       }
@@ -673,7 +673,7 @@ impl Render for MachinesView {
       {
         let content_clone = content.clone();
         editor.update(cx, |state, cx| {
-          state.replace(&content_clone, window, cx);
+          state.set_value(content_clone.clone(), window, cx);
         });
         self.last_synced_file_content = content.clone();
       }

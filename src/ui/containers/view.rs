@@ -1,4 +1,6 @@
-use gpui::{App, Context, Entity, Render, Styled, Task, Timer, Window, div, prelude::*, px};
+use gpui::{
+  App, Context, Entity, Render, Styled, Task, Timer, UniformListScrollHandle, Window, div, prelude::*, px,
+};
 use gpui_component::{
   WindowExt,
   button::{Button, ButtonVariants},
@@ -10,7 +12,7 @@ use std::time::Duration;
 use crate::docker::ContainerInfo;
 use crate::services;
 use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
-use crate::terminal::{TerminalSessionType, TerminalView};
+use crate::terminal::{LogStream, TerminalSessionType, TerminalView};
 use crate::ui::components::{ProcessView, detect_language_from_path};
 
 use super::create_dialog::CreateContainerDialog;
@@ -39,6 +41,22 @@ pub struct ContainersView {
   /// Stats poll task — runs while Stats tab is active for the current
   /// container, dropped when leaving the tab or switching containers.
   stats_task: Option<Task<()>>,
+  /// Scroll handle for the (virtualized) logs uniform list.
+  logs_scroll_handle: UniformListScrollHandle,
+  /// Sticky-bottom flag: when true (default), incoming chunks scroll
+  /// the list to the bottom. User scrolling up flips this off; the
+  /// "Following" toolbar button (or a fresh container select) flips it
+  /// back on.
+  logs_auto_follow: bool,
+  /// Cached line count from the previous frame so we know when the
+  /// buffer grew and need to re-scroll.
+  logs_last_line_count: usize,
+  /// libghostty-backed terminal that the streaming bytes are fed into.
+  logs_stream: Option<std::sync::Arc<LogStream>>,
+  /// `TerminalView` driving `logs_stream` — rendered on the Logs tab so
+  /// the streaming logs share selection / scroll / drag-extend with
+  /// the interactive terminal.
+  logs_terminal_view: Option<Entity<TerminalView>>,
 }
 
 impl ContainersView {
@@ -168,6 +186,11 @@ impl ContainersView {
       last_synced_file_content: String::new(),
       logs_task: None,
       stats_task: None,
+      logs_scroll_handle: UniformListScrollHandle::default(),
+      logs_auto_follow: true,
+      logs_last_line_count: 0,
+      logs_stream: None,
+      logs_terminal_view: None,
     }
   }
 
@@ -777,6 +800,15 @@ impl ContainersView {
     self.container_tab_state.logs.clear();
     self.last_synced_logs.clear();
     self.container_tab_state.logs_loading = true;
+    // Fresh libghostty terminal + `TerminalView` per restart so cleared
+    // / re-tailed logs don't pile on top of the previous container's
+    // output, and selection state from the prior view is dropped.
+    self.logs_stream = LogStream::new(120, 40).ok().map(std::sync::Arc::new);
+    if let Some(stream) = self.logs_stream.clone() {
+      self.logs_terminal_view = Some(cx.new(|cx| TerminalView::for_log_stream(stream, cx)));
+    } else {
+      self.logs_terminal_view = None;
+    }
 
     let id = container_id.to_string();
     let max_log_lines = settings_state(cx).read(cx).settings.max_log_lines;
@@ -786,11 +818,16 @@ impl ContainersView {
     let client = services::docker_client();
 
     if follow {
-      // Live tail: stream chunks via mpsc and append on the UI thread.
+      // Live tail: stream raw bytes from bollard into the libghostty
+      // log terminal via mpsc; the terminal actor handles vt_write.
+      tracing::info!(target: "dockside.logs", container = %id, "starting log stream");
+      let stream_target = self.logs_stream.clone();
       let task = cx.spawn(async move |this, cx| {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
         let id_for_stream = id.clone();
+        let id_for_log = id.clone();
         let stream_handle = tokio_handle.spawn(async move {
+          tracing::info!(target: "dockside.logs", container = %id_for_log, "stream task entered");
           let guard = client.read().await;
           match guard.as_ref() {
             Some(c) => {
@@ -798,19 +835,29 @@ impl ContainersView {
                 .stream_container_logs(&id_for_stream, Some(max_log_lines), timestamps, tx.clone())
                 .await
               {
-                let _ = tx.send(format!("\n[log stream ended: {e}]\n")).await;
+                tracing::warn!(target: "dockside.logs", err = %e, "stream ended with error");
+                let _ = tx
+                  .send(format!("\r\n[log stream ended: {e}]\r\n").into_bytes())
+                  .await;
+              } else {
+                tracing::info!(target: "dockside.logs", container = %id_for_log, "stream ended cleanly");
               }
             }
             None => {
-              let _ = tx.send("Docker client not connected\n".to_string()).await;
+              let _ = tx.send(b"Docker client not connected\r\n".to_vec()).await;
             }
           }
         });
 
+        let mut total = 0usize;
         while let Some(chunk) = rx.recv().await {
+          total += chunk.len();
+          // Push into libghostty.
+          if let Some(s) = stream_target.as_ref() {
+            s.feed_bytes(chunk);
+          }
           let still_alive = this
             .update(cx, |this, cx| {
-              this.container_tab_state.logs.push_str(&chunk);
               if this.container_tab_state.logs_loading {
                 this.container_tab_state.logs_loading = false;
               }
@@ -821,13 +868,15 @@ impl ContainersView {
             break;
           }
         }
-        // Stop the bollard stream when the receiver loop ends (caller dropped
-        // task, container changed, etc).
+        tracing::info!(target: "dockside.logs", total_bytes = total, "ui receiver loop exited");
         stream_handle.abort();
       });
       self.logs_task = Some(task);
     } else {
-      // One-shot snapshot.
+      // One-shot snapshot — fetch the tail and feed it into the same
+      // libghostty terminal as the streaming path so the renderer is
+      // consistent across modes.
+      let stream_target = self.logs_stream.clone();
       cx.spawn(async move |this, cx| {
         let logs = cx
           .background_executor()
@@ -846,7 +895,21 @@ impl ContainersView {
           .await;
 
         let _ = this.update(cx, |this, cx| {
-          this.container_tab_state.logs = logs;
+          if let Some(s) = stream_target.as_ref() {
+            // `container_logs` returns a single `String` already
+            // de-multiplexed by bollard; convert bare \n to CRLF so
+            // libghostty advances rows correctly.
+            let mut bytes = Vec::with_capacity(logs.len() + 16);
+            let mut prev = 0u8;
+            for &b in logs.as_bytes() {
+              if b == b'\n' && prev != b'\r' {
+                bytes.push(b'\r');
+              }
+              bytes.push(b);
+              prev = b;
+            }
+            s.feed_bytes(bytes);
+          }
           this.container_tab_state.logs_loading = false;
           cx.notify();
         });
@@ -952,25 +1015,16 @@ impl ContainersView {
 impl Render for ContainersView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     // Sync editor content with loaded data (only when source data changes, not editor content)
-    if let Some(ref editor) = self.logs_editor {
-      let logs = &self.container_tab_state.logs;
-      // Sync whenever the source string changes — including when it
-      // becomes empty (clear button) or grows mid-stream (follow mode).
-      if self.last_synced_logs != *logs {
-        let logs_clone = logs.clone();
-        editor.update(cx, |state, cx| {
-          state.replace(&logs_clone, window, cx);
-        });
-        self.last_synced_logs = logs.clone();
-      }
-    }
+    // libghostty handles scroll and rendering internally; nothing to
+    // sync from `last_synced_logs` anymore. Keep the field around as a
+    // marker for "we have data" until other call sites stop checking it.
 
     if let Some(ref editor) = self.inspect_editor {
       let inspect = &self.container_tab_state.inspect;
       if !inspect.is_empty() && !self.container_tab_state.inspect_loading && self.last_synced_inspect != *inspect {
         let inspect_clone = inspect.clone();
         editor.update(cx, |state, cx| {
-          state.replace(&inspect_clone, window, cx);
+          state.set_value(inspect_clone, window, cx);
         });
         self.last_synced_inspect = inspect.clone();
       }
@@ -985,7 +1039,7 @@ impl Render for ContainersView {
       {
         let content_clone = content.clone();
         editor.update(cx, |state, cx| {
-          state.replace(&content_clone, window, cx);
+          state.set_value(content_clone, window, cx);
         });
         self.last_synced_file_content = content.clone();
       }
@@ -1010,6 +1064,7 @@ impl Render for ContainersView {
       .terminal_view(terminal_view)
       .process_view(process_view)
       .logs_editor(logs_editor)
+      .logs_terminal(self.logs_terminal_view.clone())
       .inspect_editor(inspect_editor)
       .file_content_editor(file_content_editor)
       .on_tab_change(cx.listener(|this, tab: &ContainerDetailTab, window, cx| {

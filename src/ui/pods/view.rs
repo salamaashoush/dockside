@@ -337,7 +337,7 @@ impl Render for PodsView {
       if !logs.is_empty() && !self.pod_tab_state.logs_loading && self.last_synced_logs != *logs {
         let logs_clone = logs.clone();
         editor.update(cx, |state, cx| {
-          state.replace(&logs_clone, window, cx);
+          state.set_value(logs_clone.clone(), window, cx);
         });
         self.last_synced_logs = logs.clone();
       }
@@ -348,7 +348,7 @@ impl Render for PodsView {
       if !describe.is_empty() && !self.pod_tab_state.describe_loading && self.last_synced_describe != *describe {
         let describe_clone = describe.clone();
         editor.update(cx, |state, cx| {
-          state.replace(&describe_clone, window, cx);
+          state.set_value(describe_clone.clone(), window, cx);
         });
         self.last_synced_describe = describe.clone();
       }
@@ -359,7 +359,7 @@ impl Render for PodsView {
       if !yaml.is_empty() && !self.pod_tab_state.yaml_loading && self.last_synced_yaml != *yaml {
         let yaml_clone = yaml.clone();
         editor.update(cx, |state, cx| {
-          state.replace(&yaml_clone, window, cx);
+          state.set_value(yaml_clone.clone(), window, cx);
         });
         self.last_synced_yaml = yaml.clone();
       }

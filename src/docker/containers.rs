@@ -14,6 +14,22 @@ use std::collections::{HashMap, HashSet};
 
 use super::DockerClient;
 
+/// Translate any bare `\n` in the input into `\r\n` so a terminal
+/// emulator (libghostty) advances both column and row. Bollard log
+/// records typically arrive with `\n` only.
+fn ensure_crlf(input: &[u8]) -> Vec<u8> {
+  let mut out = Vec::with_capacity(input.len() + 16);
+  let mut prev: u8 = 0;
+  for &b in input {
+    if b == b'\n' && prev != b'\r' {
+      out.push(b'\r');
+    }
+    out.push(b);
+    prev = b;
+  }
+  out
+}
+
 /// Build Docker's exposed ports map from a set of port keys.
 /// Docker API requires empty objects as values for exposed ports.
 /// This function encapsulates the creation pattern required by the bollard library.
@@ -568,16 +584,17 @@ impl DockerClient {
     Ok(logs)
   }
 
-  /// Stream container logs into a channel until the receiver is dropped or
-  /// the container exits. The returned future resolves when streaming
-  /// stops; cancel by dropping the receiver (the next send fails and we
-  /// return early). `tail` seeds the initial backfill before live tailing.
+  /// Stream container logs as raw bytes until the receiver is dropped or
+  /// the container exits. Bytes are post-de-mux (bollard strips Docker's
+  /// 8-byte stream-frame header), so they are directly feedable into a
+  /// terminal emulator. Newlines are translated to CRLF so libghostty
+  /// renders one line per record.
   pub async fn stream_container_logs(
     &self,
     id: &str,
     tail: Option<usize>,
     timestamps: bool,
-    tx: tokio::sync::mpsc::Sender<String>,
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
   ) -> Result<()> {
     let docker = self.client()?;
 
@@ -591,20 +608,26 @@ impl DockerClient {
     };
 
     let mut stream = docker.logs(id, Some(options));
+    let mut sent = 0usize;
     while let Some(result) = stream.next().await {
       match result {
         Ok(output) => {
-          let s = output.to_string();
-          if tx.send(s).await.is_err() {
-            // Receiver dropped — caller no longer cares.
+          let bytes = output.into_bytes();
+          let raw: Vec<u8> = ensure_crlf(&bytes);
+          tracing::trace!(target: "dockside.logs", bytes = raw.len(), "stream chunk");
+          if tx.send(raw).await.is_err() {
+            tracing::info!(target: "dockside.logs", chunks = sent, "send failed, receiver dropped");
             return Ok(());
           }
+          sent += 1;
         }
         Err(e) => {
+          tracing::warn!(target: "dockside.logs", err = %e, "bollard error");
           return Err(anyhow::anyhow!("Log stream failed: {e}"));
         }
       }
     }
+    tracing::info!(target: "dockside.logs", chunks = sent, "bollard stream ended");
     Ok(())
   }
 

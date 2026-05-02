@@ -561,7 +561,7 @@ fn terminal_actor_loop(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn snapshot_into(
+pub(crate) fn snapshot_into(
   terminal: &Terminal<'static, 'static>,
   render_state: &mut RenderState<'static>,
   row_iter: &mut RowIterator<'static>,

@@ -122,6 +122,7 @@ pub struct ContainerDetail {
   on_toggle_logs_follow: Option<RefreshCallback>,
   on_toggle_logs_timestamps: Option<RefreshCallback>,
   on_clear_logs: Option<RefreshCallback>,
+  logs_terminal: Option<Entity<TerminalView>>,
   on_navigate_path: Option<FileNavigateCallback>,
   on_file_select: Option<FileSelectCallback>,
   on_close_file_viewer: Option<CloseViewerCallback>,
@@ -149,6 +150,7 @@ impl ContainerDetail {
       on_toggle_logs_follow: None,
       on_toggle_logs_timestamps: None,
       on_clear_logs: None,
+      logs_terminal: None,
       on_navigate_path: None,
       on_file_select: None,
       on_close_file_viewer: None,
@@ -234,6 +236,11 @@ impl ContainerDetail {
     F: Fn(&ContainerDetailTab, &mut Window, &mut App) + 'static,
   {
     self.on_tab_change = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn logs_terminal(mut self, view: Option<Entity<TerminalView>>) -> Self {
+    self.logs_terminal = view;
     self
   }
 
@@ -732,27 +739,15 @@ impl ContainerDetail {
             .child("Loading logs..."),
         )
         .into_any_element()
-    } else if let Some(ref editor) = self.logs_editor {
+    } else if let Some(view) = self.logs_terminal.clone() {
       div()
+        .id("container-logs-terminal")
         .size_full()
-        .child(Input::new(editor).size_full().appearance(false).disabled(true))
+        .min_h_0()
+        .child(view)
         .into_any_element()
     } else {
-      let logs_content = state.map_or_else(|| "No logs available".to_string(), |s| s.logs.clone());
-      div()
-        .size_full()
-        .child(
-          div()
-            .size_full()
-            .overflow_y_scrollbar()
-            .bg(colors.sidebar)
-            .p(px(12.))
-            .font_family("monospace")
-            .text_xs()
-            .text_color(colors.foreground)
-            .child(logs_content),
-        )
-        .into_any_element()
+      div().size_full().into_any_element()
     };
 
     v_flex()

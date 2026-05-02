@@ -311,7 +311,7 @@ impl Render for VolumesView {
       {
         let content_clone = content.clone();
         editor.update(cx, |state, cx| {
-          state.replace(&content_clone, window, cx);
+          state.set_value(content_clone.clone(), window, cx);
         });
         self.last_synced_file_content = content.clone();
       }
