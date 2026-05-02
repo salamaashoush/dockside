@@ -254,6 +254,24 @@ impl DashboardView {
       ("Off".to_string(), "Kubernetes disabled".to_string())
     };
 
+    let dns_settings = self.settings_state.read(cx).settings.clone();
+    let dns_running = services::dns::manager(cx).is_running();
+    let proxy_running = services::proxy::manager(cx).is_running();
+    let dns_active = dns_running && proxy_running;
+    let dns_route_count = services::dns::manager(cx)
+      .route_map()
+      .map_or(0, |m| m.read().distinct_container_count());
+    let (dns_value, dns_sub) = if dns_active {
+      (
+        format!("*.{}", dns_settings.dns_suffix.trim_matches('.')),
+        format!("{dns_route_count} routed"),
+      )
+    } else if dns_settings.dns_enabled {
+      ("Starting".to_string(), "resolver coming up".to_string())
+    } else {
+      ("Off".to_string(), "Local DNS disabled".to_string())
+    };
+
     h_flex()
       .px(px(16.))
       .gap(px(12.))
@@ -289,6 +307,18 @@ impl DashboardView {
         machine_value,
         machine_sub,
         Icon::new(AppIcon::Machine),
+        cx,
+      ))
+      .child(stat_tile(
+        if dns_active {
+          colors.success
+        } else {
+          colors.muted_foreground
+        },
+        "Local DNS",
+        dns_value,
+        dns_sub,
+        Icon::new(AppIcon::Network),
         cx,
       ))
   }
@@ -749,7 +779,7 @@ impl Render for DashboardView {
       .child(self.render_system(cx))
       .child(Self::section_header("Resources", cx))
       .child(self.render_counts(cx))
-      .child(Self::section_header("Local DNS", cx))
+      .child(Self::section_header("Local DNS routes", cx))
       .child(self.render_dns_card(cx))
       .child(Self::section_header("Favorites", cx))
       .child(self.render_favorites(cx))

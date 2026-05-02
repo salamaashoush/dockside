@@ -261,27 +261,75 @@ fn uninstall_resolver_linux(suffix: &str) -> anyhow::Result<()> {
 
 #[cfg(target_os = "linux")]
 fn install_ca_linux(pem_path: &std::path::Path) -> anyhow::Result<()> {
-  let dest_dir = std::path::Path::new("/usr/local/share/ca-certificates");
-  std::fs::create_dir_all(dest_dir)?;
-  let dest = dest_dir.join("dockside.crt");
-  std::fs::copy(pem_path, &dest)?;
-  let status = std::process::Command::new("update-ca-certificates").status()?;
-  if !status.success() {
-    anyhow::bail!("`update-ca-certificates` exited with {status}");
+  use std::path::Path;
+  // Detect distro CA tooling. Arch / Fedora / RHEL / openSUSE ship
+  // `update-ca-trust` reading `/etc/ca-certificates/trust-source/anchors/`.
+  // Debian / Ubuntu ship `update-ca-certificates` reading
+  // `/usr/local/share/ca-certificates/`.
+  if Path::new("/etc/ca-certificates/trust-source/anchors").is_dir() || which_exists("update-ca-trust") {
+    let dest_dir = Path::new("/etc/ca-certificates/trust-source/anchors");
+    std::fs::create_dir_all(dest_dir)?;
+    let dest = dest_dir.join("dockside.crt");
+    std::fs::copy(pem_path, &dest)?;
+    let status = std::process::Command::new("update-ca-trust").arg("extract").status()?;
+    if !status.success() {
+      anyhow::bail!("`update-ca-trust extract` exited with {status}");
+    }
+    println!("installed CA at {} (Arch/Fedora/RHEL family)", dest.display());
+    return Ok(());
   }
-  println!("installed CA at {}", dest.display());
-  Ok(())
+
+  if which_exists("update-ca-certificates") {
+    let dest_dir = Path::new("/usr/local/share/ca-certificates");
+    std::fs::create_dir_all(dest_dir)?;
+    let dest = dest_dir.join("dockside.crt");
+    std::fs::copy(pem_path, &dest)?;
+    let status = std::process::Command::new("update-ca-certificates").status()?;
+    if !status.success() {
+      anyhow::bail!("`update-ca-certificates` exited with {status}");
+    }
+    println!("installed CA at {} (Debian/Ubuntu family)", dest.display());
+    return Ok(());
+  }
+
+  anyhow::bail!(
+    "neither `update-ca-trust` nor `update-ca-certificates` is on PATH — \
+     install ca-certificates package or copy {} into your system trust store manually",
+    pem_path.display()
+  );
 }
 
 #[cfg(target_os = "linux")]
 fn uninstall_ca_linux() -> anyhow::Result<()> {
-  let path = std::path::Path::new("/usr/local/share/ca-certificates/dockside.crt");
-  if path.exists() {
-    std::fs::remove_file(path)?;
-    let _ = std::process::Command::new("update-ca-certificates").status();
-    println!("removed {}", path.display());
+  use std::path::Path;
+  let mut removed = false;
+  for candidate in [
+    Path::new("/etc/ca-certificates/trust-source/anchors/dockside.crt"),
+    Path::new("/usr/local/share/ca-certificates/dockside.crt"),
+  ] {
+    if candidate.exists() {
+      std::fs::remove_file(candidate)?;
+      println!("removed {}", candidate.display());
+      removed = true;
+    }
+  }
+  if removed {
+    if which_exists("update-ca-trust") {
+      let _ = std::process::Command::new("update-ca-trust").arg("extract").status();
+    }
+    if which_exists("update-ca-certificates") {
+      let _ = std::process::Command::new("update-ca-certificates").status();
+    }
   }
   Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn which_exists(name: &str) -> bool {
+  let Ok(path) = std::env::var("PATH") else {
+    return false;
+  };
+  path.split(':').any(|p| std::path::Path::new(p).join(name).is_file())
 }
 
 #[cfg(unix)]
