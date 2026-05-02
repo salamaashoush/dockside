@@ -89,6 +89,7 @@ pub enum VmType {
   #[default]
   Qemu,
   Vz,
+  Krunkit,
 }
 
 impl std::fmt::Display for VmType {
@@ -96,6 +97,7 @@ impl std::fmt::Display for VmType {
     match self {
       VmType::Vz => write!(f, "vz"),
       VmType::Qemu => write!(f, "qemu"),
+      VmType::Krunkit => write!(f, "krunkit"),
     }
   }
 }
@@ -105,6 +107,7 @@ impl VmType {
     match self {
       VmType::Vz => "Apple Virtualization (VZ)",
       VmType::Qemu => "QEMU",
+      VmType::Krunkit => "Krunkit (GPU/AI)",
     }
   }
 }
@@ -799,12 +802,14 @@ mod tests {
   fn test_vm_type_display_name() {
     assert_eq!(VmType::Vz.display_name(), "Apple Virtualization (VZ)");
     assert_eq!(VmType::Qemu.display_name(), "QEMU");
+    assert_eq!(VmType::Krunkit.display_name(), "Krunkit (GPU/AI)");
   }
 
   #[test]
   fn test_vm_type_display() {
     assert_eq!(format!("{}", VmType::Vz), "vz");
     assert_eq!(format!("{}", VmType::Qemu), "qemu");
+    assert_eq!(format!("{}", VmType::Krunkit), "krunkit");
   }
 
   #[test]

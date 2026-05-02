@@ -159,6 +159,7 @@ impl ColimaClient {
     let vm_type = match value["driver"].as_str() {
       Some(d) if d.contains("QEMU") => Some(VmType::Qemu),
       Some(d) if d.contains("Virtualization") => Some(VmType::Vz),
+      Some(d) if d.to_lowercase().contains("krunkit") || d.to_lowercase().contains("libkrun") => Some(VmType::Krunkit),
       _ => None,
     };
 

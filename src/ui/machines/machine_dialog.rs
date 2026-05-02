@@ -747,12 +747,16 @@ impl MachineDialog {
     // Constraint flags
     let is_vz = vm_type == VmType::Vz;
     let is_qemu = vm_type == VmType::Qemu;
+    let is_krunkit = vm_type == VmType::Krunkit;
+    // Krunkit requires Apple Silicon macOS (libkrun-backed). Hide elsewhere.
+    let krunkit_supported = cfg!(target_os = "macos") && cfg!(target_arch = "aarch64");
+    let krunkit_installed = krunkit_supported && crate::utils::find_binary("krunkit").is_some();
 
     v_flex()
       .w_full()
       .child(Self::render_form_row_with_desc(
         "VM Type",
-        "Apple VZ (macOS 13+) or QEMU",
+        "Apple VZ (macOS 13+), QEMU, or Krunkit (GPU/AI, requires krunkit binary)",
         h_flex()
           .gap(px(4.))
           .child(
@@ -785,7 +789,23 @@ impl MachineDialog {
                 this.nested_virtualization = false;
                 cx.notify();
               })),
-          ),
+          )
+          .when(krunkit_supported, |row| {
+            row.child(
+              Button::new("vm-krunkit")
+                .label(if krunkit_installed { "Krunkit" } else { "Krunkit (not installed)" })
+                .small()
+                .when(is_krunkit, ButtonVariants::primary)
+                .when(!is_krunkit, ButtonVariants::ghost)
+                .on_click(cx.listener(|this, _ev, _window, cx| {
+                  this.vm_type = VmType::Krunkit;
+                  this.mount_type = MountType::Virtiofs;
+                  this.rosetta = false;
+                  this.nested_virtualization = false;
+                  cx.notify();
+                })),
+            )
+          }),
         colors,
       ))
       .child(Self::render_form_row_with_desc(
