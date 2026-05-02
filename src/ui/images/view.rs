@@ -48,6 +48,9 @@ impl ImagesView {
         ImageListEvent::BuildImage => {
           crate::ui::dialogs::open_build_image_dialog(window, cx);
         }
+        ImageListEvent::BrowseRegistry => {
+          crate::ui::dialogs::open_registry_browser_dialog(window, cx);
+        }
       },
     )
     .detach();

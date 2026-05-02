@@ -21,6 +21,7 @@ pub enum ImageListEvent {
   Selected(Box<ImageInfo>),
   PullImage,
   BuildImage,
+  BrowseRegistry,
 }
 
 /// Delegate for the image list
@@ -534,6 +535,15 @@ impl Render for ImageList {
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {
                 this.toggle_search(window, cx);
+              })),
+          )
+          .child(
+            Button::new("browse")
+              .label("Browse")
+              .ghost()
+              .compact()
+              .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.emit(ImageListEvent::BrowseRegistry);
               })),
           )
           .child(

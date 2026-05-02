@@ -19,6 +19,7 @@ use crate::ui::deployments::create_dialog::CreateDeploymentDialog;
 use crate::ui::images::build_dialog::BuildImageDialog;
 use crate::ui::images::pull_dialog::PullImageDialog;
 use crate::ui::images::push_dialog::PushImageDialog;
+use crate::ui::images::registry_dialog::RegistryBrowserDialog;
 use crate::ui::images::tag_dialog::TagImageDialog;
 use crate::ui::machines::MachineDialog;
 use crate::ui::networks::create_dialog::CreateNetworkDialog;
@@ -52,6 +53,30 @@ pub fn open_pull_image_dialog(window: &mut Window, cx: &mut App) {
                   window.close_dialog(cx);
                 }
               }
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
+/// Opens the Registry Browser dialog (Docker Hub search via the
+/// daemon's `/images/search`) with a Close button.
+pub fn open_registry_browser_dialog(window: &mut Window, cx: &mut App) {
+  let dialog_entity = cx.new(RegistryBrowserDialog::new);
+
+  window.open_dialog(cx, move |dialog, _window, _cx| {
+    dialog
+      .title("Browse Docker Hub")
+      .min_w(px(700.))
+      .child(dialog_entity.clone())
+      .footer(move |_dialog_state, _, _window, _cx| {
+        vec![
+          Button::new("close")
+            .label("Close")
+            .ghost()
+            .on_click(|_ev, window, cx| {
+              window.close_dialog(cx);
             })
             .into_any_element(),
         ]

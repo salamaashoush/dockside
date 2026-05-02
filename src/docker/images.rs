@@ -2,7 +2,7 @@ use anyhow::Result;
 use bollard::auth::DockerCredentials;
 use bollard::query_parameters::{
   BuildImageOptionsBuilder, CreateImageOptions, ListImagesOptions, PushImageOptionsBuilder, RemoveImageOptions,
-  TagImageOptionsBuilder,
+  SearchImagesOptionsBuilder, TagImageOptionsBuilder,
 };
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
@@ -22,6 +22,16 @@ pub struct ImageInfo {
   pub labels: HashMap<String, String>,
   pub architecture: Option<String>,
   pub os: Option<String>,
+}
+
+/// Match returned from a Docker Hub registry search.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegistrySearchResult {
+  pub name: String,
+  pub description: String,
+  pub stars: i64,
+  pub official: bool,
+  pub automated: bool,
 }
 
 /// One streamed event from `build_image_with_progress`. Either `stream`
@@ -196,6 +206,29 @@ impl DockerClient {
           size: h.size,
           comment: h.comment,
           tags: h.tags,
+        })
+        .collect(),
+    )
+  }
+
+  /// Search Docker Hub via the daemon's `/images/search` endpoint.
+  /// Returns up to `limit` matches sorted by stars descending.
+  pub async fn search_images(&self, query: &str, limit: usize) -> Result<Vec<RegistrySearchResult>> {
+    let docker = self.client()?;
+    let opts = SearchImagesOptionsBuilder::default()
+      .term(query)
+      .limit(i32::try_from(limit).unwrap_or(25))
+      .build();
+    let resp = docker.search_images(opts).await?;
+    Ok(
+      resp
+        .into_iter()
+        .map(|r| RegistrySearchResult {
+          name: r.name.unwrap_or_default(),
+          description: r.description.unwrap_or_default(),
+          stars: r.star_count.unwrap_or(0),
+          official: r.is_official.unwrap_or(false),
+          automated: r.is_automated.unwrap_or(false),
         })
         .collect(),
     )
