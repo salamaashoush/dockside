@@ -1,8 +1,6 @@
 use gpui::{App, Entity, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, Selectable, Sizable,
-  button::{Button, ButtonVariants},
-  h_flex,
+  Icon, Selectable, h_flex,
   input::{Input, InputState},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
@@ -18,7 +16,6 @@ use crate::terminal::TerminalView;
 // Re-export from state module for backwards compatibility
 pub use crate::state::PodDetailTab;
 
-type PodActionCallback = Rc<dyn Fn(&(String, String), &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&PodDetailTab, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
 type ContainerSelectCallback = Rc<dyn Fn(&String, &mut Window, &mut App) + 'static>;
@@ -50,7 +47,6 @@ pub struct PodDetail {
   logs_editor: Option<Entity<InputState>>,
   describe_editor: Option<Entity<InputState>>,
   yaml_editor: Option<Entity<InputState>>,
-  on_delete: Option<PodActionCallback>,
   on_tab_change: Option<TabChangeCallback>,
   on_refresh_logs: Option<RefreshCallback>,
   on_container_select: Option<ContainerSelectCallback>,
@@ -67,7 +63,6 @@ impl PodDetail {
       logs_editor: None,
       describe_editor: None,
       yaml_editor: None,
-      on_delete: None,
       on_tab_change: None,
       on_refresh_logs: None,
       on_container_select: None,
@@ -111,14 +106,6 @@ impl PodDetail {
 
   pub fn yaml_editor(mut self, editor: Option<Entity<InputState>>) -> Self {
     self.yaml_editor = editor;
-    self
-  }
-
-  pub fn on_delete<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&(String, String), &mut Window, &mut App) + 'static,
-  {
-    self.on_delete = Some(Rc::new(callback));
     self
   }
 
@@ -474,10 +461,7 @@ impl PodDetail {
       return Self::render_empty(cx).into_any_element();
     };
 
-    let pod_name = pod.name.clone();
-    let pod_namespace = pod.namespace.clone();
-
-    let on_delete = self.on_delete.clone();
+    let _ = pod;
     let on_tab_change = self.on_tab_change.clone();
 
     // Toolbar with tabs and actions
@@ -500,21 +484,7 @@ impl PodDetail {
                 }
               })
           })),
-      )
-      .child(h_flex().pr(px(12.)).gap(px(8.)).child({
-        let on_delete = on_delete.clone();
-        let name = pod_name.clone();
-        let ns = pod_namespace.clone();
-        Button::new("delete")
-          .icon(Icon::new(AppIcon::Trash))
-          .ghost()
-          .small()
-          .on_click(move |_ev, window, cx| {
-            if let Some(ref cb) = on_delete {
-              cb(&(name.clone(), ns.clone()), window, cx);
-            }
-          })
-      }));
+      );
 
     // Content based on active tab
     let content = match self.active_tab {

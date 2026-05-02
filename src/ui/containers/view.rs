@@ -1019,23 +1019,6 @@ impl Render for ContainersView {
       }))
       .on_open_in_editor(cx.listener(|this, data: &(String, bool), window, cx| {
         this.on_open_in_editor(data, window, cx);
-      }))
-      .on_start(cx.listener(|_this, id: &str, _window, cx| {
-        services::start_container(id.to_string(), cx);
-      }))
-      .on_stop(cx.listener(|_this, id: &str, _window, cx| {
-        services::stop_container(id.to_string(), cx);
-      }))
-      .on_restart(cx.listener(|_this, id: &str, _window, cx| {
-        services::restart_container(id.to_string(), cx);
-      }))
-      .on_delete(cx.listener(|this, id: &str, _window, cx| {
-        services::delete_container(id.to_string(), cx);
-        // Clear selection in global state
-        this.docker_state.update(cx, |s, _| s.set_selection(Selection::None));
-        this.active_tab = ContainerDetailTab::Info;
-        this.terminal_view = None;
-        cx.notify();
       }));
 
     div()

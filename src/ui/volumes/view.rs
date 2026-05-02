@@ -353,11 +353,6 @@ impl Render for VolumesView {
       }))
       .on_symlink_click(cx.listener(|this, path: &str, window, cx| {
         this.on_symlink_follow(path, window, cx);
-      }))
-      .on_delete(cx.listener(|this, _name: &str, _window, cx| {
-        this.docker_state.update(cx, |s, _| s.set_selection(Selection::None));
-        this.active_tab = 0;
-        cx.notify();
       }));
 
     div()

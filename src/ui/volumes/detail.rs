@@ -1,10 +1,7 @@
 use gpui::{App, Entity, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, IconName, Selectable,
-  button::{Button, ButtonVariants},
-  h_flex,
+  Icon, Selectable, h_flex,
   input::InputState,
-  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -16,7 +13,6 @@ use crate::assets::AppIcon;
 use crate::docker::{VolumeFileEntry, VolumeInfo};
 use crate::ui::components::{FileExplorer, FileExplorerConfig, FileExplorerState};
 
-type VolumeActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
 type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type FileSelectCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
@@ -52,7 +48,6 @@ pub struct VolumeDetail {
   volume_state: Option<VolumeTabState>,
   file_content_editor: Option<Entity<InputState>>,
   used_by: Vec<String>,
-  on_delete: Option<VolumeActionCallback>,
   on_tab_change: Option<TabChangeCallback>,
   on_navigate_path: Option<FileNavigateCallback>,
   on_file_select: Option<FileSelectCallback>,
@@ -68,7 +63,6 @@ impl VolumeDetail {
       volume_state: None,
       file_content_editor: None,
       used_by: Vec::new(),
-      on_delete: None,
       on_tab_change: None,
       on_navigate_path: None,
       on_file_select: None,
@@ -99,14 +93,6 @@ impl VolumeDetail {
 
   pub fn file_content_editor(mut self, editor: Option<Entity<InputState>>) -> Self {
     self.file_content_editor = editor;
-    self
-  }
-
-  pub fn on_delete<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_delete = Some(Rc::new(callback));
     self
   }
 
@@ -444,10 +430,7 @@ impl VolumeDetail {
       return Self::render_empty(cx).into_any_element();
     };
 
-    let volume_name = volume.name.clone();
-    let volume_name_for_delete = volume_name.clone();
-
-    let on_delete = self.on_delete.clone();
+    let _ = volume;
     let on_tab_change = self.on_tab_change.clone();
 
     let tabs = ["Info", "Files"];
@@ -471,27 +454,7 @@ impl VolumeDetail {
                 }
               })
           })),
-      )
-      .child(h_flex().pr(px(12.)).gap(px(8.)).child({
-        let on_delete = on_delete.clone();
-        let name = volume_name_for_delete.clone();
-        Button::new("volume-actions")
-          .icon(IconName::Ellipsis)
-          .ghost()
-          .compact()
-          .dropdown_menu(move |menu, _window, _cx| {
-            let mut menu = menu;
-            if let Some(cb) = on_delete.clone() {
-              let name = name.clone();
-              menu = menu.item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click(
-                move |_, window, cx| {
-                  cb(&name, window, cx);
-                },
-              ));
-            }
-            menu
-          })
-      }));
+      );
 
     // Content based on active tab
     let is_files_tab = self.active_tab == 1;

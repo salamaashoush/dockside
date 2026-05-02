@@ -439,13 +439,6 @@ impl Render for PodsView {
       }))
       .on_container_select(cx.listener(|this, container: &String, window, cx| {
         this.on_container_select(container, window, cx);
-      }))
-      .on_delete(cx.listener(|this, (name, ns): &(String, String), _window, cx| {
-        services::delete_pod(name.clone(), ns.clone(), cx);
-        this.docker_state.update(cx, |s, _| s.set_selection(Selection::None));
-        this.active_tab = PodDetailTab::Info;
-        this.terminal_view = None;
-        cx.notify();
       }));
 
     div()

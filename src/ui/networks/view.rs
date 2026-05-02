@@ -111,11 +111,6 @@ impl Render for NetworksView {
       .active_tab(active_tab)
       .on_tab_change(cx.listener(|this, tab: &usize, _window, cx| {
         this.on_tab_change(*tab, cx);
-      }))
-      .on_delete(cx.listener(|this, _id: &str, _window, cx| {
-        this.docker_state.update(cx, |s, _| s.set_selection(Selection::None));
-        this.active_tab = 0;
-        cx.notify();
       }));
 
     div()

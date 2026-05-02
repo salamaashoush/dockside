@@ -3,7 +3,6 @@ use gpui_component::{
   Icon, IconName, Selectable,
   button::{Button, ButtonVariants},
   h_flex,
-  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -16,19 +15,12 @@ use crate::docker::ImageInfo;
 use crate::state::ImageInspectData;
 use crate::ui::components::{render_error_panel, render_install_hint};
 
-type ImageActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
-type ImageNameCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 
 pub struct ImageDetail {
   image: Option<ImageInfo>,
   inspect_data: Option<ImageInspectData>,
   active_tab: usize,
-  on_delete: Option<ImageActionCallback>,
-  on_tag: Option<ImageNameCallback>,
-  on_push: Option<ImageNameCallback>,
-  on_scan: Option<ImageNameCallback>,
-  on_save: Option<ImageNameCallback>,
   on_tab_change: Option<TabChangeCallback>,
 }
 
@@ -38,11 +30,6 @@ impl ImageDetail {
       image: None,
       inspect_data: None,
       active_tab: 0,
-      on_delete: None,
-      on_tag: None,
-      on_push: None,
-      on_scan: None,
-      on_save: None,
       on_tab_change: None,
     }
   }
@@ -59,46 +46,6 @@ impl ImageDetail {
 
   pub fn active_tab(mut self, tab: usize) -> Self {
     self.active_tab = tab;
-    self
-  }
-
-  pub fn on_tag<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_tag = Some(Rc::new(callback));
-    self
-  }
-
-  pub fn on_push<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_push = Some(Rc::new(callback));
-    self
-  }
-
-  pub fn on_scan<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_scan = Some(Rc::new(callback));
-    self
-  }
-
-  pub fn on_save<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_save = Some(Rc::new(callback));
-    self
-  }
-
-  pub fn on_delete<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_delete = Some(Rc::new(callback));
     self
   }
 
@@ -557,8 +504,7 @@ impl ImageDetail {
     let data = self.inspect_data.as_ref();
 
     if data.is_none_or(|d| d.scan.is_none() && !d.scan_loading && d.scan_error.is_none()) {
-      let on_scan = self.on_scan.clone();
-      let image_id = self.image.as_ref().map(|i| i.id.clone()).unwrap_or_default();
+      let image = self.image.clone();
       return v_flex()
         .w_full()
         .p(px(32.))
@@ -580,9 +526,10 @@ impl ImageDetail {
             .icon(Icon::new(IconName::Eye))
             .label("Scan with Trivy")
             .primary()
-            .on_click(move |_ev, window, cx| {
-              if let Some(ref cb) = on_scan {
-                cb(&image_id, window, cx);
+            .on_click(move |_ev, _window, cx| {
+              if let Some(ref img) = image {
+                let image_ref = img.repo_tags.first().cloned().unwrap_or_else(|| img.id.clone());
+                crate::services::scan_image(img.id.clone(), image_ref, cx);
               }
             }),
         );
@@ -751,10 +698,6 @@ impl ImageDetail {
       return Self::render_empty(cx).into_any_element();
     };
 
-    let image_id = image.id.clone();
-    let image_id_for_delete = image_id.clone();
-
-    let on_delete = self.on_delete.clone();
     let on_tab_change = self.on_tab_change.clone();
 
     let tabs = ["Info", "Layers", "Vulnerabilities"];
@@ -778,68 +721,7 @@ impl ImageDetail {
                 }
               })
           })),
-      )
-      .child(h_flex().pr(px(12.)).gap(px(8.)).child({
-        let on_scan = self.on_scan.clone();
-        let on_save = self.on_save.clone();
-        let on_tag = self.on_tag.clone();
-        let on_push = self.on_push.clone();
-        let on_delete_menu = on_delete.clone();
-        let id_scan = image_id_for_delete.clone();
-        let id_save = image_id_for_delete.clone();
-        let id_tag = image_id_for_delete.clone();
-        let id_push = image_id_for_delete.clone();
-        let id_delete = image_id_for_delete.clone();
-        Button::new("image-actions")
-          .icon(IconName::Ellipsis)
-          .ghost()
-          .compact()
-          .dropdown_menu(move |menu, _window, _cx| {
-            let mut menu = menu;
-            if let Some(cb) = on_scan.clone() {
-              let id = id_scan.clone();
-              menu = menu.item(PopupMenuItem::new("Scan").icon(Icon::new(IconName::Eye)).on_click(
-                move |_, window, cx| {
-                  cb(&id, window, cx);
-                },
-              ));
-            }
-            if let Some(cb) = on_save.clone() {
-              let id = id_save.clone();
-              menu = menu.item(PopupMenuItem::new("Save").icon(Icon::new(IconName::Inbox)).on_click(
-                move |_, window, cx| {
-                  cb(&id, window, cx);
-                },
-              ));
-            }
-            if let Some(cb) = on_tag.clone() {
-              let id = id_tag.clone();
-              menu = menu.item(PopupMenuItem::new("Tag").icon(Icon::new(AppIcon::Edit)).on_click(
-                move |_, window, cx| {
-                  cb(&id, window, cx);
-                },
-              ));
-            }
-            if let Some(cb) = on_push.clone() {
-              let id = id_push.clone();
-              menu = menu.item(PopupMenuItem::new("Push").icon(Icon::new(IconName::ArrowUp)).on_click(
-                move |_, window, cx| {
-                  cb(&id, window, cx);
-                },
-              ));
-            }
-            menu = menu.separator();
-            if let Some(cb) = on_delete_menu.clone() {
-              let id = id_delete.clone();
-              menu = menu.item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click(
-                move |_, window, cx| {
-                  cb(&id, window, cx);
-                },
-              ));
-            }
-            menu
-          })
-      }));
+      );
 
     // Content based on active tab
     let content = match self.active_tab {

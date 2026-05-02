@@ -16,6 +16,7 @@ use crate::docker::ImageInfo;
 use crate::services;
 use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
 use crate::ui::components::{render_error, render_loading};
+use crate::ui::dialogs::{open_push_image_dialog, open_tag_image_dialog, prompt_save_image_tarball};
 
 /// Image list events emitted to parent
 pub enum ImageListEvent {
@@ -244,15 +245,56 @@ impl ListDelegate for ImageListDelegate {
               .xsmall()
               .dropdown_menu({
                 let id = id.clone();
+                let display = image.display_name();
+                let image_ref = image.repo_tags.first().cloned().unwrap_or_else(|| image.id.clone());
                 move |menu, _window, _cx| {
-                  let id_for_delete = id.clone();
-                  menu.item(
-                    PopupMenuItem::new("Delete")
-                      .icon(Icon::new(AppIcon::Trash))
-                      .on_click(move |_, _, cx| {
-                        services::delete_image(id_for_delete.clone(), cx);
-                      }),
-                  )
+                  let id_scan = id.clone();
+                  let ref_scan = image_ref.clone();
+                  let ref_save = image_ref.clone();
+                  let display_tag = display.clone();
+                  let display_push = display.clone();
+                  let id_delete = id.clone();
+                  menu
+                    .item(
+                      PopupMenuItem::new("Scan")
+                        .icon(IconName::Eye)
+                        .on_click(move |_, _, cx| {
+                          services::scan_image(id_scan.clone(), ref_scan.clone(), cx);
+                        }),
+                    )
+                    .item(
+                      PopupMenuItem::new("Save")
+                        .icon(IconName::Inbox)
+                        .on_click(move |_, window, cx| {
+                          prompt_save_image_tarball(ref_save.clone(), window, cx);
+                        }),
+                    )
+                    .item(
+                      PopupMenuItem::new("Tag")
+                        .icon(Icon::new(AppIcon::Edit))
+                        .on_click(move |_, window, cx| {
+                          open_tag_image_dialog(display_tag.clone(), window, cx);
+                        }),
+                    )
+                    .item(
+                      PopupMenuItem::new("Push")
+                        .icon(IconName::ArrowUp)
+                        .on_click(move |_, window, cx| {
+                          let (image, tag) = display_push.rsplit_once(':').map_or_else(
+                            || (display_push.clone(), "latest".to_string()),
+                            |(i, t)| (i.to_string(), t.to_string()),
+                          );
+                          open_push_image_dialog(image, tag, window, cx);
+                        }),
+                    )
+                    .separator()
+                    .item(
+                      PopupMenuItem::new("Delete")
+                        .icon(Icon::new(AppIcon::Trash))
+                        .on_click(move |_, _, cx| {
+                          services::delete_image(id_delete.clone(), cx);
+                        }),
+                    )
                 }
               }),
           )

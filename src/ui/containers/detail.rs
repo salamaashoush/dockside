@@ -4,7 +4,6 @@ use gpui_component::{
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
-  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -38,7 +37,6 @@ use crate::docker::{ContainerFileEntry, ContainerInfo};
 use crate::terminal::TerminalView;
 use crate::ui::components::{FileExplorer, FileExplorerConfig, FileExplorerState, ProcessView};
 
-type ContainerActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&ContainerDetailTab, &mut Window, &mut App) + 'static>;
 type RefreshCallback = Rc<dyn Fn(&(), &mut Window, &mut App) + 'static>;
 type FileNavigateCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
@@ -127,10 +125,6 @@ pub struct ContainerDetail {
   process_view: Option<Entity<ProcessView>>,
   inspect_editor: Option<Entity<InputState>>,
   file_content_editor: Option<Entity<InputState>>,
-  on_start: Option<ContainerActionCallback>,
-  on_stop: Option<ContainerActionCallback>,
-  on_restart: Option<ContainerActionCallback>,
-  on_delete: Option<ContainerActionCallback>,
   on_tab_change: Option<TabChangeCallback>,
   on_refresh_logs: Option<RefreshCallback>,
   on_toggle_logs_follow: Option<RefreshCallback>,
@@ -154,10 +148,6 @@ impl ContainerDetail {
       process_view: None,
       inspect_editor: None,
       file_content_editor: None,
-      on_start: None,
-      on_stop: None,
-      on_restart: None,
-      on_delete: None,
       on_tab_change: None,
       on_refresh_logs: None,
       on_toggle_logs_follow: None,
@@ -204,38 +194,6 @@ impl ContainerDetail {
 
   pub fn file_content_editor(mut self, editor: Option<Entity<InputState>>) -> Self {
     self.file_content_editor = editor;
-    self
-  }
-
-  pub fn on_start<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_start = Some(Rc::new(callback));
-    self
-  }
-
-  pub fn on_stop<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_stop = Some(Rc::new(callback));
-    self
-  }
-
-  pub fn on_restart<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_restart = Some(Rc::new(callback));
-    self
-  }
-
-  pub fn on_delete<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_delete = Some(Rc::new(callback));
     self
   }
 
@@ -1069,91 +1027,30 @@ impl ContainerDetail {
     };
 
     let is_running = container.state.is_running();
-    let container_id = container.id.clone();
-    let container_id_for_stop = container_id.clone();
-    let container_id_for_restart = container_id.clone();
-    let container_id_for_delete = container_id.clone();
-
-    let on_start = self.on_start.clone();
-    let on_stop = self.on_stop.clone();
-    let on_restart = self.on_restart.clone();
-    let on_delete = self.on_delete.clone();
     let on_tab_change = self.on_tab_change.clone();
 
     // Toolbar with tabs and actions
-    let toolbar = h_flex()
-      .w_full()
-      .items_center()
-      .flex_shrink_0()
-      .child(
-        TabBar::new("container-tabs")
-          .flex_1()
-          .children(ContainerDetailTab::ALL.iter().map(|tab| {
-            let on_tab_change = on_tab_change.clone();
-            let tab_variant = *tab;
-            Tab::new()
-              .label(tab.label().to_string())
-              .selected(self.active_tab == *tab)
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_tab_change {
-                  cb(&tab_variant, window, cx);
-                }
-              })
-          })),
-      )
-      .child(h_flex().pr(px(12.)).gap(px(8.)).child({
-        let on_start = on_start.clone();
-        let on_stop = on_stop.clone();
-        let on_restart = on_restart.clone();
-        let on_delete = on_delete.clone();
-        let id_start = container_id.clone();
-        let id_stop = container_id_for_stop.clone();
-        let id_restart = container_id_for_restart.clone();
-        let id_delete = container_id_for_delete.clone();
-        Button::new("container-actions")
-          .icon(IconName::Ellipsis)
-          .ghost()
-          .compact()
-          .dropdown_menu(move |menu, _window, _cx| {
-            let mut menu = menu;
-            if !is_running && let Some(cb) = on_start.clone() {
-              let id = id_start.clone();
-              menu = menu.item(PopupMenuItem::new("Start").icon(Icon::new(AppIcon::Play)).on_click(
-                move |_, window, cx| {
-                  cb(&id, window, cx);
-                },
-              ));
-            }
-            if is_running && let Some(cb) = on_stop.clone() {
-              let id = id_stop.clone();
-              menu = menu.item(PopupMenuItem::new("Stop").icon(Icon::new(AppIcon::Stop)).on_click(
-                move |_, window, cx| {
-                  cb(&id, window, cx);
-                },
-              ));
-            }
-            if let Some(cb) = on_restart.clone() {
-              let id = id_restart.clone();
-              menu = menu.item(
-                PopupMenuItem::new("Restart")
-                  .icon(Icon::new(AppIcon::Restart))
-                  .on_click(move |_, window, cx| {
-                    cb(&id, window, cx);
-                  }),
-              );
-            }
-            menu = menu.separator();
-            if let Some(cb) = on_delete.clone() {
-              let id = id_delete.clone();
-              menu = menu.item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click(
-                move |_, window, cx| {
-                  cb(&id, window, cx);
-                },
-              ));
-            }
-            menu
-          })
-      }));
+    let toolbar =
+      h_flex()
+        .w_full()
+        .items_center()
+        .flex_shrink_0()
+        .child(
+          TabBar::new("container-tabs")
+            .flex_1()
+            .children(ContainerDetailTab::ALL.iter().map(|tab| {
+              let on_tab_change = on_tab_change.clone();
+              let tab_variant = *tab;
+              Tab::new()
+                .label(tab.label().to_string())
+                .selected(self.active_tab == *tab)
+                .on_click(move |_ev, window, cx| {
+                  if let Some(ref cb) = on_tab_change {
+                    cb(&tab_variant, window, cx);
+                  }
+                })
+            })),
+        );
 
     // Terminal, Logs, Processes, and Files tabs need full height without scroll
     let is_full_height_tab = matches!(

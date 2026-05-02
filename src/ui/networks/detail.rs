@@ -14,13 +14,11 @@ use std::rc::Rc;
 use crate::assets::AppIcon;
 use crate::docker::NetworkInfo;
 
-type NetworkActionCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
 
 pub struct NetworkDetail {
   network: Option<NetworkInfo>,
   active_tab: usize,
-  on_delete: Option<NetworkActionCallback>,
   on_tab_change: Option<TabChangeCallback>,
 }
 
@@ -29,7 +27,6 @@ impl NetworkDetail {
     Self {
       network: None,
       active_tab: 0,
-      on_delete: None,
       on_tab_change: None,
     }
   }
@@ -41,14 +38,6 @@ impl NetworkDetail {
 
   pub fn active_tab(mut self, tab: usize) -> Self {
     self.active_tab = tab;
-    self
-  }
-
-  pub fn on_delete<F>(mut self, callback: F) -> Self
-  where
-    F: Fn(&str, &mut Window, &mut App) + 'static,
-  {
-    self.on_delete = Some(Rc::new(callback));
     self
   }
 
@@ -530,58 +519,31 @@ impl NetworkDetail {
       return Self::render_empty(cx).into_any_element();
     };
 
-    let network_id = network.id.clone();
-    let is_system = network.is_system_network();
-
-    let on_delete = self.on_delete.clone();
     let on_tab_change = self.on_tab_change.clone();
 
     let tabs = ["Info"];
 
     // Toolbar with tabs and actions
-    let toolbar = h_flex()
-      .w_full()
-      .items_center()
-      .flex_shrink_0()
-      .child(
-        TabBar::new("network-tabs")
-          .flex_1()
-          .children(tabs.iter().enumerate().map(|(i, label)| {
-            let on_tab_change = on_tab_change.clone();
-            Tab::new()
-              .label((*label).to_string())
-              .selected(self.active_tab == i)
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_tab_change {
-                  cb(&i, window, cx);
-                }
-              })
-          })),
-      )
-      .when(!is_system, |el| {
-        let on_delete = on_delete.clone();
-        let id = network_id.clone();
-        el.child(
-          h_flex().pr(px(12.)).gap(px(8.)).child(
-            Button::new("network-actions")
-              .icon(IconName::Ellipsis)
-              .ghost()
-              .compact()
-              .dropdown_menu(move |menu, _window, _cx| {
-                let mut menu = menu;
-                if let Some(cb) = on_delete.clone() {
-                  let id = id.clone();
-                  menu = menu.item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click(
-                    move |_, window, cx| {
-                      cb(&id, window, cx);
-                    },
-                  ));
-                }
-                menu
-              }),
-          ),
-        )
-      });
+    let toolbar =
+      h_flex()
+        .w_full()
+        .items_center()
+        .flex_shrink_0()
+        .child(
+          TabBar::new("network-tabs")
+            .flex_1()
+            .children(tabs.iter().enumerate().map(|(i, label)| {
+              let on_tab_change = on_tab_change.clone();
+              Tab::new()
+                .label((*label).to_string())
+                .selected(self.active_tab == i)
+                .on_click(move |_ev, window, cx| {
+                  if let Some(ref cb) = on_tab_change {
+                    cb(&i, window, cx);
+                  }
+                })
+            })),
+        );
 
     // Content based on active tab
     let content = Self::render_info_tab(network, cx);
