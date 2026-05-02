@@ -349,6 +349,8 @@ pub struct DockerState {
   pub active_detail_tab: usize,
   /// Currently selected item - used by keyboard shortcuts
   pub selection: Selection,
+  /// IDs of containers ticked for bulk start/stop/restart/delete
+  pub selected_container_ids: std::collections::HashSet<String>,
 
   // Loading states - general loading indicator
   pub is_loading: bool,
@@ -383,6 +385,7 @@ impl DockerState {
       current_view: CurrentView::default(),
       active_detail_tab: 0,
       selection: Selection::None,
+      selected_container_ids: std::collections::HashSet::new(),
       is_loading: true,
       // Per-resource load states
       containers_state: LoadState::NotLoaded,
@@ -399,6 +402,20 @@ impl DockerState {
   // Selection management
   pub fn set_selection(&mut self, selection: Selection) {
     self.selection = selection;
+  }
+
+  pub fn toggle_bulk_container(&mut self, id: &str) {
+    if !self.selected_container_ids.remove(id) {
+      self.selected_container_ids.insert(id.to_string());
+    }
+  }
+
+  pub fn clear_bulk_container(&mut self) {
+    self.selected_container_ids.clear();
+  }
+
+  pub fn is_bulk_container_selected(&self, id: &str) -> bool {
+    self.selected_container_ids.contains(id)
   }
 
   // Machines

@@ -8,6 +8,41 @@ use crate::state::{StateChanged, docker_state};
 
 use super::super::core::{DispatcherEvent, dispatcher, docker_client};
 
+pub fn toggle_container_bulk_selection(id: &str, cx: &mut App) {
+  let state = docker_state(cx);
+  state.update(cx, |s, cx| {
+    s.toggle_bulk_container(id);
+    cx.notify();
+  });
+}
+
+pub fn clear_container_bulk_selection(cx: &mut App) {
+  let state = docker_state(cx);
+  state.update(cx, |s, cx| {
+    s.clear_bulk_container();
+    cx.notify();
+  });
+}
+
+pub fn bulk_action_containers(action: &str, cx: &mut App) {
+  let ids: Vec<String> = docker_state(cx)
+    .read(cx)
+    .selected_container_ids
+    .iter()
+    .cloned()
+    .collect();
+  for id in ids {
+    match action {
+      "start" => start_container(id, cx),
+      "stop" => stop_container(id, cx),
+      "restart" => restart_container(id, cx),
+      "delete" => delete_container(id, cx),
+      _ => {}
+    }
+  }
+  clear_container_bulk_selection(cx);
+}
+
 pub fn start_container(id: String, cx: &mut App) {
   let task_id = start_task(cx, "Starting container...".to_string());
   let disp = dispatcher(cx);

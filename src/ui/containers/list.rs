@@ -2,6 +2,7 @@ use gpui::{App, Context, Entity, Render, Styled, Window, div, prelude::*, px};
 use gpui_component::{
   Icon, IconName, IndexPath, Sizable,
   button::{Button, ButtonVariants},
+  checkbox::Checkbox,
   h_flex,
   input::{Input, InputState},
   label::Label,
@@ -259,6 +260,16 @@ impl ListDelegate for ContainerListDelegate {
         menu
       });
 
+    // Checkbox for bulk selection — selection set lives on DockerState so
+    // the menu closure can mutate it without holding a list-entity ref.
+    let checked = self.docker_state.read(cx).is_bulk_container_selected(&container_id);
+    let cb_id = container_id.clone();
+    let checkbox = Checkbox::new(("container-cb", row))
+      .checked(checked)
+      .on_click(move |_, _, cx| {
+        services::toggle_container_bulk_selection(&cb_id, cx);
+      });
+
     // Build item content with menu button INSIDE (not as suffix which gets hidden)
     let item_content = h_flex()
       .w_full()
@@ -271,6 +282,7 @@ impl ListDelegate for ContainerListDelegate {
           .min_w_0()
           .items_center()
           .gap(px(8.))
+          .child(div().flex_shrink_0().child(checkbox))
           .child(
             div()
               .size(px(24.))
@@ -614,6 +626,66 @@ impl Render for ContainerList {
           ),
       );
 
+    // Bulk selection toolbar — visible when ≥1 container ticked.
+    let bulk_count = self.docker_state.read(cx).selected_container_ids.len();
+    let bulk_bar = (bulk_count > 0).then(|| {
+      h_flex()
+        .w_full()
+        .px(px(12.))
+        .py(px(6.))
+        .gap(px(8.))
+        .items_center()
+        .bg(colors.sidebar)
+        .border_b_1()
+        .border_color(colors.border)
+        .child(
+          div()
+            .flex_1()
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(format!("{bulk_count} selected")),
+        )
+        .child(
+          Button::new("bulk-start")
+            .label("Start")
+            .icon(Icon::new(AppIcon::Play))
+            .ghost()
+            .xsmall()
+            .on_click(|_, _, cx| services::bulk_action_containers("start", cx)),
+        )
+        .child(
+          Button::new("bulk-stop")
+            .label("Stop")
+            .icon(Icon::new(AppIcon::Stop))
+            .ghost()
+            .xsmall()
+            .on_click(|_, _, cx| services::bulk_action_containers("stop", cx)),
+        )
+        .child(
+          Button::new("bulk-restart")
+            .label("Restart")
+            .icon(Icon::new(AppIcon::Restart))
+            .ghost()
+            .xsmall()
+            .on_click(|_, _, cx| services::bulk_action_containers("restart", cx)),
+        )
+        .child(
+          Button::new("bulk-delete")
+            .label("Delete")
+            .icon(Icon::new(AppIcon::Trash))
+            .ghost()
+            .xsmall()
+            .on_click(|_, _, cx| services::bulk_action_containers("delete", cx)),
+        )
+        .child(
+          Button::new("bulk-clear")
+            .label("Clear")
+            .ghost()
+            .xsmall()
+            .on_click(|_, _, cx| services::clear_container_bulk_selection(cx)),
+        )
+    });
+
     // Search bar
     let search_bar = if search_visible {
       Some(
@@ -680,6 +752,7 @@ impl Render for ContainerList {
       .flex_col()
       .overflow_hidden()
       .child(toolbar)
+      .children(bulk_bar)
       .children(search_bar)
       .child(
         div()
