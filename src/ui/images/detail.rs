@@ -557,12 +557,35 @@ impl ImageDetail {
     let data = self.inspect_data.as_ref();
 
     if data.is_none_or(|d| d.scan.is_none() && !d.scan_loading && d.scan_error.is_none()) {
-      return v_flex().w_full().p(px(16.)).gap(px(8.)).child(
-        div()
-          .text_sm()
-          .text_color(colors.muted_foreground)
-          .child("No scan run yet. Click Scan in the toolbar to run Trivy."),
-      );
+      let on_scan = self.on_scan.clone();
+      let image_id = self.image.as_ref().map(|i| i.id.clone()).unwrap_or_default();
+      return v_flex()
+        .w_full()
+        .p(px(32.))
+        .gap(px(16.))
+        .items_center()
+        .child(
+          Icon::new(IconName::Eye)
+            .size(px(40.))
+            .text_color(colors.muted_foreground),
+        )
+        .child(
+          div()
+            .text_sm()
+            .text_color(colors.muted_foreground)
+            .child("No vulnerability scan yet for this image."),
+        )
+        .child(
+          Button::new("vulns-empty-scan")
+            .icon(Icon::new(IconName::Eye))
+            .label("Scan with Trivy")
+            .primary()
+            .on_click(move |_ev, window, cx| {
+              if let Some(ref cb) = on_scan {
+                cb(&image_id, window, cx);
+              }
+            }),
+        );
     }
 
     let d = data.unwrap();
