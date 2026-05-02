@@ -3,7 +3,7 @@
 use gpui::App;
 use std::io::Read;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::services::{complete_task, fail_task, start_task};
 use crate::terminal::LogStream;
@@ -11,6 +11,49 @@ use crate::utils::docker_cmd;
 
 use super::super::core::{DispatcherEvent, dispatcher};
 use super::containers::refresh_containers;
+
+/// Cancel handle for an in-flight `compose_watch` invocation. Holding
+/// this keeps the watch alive; calling `stop()` (or dropping the last
+/// `Arc`) kills the child `docker compose watch` process so its file
+/// watchers tear down cleanly.
+///
+/// `Child::kill` requires `&mut self`, so the child lives behind a
+/// `Mutex` shared with the polling background task.
+#[derive(Default)]
+pub struct ComposeWatchHandle {
+  child: Mutex<Option<std::process::Child>>,
+  stop_requested: std::sync::atomic::AtomicBool,
+}
+
+impl ComposeWatchHandle {
+  fn install(&self, child: std::process::Child) {
+    if let Ok(mut guard) = self.child.lock() {
+      *guard = Some(child);
+    }
+  }
+
+  fn take_child(&self) -> Option<std::process::Child> {
+    self.child.lock().ok().and_then(|mut g| g.take())
+  }
+
+  fn is_stop_requested(&self) -> bool {
+    self.stop_requested.load(std::sync::atomic::Ordering::SeqCst)
+  }
+
+  /// Kill the watch child if still running. Idempotent.
+  pub fn stop(&self) {
+    self.stop_requested.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(mut child) = self.take_child() {
+      let _ = child.kill();
+    }
+  }
+}
+
+impl Drop for ComposeWatchHandle {
+  fn drop(&mut self) {
+    self.stop();
+  }
+}
 
 /// Build a `docker compose` invocation for `project_name`, prefixing
 /// `-f <config>` for every known compose file and chdir-ing into the
@@ -124,11 +167,9 @@ pub fn compose_down(project_name: String, working_dir: Option<String>, config_fi
 }
 
 /// Spawn `docker compose -p <project> [--profile <p>] watch` and stream
-/// stdout / stderr bytes into `log_stream` as they arrive. The process
-/// is detached on the background executor; dropping the corresponding
-/// `LogStream` on the caller side is the documented stop signal (the
-/// downstream channel will close and the next write returns broken
-/// pipe, which we treat as termination).
+/// stdout / stderr bytes into `log_stream` as they arrive. Returns a
+/// `ComposeWatchHandle` that the caller (typically the output dialog)
+/// uses to terminate the child via `Child::kill` on close.
 pub fn compose_watch(
   project_name: String,
   working_dir: Option<String>,
@@ -136,11 +177,13 @@ pub fn compose_watch(
   profile: Option<String>,
   log_stream: &Arc<LogStream>,
   cx: &mut App,
-) {
+) -> Arc<ComposeWatchHandle> {
   let task_id = start_task(cx, format!("compose watch '{project_name}'..."));
   let project_for_msg = project_name.clone();
   let disp = dispatcher(cx);
   let log_for_task = log_stream.clone();
+  let handle = Arc::new(ComposeWatchHandle::default());
+  let handle_for_task = handle.clone();
 
   cx.spawn(async move |cx| {
     let result = cx
@@ -184,13 +227,37 @@ pub fn compose_watch(
           }
         });
 
-        let status = child.wait().map_err(|e| format!("wait failed: {e}"))?;
+        // Hand the child off to the cancel handle so `stop()` can
+        // call `Child::kill` from another thread. We poll `try_wait`
+        // until the child exits (or stop is requested + the handle
+        // killed it for us).
+        handle_for_task.install(child);
+        let status: Option<std::process::ExitStatus> = loop {
+          let mut guard = handle_for_task
+            .child
+            .lock()
+            .map_err(|e| format!("watch handle poisoned: {e}"))?;
+          match guard.as_mut() {
+            Some(c) => match c.try_wait() {
+              Ok(Some(s)) => {
+                let _ = guard.take();
+                break Some(s);
+              }
+              Ok(None) => {}
+              Err(e) => return Err(format!("try_wait failed: {e}")),
+            },
+            // Handle::stop() already took the child + killed it.
+            None => break None,
+          }
+          drop(guard);
+          std::thread::sleep(std::time::Duration::from_millis(100));
+        };
         let _ = stdout_handle.join();
         let _ = stderr_handle.join();
-        if status.success() {
-          Ok(())
-        } else {
-          Err(format!("docker compose watch exited with status {status}"))
+        match status {
+          None => Ok(()),
+          Some(s) if s.success() || handle_for_task.is_stop_requested() => Ok(()),
+          Some(s) => Err(format!("docker compose watch exited with status {s}")),
         }
       })
       .await;
@@ -215,6 +282,8 @@ pub fn compose_watch(
     })
   })
   .detach();
+
+  handle
 }
 
 fn crlf_normalize(input: &[u8]) -> Vec<u8> {

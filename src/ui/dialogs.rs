@@ -275,7 +275,7 @@ pub fn open_compose_watch_dialog(
                 Ok(s) => std::sync::Arc::new(s),
                 Err(_) => return,
               };
-              services::compose_watch(
+              let watch_handle = services::compose_watch(
                 project.clone(),
                 working_dir.clone(),
                 config_files.clone(),
@@ -284,7 +284,7 @@ pub fn open_compose_watch_dialog(
                 cx,
               );
               window.close_dialog(cx);
-              open_compose_watch_output_dialog(project.clone(), log_stream, window, cx);
+              open_compose_watch_output_dialog(project.clone(), log_stream, watch_handle, window, cx);
             })
             .into_any_element(),
         ]
@@ -295,11 +295,13 @@ pub fn open_compose_watch_dialog(
 fn open_compose_watch_output_dialog(
   project: String,
   log_stream: std::sync::Arc<crate::terminal::LogStream>,
+  watch_handle: std::sync::Arc<services::ComposeWatchHandle>,
   window: &mut Window,
   cx: &mut App,
 ) {
   let view = cx.new(|cx| crate::terminal::TerminalView::for_log_stream(log_stream, cx));
   window.open_dialog(cx, move |dialog, _window, _cx| {
+    let handle_for_footer = watch_handle.clone();
     dialog
       .title(format!("Watching {project}"))
       .min_w(px(900.))
@@ -311,11 +313,13 @@ fn open_compose_watch_output_dialog(
           .child(div().size_full().child(view.clone())),
       )
       .footer(move |_dialog_state, _, _window, _cx| {
+        let handle = handle_for_footer.clone();
         vec![
-          Button::new("close")
-            .label("Close")
-            .ghost()
-            .on_click(|_ev, window, cx| {
+          Button::new("stop-watch")
+            .label("Stop")
+            .primary()
+            .on_click(move |_ev, window, cx| {
+              handle.stop();
               window.close_dialog(cx);
             })
             .into_any_element(),
