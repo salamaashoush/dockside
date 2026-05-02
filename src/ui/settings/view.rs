@@ -1057,14 +1057,50 @@ impl SettingsView {
       cx,
     );
 
+    let ca_installed = crate::services::is_local_ca_installed();
+    let ca_status_chip = h_flex()
+      .gap(px(6.))
+      .items_center()
+      .px(px(8.))
+      .py(px(2.))
+      .rounded(px(4.))
+      .bg(if ca_installed {
+        colors.success.opacity(0.15)
+      } else {
+        colors.muted.opacity(0.4)
+      })
+      .child(
+        div()
+          .size(px(6.))
+          .rounded_full()
+          .bg(if ca_installed {
+            colors.success
+          } else {
+            colors.muted_foreground
+          })
+          .flex_shrink_0(),
+      )
+      .child(
+        div()
+          .text_xs()
+          .text_color(if ca_installed {
+            colors.success
+          } else {
+            colors.muted_foreground
+          })
+          .child(if ca_installed { "Installed" } else { "Not installed" }),
+      );
+
     let ca_row = Self::render_row(
       "HTTPS root certificate",
       "Trust dockside-issued certs so https://*.dockside.test shows a green lock.",
       h_flex()
-        .gap(px(6.))
+        .gap(px(8.))
+        .items_center()
+        .child(ca_status_chip)
         .child(
           Button::new("dns-install-ca")
-            .label("Install")
+            .label(if ca_installed { "Reinstall" } else { "Install" })
             .primary()
             .small()
             .on_click(cx.listener(|_this, _ev, _w, cx| {
@@ -1074,18 +1110,20 @@ impl SettingsView {
               cx.notify();
             })),
         )
-        .child(
-          Button::new("dns-uninstall-ca")
-            .label("Remove")
-            .ghost()
-            .small()
-            .on_click(cx.listener(|_this, _ev, _w, cx| {
-              if let Err(e) = crate::services::uninstall_local_ca() {
-                tracing::warn!("dns: uninstall_local_ca failed: {e}");
-              }
-              cx.notify();
-            })),
-        ),
+        .when(ca_installed, |el| {
+          el.child(
+            Button::new("dns-uninstall-ca")
+              .label("Remove")
+              .ghost()
+              .small()
+              .on_click(cx.listener(|_this, _ev, _w, cx| {
+                if let Err(e) = crate::services::uninstall_local_ca() {
+                  tracing::warn!("dns: uninstall_local_ca failed: {e}");
+                }
+                cx.notify();
+              })),
+          )
+        }),
       cx,
     );
 

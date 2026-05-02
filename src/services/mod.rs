@@ -135,6 +135,34 @@ pub fn uninstall_local_ca() -> anyhow::Result<()> {
   helper::run_privileged(&["uninstall-ca"]).map(|_| ())
 }
 
+/// Check whether the Dockside root CA is currently installed in the OS
+/// trust store. Pure file-existence probe — no privileged call needed.
+pub fn is_local_ca_installed() -> bool {
+  #[cfg(target_os = "linux")]
+  {
+    std::path::Path::new("/etc/ca-certificates/trust-source/anchors/dockside.crt").is_file()
+      || std::path::Path::new("/usr/local/share/ca-certificates/dockside.crt").is_file()
+  }
+  #[cfg(target_os = "macos")]
+  {
+    // `security find-certificate` exits 0 when the cert is in the keychain.
+    std::process::Command::new("/usr/bin/security")
+      .args([
+        "find-certificate",
+        "-c",
+        "Dockside Local Root CA",
+        "/Library/Keychains/System.keychain",
+      ])
+      .output()
+      .map(|o| o.status.success())
+      .unwrap_or(false)
+  }
+  #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+  {
+    false
+  }
+}
+
 /// Build a `<name>.<suffix>:<http_port>` URL for the given container id, or
 /// `None` if DNS is disabled / the container is not yet routed. Returns the
 /// full `http://...` URL (HTTPS would need the user to install the root CA;
