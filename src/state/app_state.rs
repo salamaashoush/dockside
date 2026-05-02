@@ -24,6 +24,7 @@ pub enum CurrentView {
   Secrets,
   ConfigMaps,
   Pvcs,
+  Storage,
   Machines,
   /// AI Models — only constructed on macOS aarch64 (sidebar + palette
   /// gated), but variant is always defined so match arms compile on
@@ -122,12 +123,13 @@ mod tests {
       CurrentView::Secrets,
       CurrentView::ConfigMaps,
       CurrentView::Pvcs,
+      CurrentView::Storage,
       CurrentView::Machines,
       CurrentView::Models,
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 25);
+    assert_eq!(views.len(), 26);
   }
 
   #[test]

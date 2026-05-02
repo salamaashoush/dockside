@@ -27,6 +27,7 @@ pub mod services;
 pub mod settings;
 pub mod setup_dialog;
 pub mod statefulsets;
+pub mod storage;
 pub mod volumes;
 pub mod workloads;
 

@@ -7,7 +7,6 @@ use gpui_component::{
   Icon, IconName, Sizable,
   button::{Button, ButtonVariants},
   h_flex,
-  label::Label,
   menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   theme::ActiveTheme,
@@ -58,63 +57,8 @@ impl Render for PvcsView {
     let load_state = state.pvcs_state.clone();
     let count = items.len();
 
-    let selected_ns = state.selected_namespace.clone();
-    let namespaces = state.namespaces.clone();
-    let ns_label = if selected_ns == "all" {
-      "All".to_string()
-    } else {
-      selected_ns
-    };
-
-    let toolbar = h_flex()
-      .h(px(52.))
-      .w_full()
-      .px(px(16.))
-      .border_b_1()
-      .border_color(colors.border)
-      .items_center()
-      .justify_between()
-      .child(
-        v_flex().child(Label::new("PersistentVolumeClaims")).child(
-          div()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(format!("{count} items")),
-        ),
-      )
-      .child(
-        h_flex()
-          .gap(px(8.))
-          .items_center()
-          .child(
-            Button::new("namespace-selector")
-              .label(ns_label)
-              .ghost()
-              .compact()
-              .dropdown_menu(move |menu, _w, _cx| {
-                let mut menu = menu.item(PopupMenuItem::new("All Namespaces").on_click(|_, _, cx| {
-                  services::set_namespace("all".to_string(), cx);
-                }));
-                if !namespaces.is_empty() {
-                  menu = menu.separator();
-                  for ns in &namespaces {
-                    let ns = ns.clone();
-                    menu = menu.item(PopupMenuItem::new(ns.clone()).on_click(move |_, _, cx| {
-                      services::set_namespace(ns.clone(), cx);
-                    }));
-                  }
-                }
-                menu
-              }),
-          )
-          .child(
-            Button::new("refresh")
-              .icon(Icon::new(AppIcon::Refresh))
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _w, cx| services::refresh_pvcs(cx))),
-          ),
-      );
+    let _ = count;
+    let _ = state;
 
     let body: gpui::Div = match &load_state {
       LoadState::NotLoaded | LoadState::Loading => render_loading("pvcs", cx),
@@ -291,7 +235,7 @@ impl Render for PvcsView {
       }
     };
 
-    v_flex().size_full().child(toolbar).child(
+    v_flex().size_full().child(
       div()
         .id("pvcs-scroll")
         .flex_1()

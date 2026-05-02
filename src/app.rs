@@ -52,6 +52,7 @@ use crate::ui::setup_dialog::{
   SetupDialog, diagnose_k8s_quick, is_colima_installed, is_colima_running, is_docker_installed,
 };
 use crate::ui::statefulsets::StatefulSetsView;
+use crate::ui::storage::StorageView;
 use crate::ui::volumes::VolumesView;
 use crate::ui::workloads::WorkloadsView;
 
@@ -82,6 +83,7 @@ pub struct DocksideApp {
   pvcs_view: Entity<PvcsView>,
   networking_view: Entity<NetworkingView>,
   cluster_view: Entity<ClusterView>,
+  storage_view: Entity<StorageView>,
   dashboard_view: Entity<DashboardView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
   pending_notifications: Vec<(NotificationType, String)>,
@@ -187,6 +189,10 @@ impl DocksideApp {
       move |_| NetworkingView::new(svcs, ing)
     });
     let cluster_view = cx.new(|cx| ClusterView::new(window, cx));
+    let storage_view = cx.new({
+      let pvcs = pvcs_view.clone();
+      move |_| StorageView::new(pvcs)
+    });
     let dashboard_view = cx.new(|cx| DashboardView::new(window, cx));
 
     // Run setup checks async — only surface the dialog if a *required* piece is
@@ -260,6 +266,7 @@ impl DocksideApp {
       pvcs_view,
       networking_view,
       cluster_view,
+      storage_view,
       dashboard_view,
       pending_notifications: Vec::new(),
       pending_setup_check: None,
@@ -712,11 +719,14 @@ impl DocksideApp {
                                     })),
                             )
                             .child(
-                                SidebarMenuItem::new("Storage (PVCs)")
+                                SidebarMenuItem::new("Storage")
                                     .icon(IconName::Folder)
-                                    .active(current_view == CurrentView::Pvcs)
+                                    .active(matches!(
+                                        current_view,
+                                        CurrentView::Storage | CurrentView::Pvcs
+                                    ))
                                     .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        crate::services::set_view(CurrentView::Pvcs, cx);
+                                        crate::services::set_view(CurrentView::Storage, cx);
                                     })),
                             ),
                     ),
@@ -803,6 +813,7 @@ impl DocksideApp {
       CurrentView::Ingresses => div().size_full().child(self.ingresses_view.clone()),
       CurrentView::Pvcs => div().size_full().child(self.pvcs_view.clone()),
       CurrentView::Cluster => div().size_full().child(self.cluster_view.clone()),
+      CurrentView::Storage => div().size_full().child(self.storage_view.clone()),
       CurrentView::Dashboard => div().size_full().child(self.dashboard_view.clone()),
     }
   }
