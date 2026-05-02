@@ -59,10 +59,12 @@ impl DashboardView {
 
   fn section_header(title: &str, cx: &Context<'_, Self>) -> gpui::Div {
     let colors = cx.theme().colors;
-    div().px(px(16.)).pt(px(20.)).pb(px(8.)).child(
-      Label::new(title.to_string())
+    div().px(px(16.)).pt(px(24.)).pb(px(10.)).child(
+      div()
         .text_sm()
-        .text_color(colors.muted_foreground),
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(colors.foreground)
+        .child(title.to_string()),
     )
   }
 
@@ -75,54 +77,70 @@ impl DashboardView {
     cx: &mut Context<'_, Self>,
   ) -> gpui::Stateful<gpui::Div> {
     let colors = cx.theme().colors;
-    let sub_text = sub.unwrap_or_default();
+    let sub_text = sub.unwrap_or_else(|| "—".to_string());
     let id = format!("tile-{label}");
     div()
       .id(SharedString::from(id))
-      .min_w(px(180.))
-      .flex_1()
-      .p(px(14.))
-      .rounded(px(8.))
+      .w(px(220.))
+      .h(px(108.))
+      .p(px(16.))
+      .rounded(px(10.))
       .border_1()
       .border_color(colors.border)
       .bg(colors.background)
-      .hover(|s| s.bg(colors.sidebar))
+      .hover(|s| s.border_color(colors.primary).bg(colors.sidebar))
       .cursor_pointer()
       .on_click(cx.listener(move |_this, _ev, _w, cx| {
         services::set_view(target, cx);
       }))
       .child(
-        h_flex()
-          .gap(px(10.))
-          .items_center()
+        v_flex()
+          .size_full()
+          .justify_between()
           .child(
-            div()
-              .size(px(32.))
-              .rounded(px(6.))
-              .bg(colors.sidebar)
-              .flex()
+            h_flex()
+              .w_full()
               .items_center()
-              .justify_center()
-              .child(icon.size(px(16.)).text_color(colors.muted_foreground)),
-          )
-          .child(
-            v_flex()
+              .justify_between()
               .child(
                 div()
                   .text_xs()
+                  .font_weight(gpui::FontWeight::MEDIUM)
                   .text_color(colors.muted_foreground)
                   .child(label.to_string()),
               )
               .child(
                 div()
-                  .text_xl()
+                  .size(px(28.))
+                  .rounded(px(6.))
+                  .bg(colors.sidebar)
+                  .flex()
+                  .items_center()
+                  .justify_center()
+                  .child(icon.size(px(14.)).text_color(colors.muted_foreground)),
+              ),
+          )
+          .child(
+            v_flex()
+              .gap(px(2.))
+              .child(
+                div()
+                  .text_2xl()
                   .font_weight(gpui::FontWeight::SEMIBOLD)
                   .text_color(colors.foreground)
+                  .line_height(px(28.))
                   .child(value),
               )
-              .when(!sub_text.is_empty(), |el| {
-                el.child(div().text_xs().text_color(colors.muted_foreground).child(sub_text))
-              }),
+              .child(
+                div()
+                  .h(px(16.))
+                  .text_xs()
+                  .text_color(colors.muted_foreground)
+                  .text_ellipsis()
+                  .overflow_hidden()
+                  .whitespace_nowrap()
+                  .child(sub_text),
+              ),
           ),
       )
   }
@@ -146,16 +164,16 @@ impl DashboardView {
     let services_count = state.services.len();
     let k8s_available = state.k8s_available;
 
-    let mut row1 = h_flex().gap(px(12.)).w_full();
-    row1 = row1.child(Self::count_tile(
+    let mut grid = h_flex().px(px(16.)).gap(px(12.)).flex_wrap();
+    grid = grid.child(Self::count_tile(
       "Containers",
       containers_total.to_string(),
-      Some(format!("{containers_running} running, {containers_stopped} stopped")),
+      Some(format!("{containers_running} running · {containers_stopped} stopped")),
       Icon::new(AppIcon::Container),
       CurrentView::Containers,
       cx,
     ));
-    row1 = row1.child(Self::count_tile(
+    grid = grid.child(Self::count_tile(
       "Images",
       images_count.to_string(),
       Some(format_bytes(images_size)),
@@ -163,7 +181,7 @@ impl DashboardView {
       CurrentView::Images,
       cx,
     ));
-    row1 = row1.child(Self::count_tile(
+    grid = grid.child(Self::count_tile(
       "Volumes",
       volumes_count.to_string(),
       None,
@@ -171,7 +189,7 @@ impl DashboardView {
       CurrentView::Volumes,
       cx,
     ));
-    row1 = row1.child(Self::count_tile(
+    grid = grid.child(Self::count_tile(
       "Networks",
       networks_count.to_string(),
       None,
@@ -180,9 +198,8 @@ impl DashboardView {
       cx,
     ));
 
-    let mut row2 = h_flex().gap(px(12.)).w_full();
     if k8s_available {
-      row2 = row2.child(Self::count_tile(
+      grid = grid.child(Self::count_tile(
         "Pods",
         pods_count.to_string(),
         None,
@@ -190,7 +207,7 @@ impl DashboardView {
         CurrentView::Pods,
         cx,
       ));
-      row2 = row2.child(Self::count_tile(
+      grid = grid.child(Self::count_tile(
         "Deployments",
         deployments_count.to_string(),
         None,
@@ -198,7 +215,7 @@ impl DashboardView {
         CurrentView::Deployments,
         cx,
       ));
-      row2 = row2.child(Self::count_tile(
+      grid = grid.child(Self::count_tile(
         "Services",
         services_count.to_string(),
         None,
@@ -208,11 +225,7 @@ impl DashboardView {
       ));
     }
 
-    let mut col = v_flex().px(px(16.)).gap(px(12.)).w_full().child(row1);
-    if k8s_available {
-      col = col.child(row2);
-    }
-    col
+    div().w_full().child(grid)
   }
 
   fn render_system(&self, cx: &Context<'_, Self>) -> gpui::Div {
@@ -225,28 +238,39 @@ impl DashboardView {
     let k8s_available = state.k8s_available;
     let nodes_count = state.nodes.len();
 
-    let docker_line = host.map_or_else(
-      || "Disconnected".to_string(),
-      |h| format!("{} • {} {}", h.docker_version, h.os, h.arch),
+    let docker_connected = host.is_some();
+    let (docker_value, docker_sub) = host.map_or_else(
+      || ("Disconnected".to_string(), String::new()),
+      |h| (h.docker_version.clone(), format!("{} {}", h.os, h.arch)),
     );
-    let machine_line = if let Some(id) = active_machine {
-      format!("{machines_total} total • active: {}", id.name())
+    let (machine_value, machine_sub) = if let Some(id) = active_machine {
+      (id.name().to_string(), format!("{machines_total} total"))
     } else {
-      format!("{machines_total} total")
+      (format!("{machines_total}"), "machines".to_string())
     };
-    let k8s_line = if k8s_available {
-      format!("{nodes_count} node(s)")
+    let (k8s_value, k8s_sub) = if k8s_available {
+      (format!("{nodes_count}"), "node(s) ready".to_string())
     } else {
-      "Unavailable".to_string()
+      ("Off".to_string(), "Kubernetes disabled".to_string())
     };
 
     h_flex()
       .px(px(16.))
-      .gap(px(20.))
-      .items_center()
+      .gap(px(12.))
       .w_full()
       .flex_wrap()
-      .child(stat_tile(colors.success, "Docker", docker_line, cx))
+      .child(stat_tile(
+        if docker_connected {
+          colors.success
+        } else {
+          colors.muted_foreground
+        },
+        "Docker",
+        docker_value,
+        docker_sub,
+        Icon::new(AppIcon::Container),
+        cx,
+      ))
       .child(stat_tile(
         if k8s_available {
           colors.success
@@ -254,10 +278,19 @@ impl DashboardView {
           colors.muted_foreground
         },
         "Kubernetes",
-        k8s_line,
+        k8s_value,
+        k8s_sub,
+        Icon::new(AppIcon::Pod),
         cx,
       ))
-      .child(stat_tile(colors.success, "Machines", machine_line, cx))
+      .child(stat_tile(
+        colors.success,
+        "Machines",
+        machine_value,
+        machine_sub,
+        Icon::new(AppIcon::Machine),
+        cx,
+      ))
   }
 
   fn render_favorites(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
@@ -296,53 +329,72 @@ impl DashboardView {
       let fav_for_unpin = fav.clone();
 
       grid = grid.child(
-        h_flex()
+        div()
           .id(SharedString::from(format!("fav-{id_suffix}")))
-          .min_w(px(220.))
-          .gap(px(8.))
-          .p(px(10.))
-          .rounded(px(8.))
+          .w(px(220.))
+          .h(px(108.))
+          .p(px(16.))
+          .rounded(px(10.))
           .border_1()
           .border_color(colors.border)
           .bg(colors.background)
-          .hover(|s| s.bg(colors.sidebar))
+          .hover(|s| s.border_color(colors.primary).bg(colors.sidebar))
           .cursor_pointer()
           .on_click(cx.listener(move |_this, _ev, _w, cx| {
             services::open_favorite(&fav_for_open, cx);
           }))
           .child(
-            div()
-              .size(px(28.))
-              .rounded(px(6.))
-              .bg(colors.sidebar)
-              .flex()
-              .items_center()
-              .justify_center()
-              .child(icon.size(px(14.)).text_color(colors.muted_foreground)),
-          )
-          .child(
             v_flex()
-              .flex_1()
-              .min_w_0()
+              .size_full()
+              .justify_between()
+              .child(
+                h_flex()
+                  .w_full()
+                  .items_center()
+                  .justify_between()
+                  .child(
+                    div()
+                      .text_xs()
+                      .font_weight(gpui::FontWeight::MEDIUM)
+                      .text_color(colors.muted_foreground)
+                      .child(kind),
+                  )
+                  .child(
+                    h_flex()
+                      .gap(px(4.))
+                      .items_center()
+                      .child(
+                        div()
+                          .size(px(28.))
+                          .rounded(px(6.))
+                          .bg(colors.sidebar)
+                          .flex()
+                          .items_center()
+                          .justify_center()
+                          .child(icon.size(px(14.)).text_color(colors.muted_foreground)),
+                      )
+                      .child(
+                        Button::new(SharedString::from(format!("unpin-{id_suffix}")))
+                          .icon(IconName::Close)
+                          .ghost()
+                          .xsmall()
+                          .on_click(cx.listener(move |_this, _ev, _w, cx| {
+                            services::toggle_favorite(fav_for_unpin.clone(), cx);
+                          })),
+                      ),
+                  ),
+              )
               .child(
                 div()
                   .text_sm()
+                  .font_weight(gpui::FontWeight::MEDIUM)
                   .text_color(colors.foreground)
+                  .line_height(px(20.))
                   .text_ellipsis()
                   .overflow_hidden()
                   .whitespace_nowrap()
                   .child(label),
-              )
-              .child(div().text_xs().text_color(colors.muted_foreground).child(kind)),
-          )
-          .child(
-            Button::new(SharedString::from(format!("unpin-{id_suffix}")))
-              .icon(IconName::Close)
-              .ghost()
-              .xsmall()
-              .on_click(cx.listener(move |_this, _ev, _w, cx| {
-                services::toggle_favorite(fav_for_unpin.clone(), cx);
-              })),
+              ),
           ),
       );
     }
@@ -353,29 +405,48 @@ impl DashboardView {
     let colors = cx.theme().colors;
     let state = self.docker_state.read(cx);
 
-    // Rough recent feed: take last 5 events (Warning first), last 5
-    // containers by created, last 5 pods by namespace+name. Cheap, all
-    // pulled from existing state Vecs.
-    let mut col = v_flex().px(px(16.)).gap(px(8.));
+    let panel = |title: &str, rows: Vec<gpui::Div>, cx: &Context<'_, Self>| -> gpui::Div {
+      let colors = cx.theme().colors;
+      v_flex()
+        .flex_1()
+        .min_w(px(360.))
+        .rounded(px(10.))
+        .border_1()
+        .border_color(colors.border)
+        .bg(colors.background)
+        .child(
+          h_flex()
+            .w_full()
+            .px(px(14.))
+            .py(px(10.))
+            .border_b_1()
+            .border_color(colors.border)
+            .child(
+              div()
+                .text_xs()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(colors.foreground)
+                .child(title.to_string()),
+            ),
+        )
+        .child(v_flex().w_full().px(px(14.)).py(px(8.)).gap(px(4.)).children(rows))
+    };
 
-    if state.k8s_available && !state.events.is_empty() {
-      col = col.child(
-        Label::new("Recent Events")
-          .text_xs()
-          .text_color(colors.muted_foreground),
-      );
-      for e in state.events.iter().take(8) {
-        let type_color = if e.event_type == "Warning" {
-          colors.warning
-        } else {
-          colors.muted_foreground
-        };
-        col = col.child(
+    let events_rows: Vec<gpui::Div> = if state.k8s_available && !state.events.is_empty() {
+      state
+        .events
+        .iter()
+        .take(6)
+        .map(|e| {
+          let type_color = if e.event_type == "Warning" {
+            colors.warning
+          } else {
+            colors.muted_foreground
+          };
           h_flex()
             .gap(px(8.))
             .py(px(4.))
-            .border_b_1()
-            .border_color(colors.border)
+            .items_center()
             .child(
               div()
                 .w(px(60.))
@@ -385,9 +456,12 @@ impl DashboardView {
             )
             .child(
               div()
-                .w(px(120.))
+                .w(px(110.))
                 .text_xs()
                 .text_color(colors.foreground)
+                .text_ellipsis()
+                .overflow_hidden()
+                .whitespace_nowrap()
                 .child(e.reason.clone()),
             )
             .child(
@@ -397,45 +471,61 @@ impl DashboardView {
                 .text_color(colors.muted_foreground)
                 .text_ellipsis()
                 .overflow_hidden()
+                .whitespace_nowrap()
                 .child(e.message.clone()),
             )
             .child(
               div()
-                .w(px(60.))
+                .w(px(40.))
                 .text_xs()
                 .text_color(colors.muted_foreground)
+                .text_right()
                 .child(e.age.clone()),
-            ),
-        );
-      }
-    }
-
-    if !state.containers.is_empty() {
-      col = col.child(
+            )
+        })
+        .collect()
+    } else {
+      vec![
         div()
-          .pt(px(8.))
-          .child(Label::new("Containers").text_xs().text_color(colors.muted_foreground)),
-      );
-      for c in state.containers.iter().take(5) {
-        let status_color = if c.state.is_running() {
-          colors.success
-        } else {
-          colors.muted_foreground
-        };
-        col = col.child(
+          .py(px(4.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("No recent events."),
+      ]
+    };
+
+    let container_rows: Vec<gpui::Div> = if state.containers.is_empty() {
+      vec![
+        div()
+          .py(px(4.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("No containers."),
+      ]
+    } else {
+      state
+        .containers
+        .iter()
+        .take(6)
+        .map(|c| {
+          let status_color = if c.state.is_running() {
+            colors.success
+          } else {
+            colors.muted_foreground
+          };
           h_flex()
             .gap(px(8.))
             .py(px(4.))
-            .border_b_1()
-            .border_color(colors.border)
+            .items_center()
             .child(div().size(px(8.)).rounded_full().bg(status_color))
             .child(
               div()
-                .w(px(220.))
+                .w(px(160.))
                 .text_xs()
                 .text_color(colors.foreground)
                 .text_ellipsis()
                 .overflow_hidden()
+                .whitespace_nowrap()
                 .child(c.name.clone()),
             )
             .child(
@@ -445,20 +535,31 @@ impl DashboardView {
                 .text_color(colors.muted_foreground)
                 .text_ellipsis()
                 .overflow_hidden()
+                .whitespace_nowrap()
                 .child(c.image.clone()),
             )
             .child(
               div()
-                .w(px(80.))
+                .w(px(70.))
                 .text_xs()
                 .text_color(colors.muted_foreground)
+                .text_right()
                 .child(c.state.to_string()),
-            ),
-        );
-      }
-    }
+            )
+        })
+        .collect()
+    };
 
-    col
+    h_flex()
+      .px(px(16.))
+      .gap(px(12.))
+      .w_full()
+      .flex_wrap()
+      .items_start()
+      .child(panel("Containers", container_rows, cx))
+      .when(state.k8s_available, |el| {
+        el.child(panel("Recent Events", events_rows, cx))
+      })
   }
 }
 
@@ -517,22 +618,81 @@ impl Render for DashboardView {
   }
 }
 
-fn stat_tile(dot_color: gpui::Hsla, label: &str, value: String, cx: &Context<'_, DashboardView>) -> gpui::Div {
+fn stat_tile(
+  dot_color: gpui::Hsla,
+  label: &str,
+  value: String,
+  sub: String,
+  icon: Icon,
+  cx: &Context<'_, DashboardView>,
+) -> gpui::Div {
   let colors = cx.theme().colors;
-  h_flex()
-    .gap(px(10.))
-    .items_center()
-    .py(px(12.))
-    .child(div().size(px(8.)).rounded_full().bg(dot_color))
+  div()
+    .w(px(220.))
+    .h(px(108.))
+    .p(px(16.))
+    .rounded(px(10.))
+    .border_1()
+    .border_color(colors.border)
+    .bg(colors.background)
     .child(
       v_flex()
+        .size_full()
+        .justify_between()
         .child(
-          div()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(label.to_string()),
+          h_flex()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .child(
+              h_flex()
+                .gap(px(6.))
+                .items_center()
+                .child(div().size(px(8.)).rounded_full().bg(dot_color))
+                .child(
+                  div()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(colors.muted_foreground)
+                    .child(label.to_string()),
+                ),
+            )
+            .child(
+              div()
+                .size(px(28.))
+                .rounded(px(6.))
+                .bg(colors.sidebar)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon.size(px(14.)).text_color(colors.muted_foreground)),
+            ),
         )
-        .child(div().text_sm().text_color(colors.foreground).child(value)),
+        .child(
+          v_flex()
+            .gap(px(2.))
+            .child(
+              div()
+                .text_lg()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(colors.foreground)
+                .line_height(px(22.))
+                .text_ellipsis()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(value),
+            )
+            .child(
+              div()
+                .h(px(16.))
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .text_ellipsis()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(sub),
+            ),
+        ),
     )
 }
 
