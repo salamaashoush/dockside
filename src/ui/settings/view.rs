@@ -1130,38 +1130,6 @@ impl SettingsView {
       block
     };
 
-    let test_panel = v_flex()
-      .w_full()
-      .gap(px(6.))
-      .p(px(16.))
-      .my(px(12.))
-      .rounded(px(8.))
-      .bg(colors.sidebar)
-      .border_1()
-      .border_color(colors.border.opacity(0.6))
-      .child(
-        div()
-          .text_sm()
-          .font_weight(gpui::FontWeight::SEMIBOLD)
-          .text_color(colors.foreground)
-          .child("Test it"),
-      )
-      .child(
-        div()
-          .text_xs()
-          .text_color(colors.muted_foreground)
-          .whitespace_normal()
-          .child(
-            "1. Run a container that exposes a port: `docker run -d --name nginx -p 8080:80 nginx`.\n\
-             2. Verify resolution: `dig @127.0.0.1 -p 15353 nginx.dockside.test +short` → 127.0.0.1.\n\
-             3. Open `http://nginx.dockside.test/` in your browser.\n\
-             4. For HTTPS, install the root CA above, then `https://nginx.dockside.test/`.\n\
-             Linux dnsmasq users: dockside writes /etc/NetworkManager/dnsmasq.d/dockside-*.conf.\n\
-             systemd-resolved users: dockside writes /etc/systemd/resolved.conf.d/dockside-*.conf.\n\
-             Check the resolver registered: `resolvectl status` or `cat /etc/resolver/dockside.test` (macOS).",
-          ),
-      );
-
     v_flex()
       .w_full()
       .child(Self::render_section("Resolver", cx))
@@ -1176,8 +1144,6 @@ impl SettingsView {
       .child(ca_row)
       .child(Self::render_section("Routes", cx))
       .child(routes_panel)
-      .child(Self::render_section("How to test", cx))
-      .child(test_panel)
       .into_any_element()
   }
 
