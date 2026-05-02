@@ -278,6 +278,7 @@ impl ContainersView {
     let comment_input = cx.new(|cx| {
       InputState::new(window, cx).placeholder(format!("Comment (optional, from container: {container_name})"))
     });
+    let author_input = cx.new(|cx| InputState::new(window, cx).placeholder("Author (optional, e.g. Jane Doe <jane@x>)"));
     let container_id = container_id.to_string();
 
     window.open_dialog(cx, move |dialog, _window, cx| {
@@ -285,6 +286,7 @@ impl ContainersView {
       let repo_clone = repo_input.clone();
       let tag_clone = tag_input.clone();
       let comment_clone = comment_input.clone();
+      let author_clone = author_input.clone();
       let container_id = container_id.clone();
 
       dialog
@@ -301,12 +303,14 @@ impl ContainersView {
             )
             .child(Input::new(&repo_input).w_full())
             .child(Input::new(&tag_input).w_full())
-            .child(Input::new(&comment_input).w_full()),
+            .child(Input::new(&comment_input).w_full())
+            .child(Input::new(&author_input).w_full()),
         )
         .footer(move |_dialog_state, _, _window, _cx| {
           let repo = repo_clone.clone();
           let tag = tag_clone.clone();
           let comment = comment_clone.clone();
+          let author = author_clone.clone();
           let id = container_id.clone();
 
           vec![
@@ -317,6 +321,7 @@ impl ContainersView {
                 let repo_text = repo.read(cx).text().to_string();
                 let tag_text = tag.read(cx).text().to_string();
                 let comment_text = comment.read(cx).text().to_string();
+                let author_text = author.read(cx).text().to_string();
 
                 if !repo_text.is_empty() {
                   let comment_opt = if comment_text.is_empty() {
@@ -324,7 +329,12 @@ impl ContainersView {
                   } else {
                     Some(comment_text)
                   };
-                  services::commit_container(id.clone(), repo_text, tag_text, comment_opt, None, cx);
+                  let author_opt = if author_text.is_empty() {
+                    None
+                  } else {
+                    Some(author_text)
+                  };
+                  services::commit_container(id.clone(), repo_text, tag_text, comment_opt, author_opt, cx);
                   window.close_dialog(cx);
                 }
               })
