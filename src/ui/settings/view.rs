@@ -504,12 +504,12 @@ impl SettingsView {
       .proxy_http_port_input
       .as_ref()
       .and_then(|i| i.read(cx).text().to_string().parse::<u16>().ok())
-      .unwrap_or(8080);
+      .unwrap_or(47080);
     let secure_proxy_port = self
       .proxy_https_port_input
       .as_ref()
       .and_then(|i| i.read(cx).text().to_string().parse::<u16>().ok())
-      .unwrap_or(8443);
+      .unwrap_or(47443);
 
     self.settings_state.update(cx, |state, cx| {
       state.settings.docker_socket = docker_socket;
@@ -1046,13 +1046,13 @@ impl SettingsView {
     );
     let plain_port_row = Self::render_row(
       "HTTP proxy port",
-      "Loopback port for plain HTTP. 80 needs root; 8080 is the unprivileged default.",
+      "Loopback port for plain HTTP. 80 needs root; default 47080 avoids common dev-tool collisions.",
       Input::new(&plain_port_box).small().w_full(),
       cx,
     );
     let secure_port_row = Self::render_row(
       "HTTPS proxy port",
-      "Loopback port for HTTPS. 443 needs root; 8443 is the unprivileged default.",
+      "Loopback port for HTTPS. 443 needs root; default 47443 avoids common dev-tool collisions.",
       Input::new(&secure_port_box).small().w_full(),
       cx,
     );

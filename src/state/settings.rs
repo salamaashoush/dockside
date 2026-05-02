@@ -410,12 +410,13 @@ fn default_dns_port() -> u16 {
   15353
 }
 fn default_proxy_http_port() -> u16 {
-  // Unprivileged port. Binding 80 needs root on Linux/macOS; users can
-  // change to 80 in Settings + grant CAP_NET_BIND_SERVICE if desired.
-  8080
+  // Unprivileged + uncommon. 8080/8443 collide with dev servers, jenkins,
+  // tomcat, etc. The 47000-range is rarely used. Users can switch to 80 in
+  // Settings + grant CAP_NET_BIND_SERVICE if they want pretty URLs.
+  47080
 }
 fn default_proxy_https_port() -> u16 {
-  8443
+  47443
 }
 
 impl Default for AppSettings {
@@ -644,8 +645,8 @@ mod tests {
       dns_autostart: true,
       dns_suffix: "dockside.test".to_string(),
       dns_port: 15353,
-      proxy_http_port: 8080,
-      proxy_https_port: 8443,
+      proxy_http_port: 47080,
+      proxy_https_port: 47443,
     };
 
     assert_eq!(settings.theme, ThemeName::GruvboxDark);
