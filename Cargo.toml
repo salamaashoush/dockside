@@ -36,7 +36,7 @@ tray-icon = "0.21"
 muda = "0.17"
 image = "0.25"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 bytesize = "2.3"
 parking_lot = "0.12"

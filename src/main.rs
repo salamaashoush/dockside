@@ -24,7 +24,7 @@ use gpui_component::{
   Root,
   theme::{Theme, ThemeConfig, ThemeRegistry, ThemeSet},
 };
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use platform::Platform;
 use state::{AppSettings, CurrentView};
@@ -135,7 +135,27 @@ fn load_theme_sync(themes_dir: &PathBuf, theme_name: &str) -> Option<Rc<ThemeCon
 }
 
 fn main() {
+  // Default: info-level for our own crate, drop noisy third-party trace
+  // streams (calloop event loop, blade GPU resource churn, Wayland/X11
+  // client chatter, naga shader passes). Respect RUST_LOG when set so
+  // developers can still crank verbosity for a specific crate.
+  let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+    EnvFilter::new(
+      "info,\
+       calloop=warn,\
+       calloop_wayland_source=warn,\
+       wayland_client=warn,\
+       wayland_backend=warn,\
+       blade_graphics=warn,\
+       blade_graphics::hal=warn,\
+       naga=warn,\
+       sctk=warn,\
+       smithay_client_toolkit=warn",
+    )
+  });
+
   tracing_subscriber::registry()
+    .with(filter)
     .with(tracing_subscriber::fmt::layer())
     .init();
 
