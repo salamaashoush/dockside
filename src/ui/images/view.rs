@@ -45,6 +45,9 @@ impl ImagesView {
         ImageListEvent::PullImage => {
           Self::show_pull_dialog(window, cx);
         }
+        ImageListEvent::BuildImage => {
+          crate::ui::dialogs::open_build_image_dialog(window, cx);
+        }
       },
     )
     .detach();

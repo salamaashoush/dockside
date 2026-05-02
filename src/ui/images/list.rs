@@ -20,6 +20,7 @@ use crate::ui::components::{render_error, render_loading};
 pub enum ImageListEvent {
   Selected(Box<ImageInfo>),
   PullImage,
+  BuildImage,
 }
 
 /// Delegate for the image list
@@ -533,6 +534,15 @@ impl Render for ImageList {
               .compact()
               .on_click(cx.listener(|this, _ev, window, cx| {
                 this.toggle_search(window, cx);
+              })),
+          )
+          .child(
+            Button::new("build")
+              .label("Build")
+              .ghost()
+              .compact()
+              .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.emit(ImageListEvent::BuildImage);
               })),
           )
           .child(

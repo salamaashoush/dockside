@@ -16,6 +16,7 @@ use gpui_component::{
 use crate::services;
 use crate::ui::containers::CreateContainerDialog;
 use crate::ui::deployments::create_dialog::CreateDeploymentDialog;
+use crate::ui::images::build_dialog::BuildImageDialog;
 use crate::ui::images::pull_dialog::PullImageDialog;
 use crate::ui::images::push_dialog::PushImageDialog;
 use crate::ui::images::tag_dialog::TagImageDialog;
@@ -50,6 +51,62 @@ pub fn open_pull_image_dialog(window: &mut Window, cx: &mut App) {
                   services::pull_image(options.image, options.platform.as_docker_arg().map(String::from), cx);
                   window.close_dialog(cx);
                 }
+              }
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
+/// Opens the Build Image dialog with a Build button configured.
+/// Streams build output into a fresh `LogStream` rendered in a new
+/// dialog body using the same `TerminalView` we use for container logs.
+pub fn open_build_image_dialog(window: &mut Window, cx: &mut App) {
+  let dialog_entity = cx.new(BuildImageDialog::new);
+
+  window.open_dialog(cx, move |dialog, _window, _cx| {
+    let dialog_clone = dialog_entity.clone();
+
+    dialog
+      .title("Build Image")
+      .min_w(px(560.))
+      .child(dialog_entity.clone())
+      .footer(move |_dialog_state, _, _window, _cx| {
+        let dialog_for_build = dialog_clone.clone();
+        vec![
+          Button::new("build")
+            .label("Build")
+            .primary()
+            .on_click({
+              let dialog = dialog_for_build.clone();
+              move |_ev, window, cx| {
+                let opts = dialog.read(cx).get_options(cx);
+                if opts.context_dir.is_empty() || opts.tag.is_empty() {
+                  return;
+                }
+                // Output goes into a new `LogStream`. We don't show it
+                // in this dialog (the dialog closes); instead the
+                // streaming task pipes bytes into the stream and the
+                // user can wire it into a viewer separately. For now,
+                // surface progress via the existing task bar.
+                let log_stream = match crate::terminal::LogStream::new(120, 40) {
+                  Ok(s) => std::sync::Arc::new(s),
+                  Err(_) => return,
+                };
+                services::build_image(
+                  opts.context_dir,
+                  opts.dockerfile,
+                  opts.tag,
+                  opts.build_args,
+                  opts.target,
+                  opts.platform.as_docker_arg().map(String::from),
+                  opts.no_cache,
+                  opts.pull,
+                  log_stream,
+                  cx,
+                );
+                window.close_dialog(cx);
               }
             })
             .into_any_element(),

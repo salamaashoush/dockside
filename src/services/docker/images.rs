@@ -74,6 +74,112 @@ pub fn delete_image(id: String, cx: &mut App) {
   .detach();
 }
 
+/// Build an image and stream the daemon output into a fresh `LogStream`,
+/// returning it so the caller can hand the same stream to a viewer
+/// entity. The build runs on the tokio runtime; errors and completion
+/// notifications go through the existing task / dispatcher pipeline.
+pub fn build_image(
+  context_dir: String,
+  dockerfile: String,
+  tag: String,
+  build_args: Vec<(String, String)>,
+  target: Option<String>,
+  platform: Option<String>,
+  no_cache: bool,
+  pull: bool,
+  log_stream: std::sync::Arc<crate::terminal::LogStream>,
+  cx: &mut App,
+) {
+  let task_id = start_task(cx, format!("Building {tag}..."));
+  let tag_for_msg = tag.clone();
+  let disp = dispatcher(cx);
+  let client = docker_client();
+  let log_for_task = log_stream.clone();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    let path = std::path::PathBuf::from(&context_dir);
+    let target_ref = target.as_deref();
+    let platform_ref = platform.as_deref();
+    docker
+      .build_image_with_progress(
+        &path,
+        &dockerfile,
+        &tag,
+        build_args,
+        target_ref,
+        platform_ref,
+        no_cache,
+        pull,
+        |ev| {
+          // Stitch stream / status / error into one CRLF-terminated
+          // chunk so the libghostty grid breaks lines correctly.
+          let mut text = String::new();
+          if !ev.stream.is_empty() {
+            text.push_str(&ev.stream);
+          }
+          if !ev.status.is_empty() {
+            if !text.is_empty() && !text.ends_with('\n') {
+              text.push('\n');
+            }
+            text.push_str(&ev.status);
+          }
+          if !ev.error.is_empty() {
+            if !text.is_empty() && !text.ends_with('\n') {
+              text.push('\n');
+            }
+            text.push_str("ERROR: ");
+            text.push_str(&ev.error);
+          }
+          if !text.is_empty() {
+            let mut bytes = Vec::with_capacity(text.len() + 16);
+            let mut prev = 0u8;
+            for &b in text.as_bytes() {
+              if b == b'\n' && prev != b'\r' {
+                bytes.push(b'\r');
+              }
+              bytes.push(b);
+              prev = b;
+            }
+            log_for_task.feed_bytes(bytes);
+          }
+        },
+      )
+      .await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(())) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Image {tag_for_msg} built"),
+          });
+        });
+        refresh_images(cx);
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn tag_image(source: String, repo: String, tag: String, cx: &mut App) {
   let task_id = start_task(cx, format!("Tagging {source} as {repo}:{tag}..."));
   let disp = dispatcher(cx);

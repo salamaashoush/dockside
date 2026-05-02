@@ -1,7 +1,8 @@
 use anyhow::Result;
 use bollard::auth::DockerCredentials;
 use bollard::query_parameters::{
-  CreateImageOptions, ListImagesOptions, PushImageOptionsBuilder, RemoveImageOptions, TagImageOptionsBuilder,
+  BuildImageOptionsBuilder, CreateImageOptions, ListImagesOptions, PushImageOptionsBuilder, RemoveImageOptions,
+  TagImageOptionsBuilder,
 };
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
@@ -21,6 +22,16 @@ pub struct ImageInfo {
   pub labels: HashMap<String, String>,
   pub architecture: Option<String>,
   pub os: Option<String>,
+}
+
+/// One streamed event from `build_image_with_progress`. Either `stream`
+/// (output line, e.g. "Step 3/8 : RUN apt-get install …"), `status`
+/// (layer status), or `error` (build failure detail) will be populated.
+#[derive(Debug, Clone, Default)]
+pub struct BuildProgressEvent {
+  pub stream: String,
+  pub status: String,
+  pub error: String,
 }
 
 /// One streamed event from `pull_image_with_progress`. Most events report
@@ -188,6 +199,91 @@ impl DockerClient {
         })
         .collect(),
     )
+  }
+
+  /// Build an image from a context directory + Dockerfile. The context
+  /// is tar-bundled in the background, then the bollard build stream is
+  /// driven and each event is delivered to `on_progress`.
+  ///
+  /// `context_dir` is the build root (everything under it is shipped).
+  /// `dockerfile` is relative to the context (e.g. `Dockerfile`).
+  pub async fn build_image_with_progress<F>(
+    &self,
+    context_dir: &std::path::Path,
+    dockerfile: &str,
+    tag: &str,
+    build_args: Vec<(String, String)>,
+    target: Option<&str>,
+    platform: Option<&str>,
+    no_cache: bool,
+    pull: bool,
+    mut on_progress: F,
+  ) -> Result<()>
+  where
+    F: FnMut(BuildProgressEvent) + Send,
+  {
+    let docker = self.client()?;
+
+    // Tar the build context. Bollard expects the request body to be a
+    // tarball; build it in-memory (fine for typical small contexts).
+    let context_dir = context_dir.to_path_buf();
+    let tar_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+      let mut buf: Vec<u8> = Vec::new();
+      {
+        let mut builder = tar::Builder::new(&mut buf);
+        builder.follow_symlinks(false);
+        builder
+          .append_dir_all(".", &context_dir)
+          .map_err(|e| anyhow::anyhow!("tar build failed: {e}"))?;
+        builder.finish().map_err(|e| anyhow::anyhow!("tar finalize failed: {e}"))?;
+      }
+      Ok(buf)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("tar task panicked: {e}"))??;
+
+    let pull_str = if pull { "true" } else { "" };
+    let mut builder = BuildImageOptionsBuilder::default()
+      .dockerfile(dockerfile)
+      .t(tag)
+      .nocache(no_cache)
+      .pull(pull_str)
+      .rm(true);
+    if let Some(t) = target {
+      builder = builder.target(t);
+    }
+    if let Some(p) = platform {
+      builder = builder.platform(p);
+    }
+    let build_args_owned: std::collections::HashMap<String, String> = build_args.into_iter().collect();
+    let build_args_ref: std::collections::HashMap<&str, &str> = build_args_owned
+      .iter()
+      .map(|(k, v)| (k.as_str(), v.as_str()))
+      .collect();
+    if !build_args_ref.is_empty() {
+      builder = builder.buildargs(&build_args_ref);
+    }
+    let opts = builder.build();
+
+    let body = bollard::body_full(bytes::Bytes::from(tar_bytes));
+    let mut stream = docker.build_image(opts, None, Some(body));
+
+    while let Some(result) = stream.next().await {
+      match result {
+        Ok(info) => {
+          let stream_text = info.stream.unwrap_or_default();
+          let status = info.status.unwrap_or_default();
+          let error = info.error.unwrap_or_default();
+          on_progress(BuildProgressEvent {
+            stream: stream_text,
+            status,
+            error,
+          });
+        }
+        Err(e) => return Err(anyhow::anyhow!("build failed: {e}")),
+      }
+    }
+    Ok(())
   }
 
   /// Tag an existing image as `repo:tag`. `repo` may include a registry

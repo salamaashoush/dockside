@@ -1,3 +1,4 @@
+pub mod build_dialog;
 mod detail;
 mod list;
 pub mod pull_dialog;
