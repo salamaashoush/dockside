@@ -563,18 +563,14 @@ impl ImageDetail {
       );
     }
     if let Some(err) = d.scan_error.as_ref() {
-      return v_flex()
-        .w_full()
-        .p(px(16.))
-        .gap(px(8.))
-        .child(div().text_sm().text_color(colors.danger).child("Scan failed."))
-        .child(
-          div()
-            .text_xs()
-            .font_family("monospace")
-            .text_color(colors.muted_foreground)
-            .child(err.clone()),
-        );
+      // Specially render the missing-binary case using an install-hint
+      // panel modeled after the Setup dialog: headline + per-platform
+      // copy-able command list + docs link. Anything else falls back to
+      // the raw error message, also dressed up.
+      if err == crate::docker::ERR_TRIVY_NOT_INSTALLED {
+        return render_install_hint(crate::docker::trivy_install_hint(), cx);
+      }
+      return render_error_panel("Scan failed", err, colors);
     }
 
     let summary = d.scan.as_ref().unwrap();
@@ -836,6 +832,166 @@ impl ImageDetail {
       )
       .into_any_element()
   }
+}
+
+/// Setup-dialog-style command row: monospace box on the left, a Copy
+/// button on the right that dumps the literal text to the clipboard.
+fn render_command_row(id: usize, command: &str, cx: &App) -> gpui::Div {
+  let colors = &cx.theme().colors;
+  let cmd = command.to_string();
+  let cmd_clone = cmd.clone();
+  h_flex()
+    .w_full()
+    .gap(px(8.))
+    .items_center()
+    .child(
+      div()
+        .flex_1()
+        .px(px(10.))
+        .py(px(6.))
+        .bg(colors.background)
+        .rounded(px(4.))
+        .border_1()
+        .border_color(colors.border)
+        .font_family("monospace")
+        .text_xs()
+        .text_color(colors.foreground)
+        .overflow_hidden()
+        .child(cmd),
+    )
+    .child(
+      Button::new(("copy-cmd", id))
+        .icon(Icon::new(AppIcon::Copy))
+        .ghost()
+        .small()
+        .on_click(move |_ev, _window, cx| {
+          cx.write_to_clipboard(gpui::ClipboardItem::new_string(cmd_clone.clone()));
+        }),
+    )
+}
+
+/// Structured install-hint panel: warning-style box, headline,
+/// platform-appropriate commands (each with a Copy button), and a docs
+/// link the user can click.
+fn render_install_hint(hint: crate::docker::InstallHint, cx: &App) -> gpui::Div {
+  let colors = &cx.theme().colors;
+  let mut col = v_flex()
+    .w_full()
+    .m(px(16.))
+    .p(px(16.))
+    .gap(px(12.))
+    .rounded(px(8.))
+    .border_1()
+    .border_color(colors.warning.opacity(0.5))
+    .bg(colors.warning.opacity(0.05))
+    .child(
+      h_flex()
+        .gap(px(8.))
+        .items_center()
+        .child(
+          Icon::new(gpui_component::IconName::Info)
+            .size(px(16.))
+            .text_color(colors.warning),
+        )
+        .child(
+          div()
+            .text_sm()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(colors.foreground)
+            .child(hint.headline.to_string()),
+        ),
+    );
+
+  if !hint.commands.is_empty() {
+    col = col.child(
+      div()
+        .text_xs()
+        .text_color(colors.muted_foreground)
+        .child("Run one of these:"),
+    );
+    for (i, c) in hint.commands.iter().enumerate() {
+      col = col.child(render_command_row(i, c, cx));
+    }
+  }
+  let docs = hint.docs_url.to_string();
+  col = col.child(
+    h_flex()
+      .gap(px(8.))
+      .items_center()
+      .child(
+        div()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("Docs:"),
+      )
+      .child(
+        div()
+          .text_xs()
+          .font_family("monospace")
+          .text_color(colors.link)
+          .child(docs.clone()),
+      )
+      .child(
+        Button::new("copy-docs")
+          .icon(Icon::new(AppIcon::Copy))
+          .ghost()
+          .small()
+          .on_click(move |_ev, _window, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(docs.clone()));
+          }),
+      ),
+  );
+  col
+}
+
+/// Generic dressed-up error panel for non-install failures (e.g. trivy
+/// returning a non-zero exit code on a junk image).
+fn render_error_panel(headline: &str, err: &str, colors: &gpui_component::theme::ThemeColor) -> gpui::Div {
+  let err_owned = err.to_string();
+  let err_clone = err_owned.clone();
+  v_flex()
+    .w_full()
+    .m(px(16.))
+    .p(px(16.))
+    .gap(px(8.))
+    .rounded(px(8.))
+    .border_1()
+    .border_color(colors.danger.opacity(0.5))
+    .bg(colors.danger.opacity(0.05))
+    .child(
+      h_flex()
+        .gap(px(8.))
+        .items_center()
+        .child(
+          Icon::new(gpui_component::IconName::CircleX)
+            .size(px(16.))
+            .text_color(colors.danger),
+        )
+        .child(
+          div()
+            .text_sm()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(colors.foreground)
+            .child(headline.to_string()),
+        ),
+    )
+    .child(
+      div()
+        .text_xs()
+        .font_family("monospace")
+        .text_color(colors.muted_foreground)
+        .child(err_owned),
+    )
+    .child(
+      Button::new("copy-err")
+        .icon(Icon::new(AppIcon::Copy))
+        .ghost()
+        .small()
+        .label("Copy error")
+        .on_click(move |_ev, _window, cx| {
+          cx.write_to_clipboard(gpui::ClipboardItem::new_string(err_clone.clone()));
+        }),
+    )
 }
 
 fn severity_badge(label: &'static str, count: usize, color: gpui::Hsla, cx: &App) -> gpui::Div {

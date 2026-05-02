@@ -211,6 +211,10 @@ impl Render for ImagesView {
             .cloned()
             .unwrap_or_else(|| img.id.clone());
           services::scan_image(id.to_string(), image_ref, cx);
+          // Jump to the Vulnerabilities tab so the user sees the
+          // running spinner / error / table without an extra click.
+          this.active_tab = 2;
+          cx.notify();
         }
       }));
 

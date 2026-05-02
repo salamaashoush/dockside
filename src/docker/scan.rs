@@ -35,19 +35,23 @@ pub struct Vulnerability {
   pub primary_url: Option<String>,
 }
 
-/// Build a platform-appropriate hint for installing the `trivy` binary.
-/// We try popular package managers per OS so the message points at
-/// something the user can actually run.
-pub fn trivy_install_hint() -> String {
-  let header = "Install trivy:";
+/// Structured install guidance for surfacing in the UI: a short
+/// headline, a list of copy-able shell commands relevant to the host
+/// platform, plus a docs URL.
+#[derive(Debug, Clone)]
+pub struct InstallHint {
+  pub headline: &'static str,
+  pub commands: Vec<&'static str>,
+  pub docs_url: &'static str,
+}
+
+/// Build a platform-aware install hint for the `trivy` binary.
+pub fn trivy_install_hint() -> InstallHint {
+  let docs_url = "https://aquasecurity.github.io/trivy/latest/getting-started/installation/";
   #[cfg(target_os = "macos")]
-  let suggestions = [
-    "brew install trivy",
-    "or download a release from https://github.com/aquasecurity/trivy/releases",
-  ];
+  let commands = vec!["brew install trivy"];
   #[cfg(target_os = "linux")]
-  let suggestions = {
-    // Detect a few distros via /etc/os-release id.
+  let commands: Vec<&'static str> = {
     let id = std::fs::read_to_string("/etc/os-release")
       .ok()
       .and_then(|s| {
@@ -56,41 +60,32 @@ pub fn trivy_install_hint() -> String {
       })
       .unwrap_or_default();
     match id.as_str() {
-      "arch" | "cachyos" | "manjaro" | "endeavouros" => [
-        "sudo pacman -S trivy",
-        "or see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
+      "arch" | "cachyos" | "manjaro" | "endeavouros" => vec!["sudo pacman -S trivy"],
+      "fedora" | "rhel" | "centos" => vec!["sudo dnf install trivy"],
+      "alpine" => vec!["apk add trivy"],
+      "debian" | "ubuntu" | "pop" | "linuxmint" => vec![
+        "sudo apt-get install wget gnupg",
+        "wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -",
+        "echo \"deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main\" | sudo tee -a /etc/apt/sources.list.d/trivy.list",
+        "sudo apt-get update && sudo apt-get install trivy",
       ],
-      "fedora" | "rhel" | "centos" => [
-        "sudo dnf install trivy",
-        "or see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
-      ],
-      "alpine" => [
-        "apk add trivy",
-        "or see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
-      ],
-      _ => [
-        "see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
-        "common: `sudo apt install trivy` (Debian/Ubuntu) | `sudo pacman -S trivy` (Arch) | `brew install trivy` (Homebrew)",
+      _ => vec![
+        "sudo apt install trivy   # Debian/Ubuntu",
+        "sudo pacman -S trivy     # Arch",
+        "sudo dnf install trivy   # Fedora",
       ],
     }
   };
   #[cfg(target_os = "windows")]
-  let suggestions = [
-    "scoop install trivy  (or)  choco install trivy",
-    "or download a release from https://github.com/aquasecurity/trivy/releases",
-  ];
+  let commands = vec!["scoop install trivy", "choco install trivy"];
   #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-  let suggestions = [
-    "see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
-    "",
-  ];
+  let commands = vec![];
 
-  let mut out = String::from(header);
-  for s in suggestions.iter().filter(|s| !s.is_empty()) {
-    out.push_str("\n  - ");
-    out.push_str(s);
+  InstallHint {
+    headline: "Trivy not found in PATH",
+    commands,
+    docs_url,
   }
-  out
 }
 
 /// True when `trivy` is on PATH.
@@ -102,12 +97,19 @@ pub fn trivy_available() -> bool {
     .unwrap_or(false)
 }
 
+/// Sentinel error string the UI matches on to render the structured
+/// install-hint widget instead of a raw error blob.
+pub const ERR_TRIVY_NOT_INSTALLED: &str = "TRIVY_NOT_INSTALLED";
+
 /// Run `trivy image --format json --quiet <id>` and parse the result.
 pub fn scan_image(image_ref: &str) -> Result<ScanSummary> {
+  if !trivy_available() {
+    return Err(anyhow!(ERR_TRIVY_NOT_INSTALLED));
+  }
   let output = Command::new("trivy")
     .args(["image", "--format", "json", "--quiet", "--scanners", "vuln", image_ref])
     .output()
-    .map_err(|e| anyhow!("Failed to invoke trivy: {e}.\n{}", trivy_install_hint()))?;
+    .map_err(|e| anyhow!("Failed to invoke trivy: {e}"))?;
 
   if !output.status.success() {
     let stderr = String::from_utf8_lossy(&output.stderr);
