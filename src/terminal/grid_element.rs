@@ -71,6 +71,10 @@ pub struct TerminalGrid {
   pub selection: Option<GridSelection>,
   /// Selection highlight color (translucent overlay).
   pub selection_color: Hsla,
+  /// Per-cell-range search match highlights (row, col_start, col_end inclusive).
+  pub search_matches: Vec<(u16, u16, u16)>,
+  /// Highlight color for search matches.
+  pub search_match_color: Hsla,
   /// Out-param: the metrics used this frame, written in `prepaint`.
   pub metrics_sink: Option<std::sync::Arc<std::sync::Mutex<Option<GridMetrics>>>>,
 }
@@ -87,6 +91,8 @@ pub struct GridLayout {
   cursor_overlay: Option<CursorOverlay>,
   selection_rects: Vec<Bounds<Pixels>>,
   selection_color: Hsla,
+  search_rects: Vec<Bounds<Pixels>>,
+  search_color: Hsla,
 }
 
 struct BgRun {
@@ -368,6 +374,31 @@ impl Element for TerminalGrid {
       }
     }
 
+    // Search match rects.
+    let mut search_rects: Vec<Bounds<Pixels>> = Vec::new();
+    if !self.search_matches.is_empty() {
+      let total_rows = self.content.lines.len();
+      if total_rows > 0 {
+        let last_row = u16::try_from(total_rows - 1).unwrap_or(u16::MAX);
+        for &(row, c0, c1) in &self.search_matches {
+          if row > last_row || c1 < c0 {
+            continue;
+          }
+          #[allow(clippy::cast_precision_loss)]
+          let x = f32::from(origin.x) + f32::from(cell_width) * f32::from(c0);
+          #[allow(clippy::cast_precision_loss)]
+          let span = f32::from(c1 - c0 + 1);
+          let w = f32::from(cell_width) * span;
+          #[allow(clippy::cast_precision_loss)]
+          let y = origin.y + line_height * f32::from(row);
+          search_rects.push(Bounds::new(
+            point(px(x.floor()), y),
+            size(px(w.ceil()), line_height),
+          ));
+        }
+      }
+    }
+
     GridLayout {
       cell_width,
       line_height,
@@ -378,6 +409,8 @@ impl Element for TerminalGrid {
       cursor_overlay,
       selection_rects,
       selection_color: self.selection_color,
+      search_rects,
+      search_color: self.search_match_color,
     }
   }
 
@@ -410,7 +443,13 @@ impl Element for TerminalGrid {
       let _ = shaped.paint(tr.origin, layout.line_height, window, cx);
     }
 
-    // 4. Selection overlay — translucent rect on top of bg + text. Painted
+    // 4. Search match overlay — painted under selection so a match the
+    //    user has selected reads as both highlighted AND selected.
+    for rect in &layout.search_rects {
+      window.paint_quad(fill(*rect, layout.search_color));
+    }
+
+    // 5. Selection overlay — translucent rect on top of bg + text. Painted
     //    before the cursor so the cursor still shows above selection.
     for rect in &layout.selection_rects {
       window.paint_quad(fill(*rect, layout.selection_color));

@@ -120,6 +120,12 @@ pub struct TerminalView {
   /// True while the auto-scroll-during-drag task is running. Prevents
   /// spawning duplicates when re-entering drag.
   drag_scroll_running: bool,
+  /// Find-bar state. Toggled with Cmd+F / Ctrl+F. When `visible`, the
+  /// query field is rendered above the grid and viewport matches are
+  /// highlighted.
+  search_visible: bool,
+  search_query: String,
+  search_input: Option<gpui::Entity<gpui_component::input::InputState>>,
 }
 
 impl TerminalView {
@@ -152,6 +158,9 @@ impl TerminalView {
       view_scroll: 0,
       last_drag_pos: None,
       drag_scroll_running: false,
+      search_visible: false,
+      search_query: String::new(),
+      search_input: None,
     };
 
     view.connect(cx);
@@ -214,6 +223,9 @@ impl TerminalView {
       view_scroll: 0,
       last_drag_pos: None,
       drag_scroll_running: false,
+      search_visible: false,
+      search_query: String::new(),
+      search_input: None,
     };
 
     Self::start_polling(cx);
@@ -761,6 +773,44 @@ impl Render for TerminalView {
     } else {
       selection_color
     };
+    // Compute search match cells (viewport rows only) for the current
+    // query. Skipped when the find bar is hidden or empty.
+    let search_matches: Vec<(u16, u16, u16)> = if self.search_visible && !self.search_query.is_empty() {
+      let q: Vec<char> = self.search_query.chars().collect();
+      let qlen = q.len();
+      let mut hits = Vec::new();
+      for (row_idx, line) in content.lines.iter().enumerate() {
+        let line_cells = &line.cells;
+        if line_cells.len() < qlen {
+          continue;
+        }
+        for start in 0..=line_cells.len().saturating_sub(qlen) {
+          if (0..qlen).all(|k| {
+            let cell = &line_cells[start + k];
+            let ch = if cell.char == '\0' { ' ' } else { cell.char };
+            ch.eq_ignore_ascii_case(&q[k])
+          }) {
+            let r = u16::try_from(row_idx).unwrap_or(u16::MAX);
+            let c0 = u16::try_from(start).unwrap_or(u16::MAX);
+            let c1 = u16::try_from(start + qlen - 1).unwrap_or(u16::MAX);
+            hits.push((r, c0, c1));
+          }
+        }
+      }
+      hits
+    } else {
+      Vec::new()
+    };
+
+    let search_match_color = gpui::Hsla {
+      h: 50.0 / 360.0,
+      s: 0.95,
+      l: 0.55,
+      a: 0.5,
+    };
+
+    let search_match_count = search_matches.len();
+    let _ = search_match_count; // displayed via the find bar via `match_count` below
     let grid = super::grid_element::TerminalGrid {
       content,
       font_size: px(font_size),
@@ -774,6 +824,8 @@ impl Render for TerminalView {
       selection: selection_for_grid,
       selection_color,
       metrics_sink: Some(self.grid_metrics.clone()),
+      search_matches: search_matches.clone(),
+      search_match_color,
     };
 
     // Scrollbar - only show if there's content to scroll
@@ -839,6 +891,23 @@ impl Render for TerminalView {
         let alt = event.keystroke.modifiers.alt;
         let shift = event.keystroke.modifiers.shift;
         let cmd = event.keystroke.modifiers.platform; // Cmd on macOS, Ctrl on other platforms
+
+        // Find-bar shortcuts: Cmd+F (mac) or Ctrl+F (Linux/Windows). Esc
+        // closes the bar.
+        if (cmd || (ctrl && !shift)) && !alt && key.to_lowercase() == "f" {
+          this.search_visible = !this.search_visible;
+          if !this.search_visible {
+            this.search_query.clear();
+          }
+          cx.notify();
+          return;
+        }
+        if this.search_visible && key == "escape" {
+          this.search_visible = false;
+          this.search_query.clear();
+          cx.notify();
+          return;
+        }
 
         // Clipboard shortcuts:
         //  - Cmd+C / Cmd+V on macOS (platform = Cmd)
@@ -1030,6 +1099,54 @@ impl Render for TerminalView {
           cx.notify();
         }),
       )
+      // Find bar — only present when active. Lazily creates an
+      // InputState on first show, mirrors the field's text into our
+      // own `search_query`, and shows the live match count.
+      .when(self.search_visible, |el| {
+        if self.search_input.is_none() {
+          self.search_input = Some(cx.new(|cx| {
+            gpui_component::input::InputState::new(window, cx)
+              .placeholder("Search visible logs (Esc to close)")
+          }));
+        }
+        if let Some(input) = self.search_input.clone() {
+          let current = input.read(cx).text().to_string();
+          if current != self.search_query {
+            self.search_query = current;
+          }
+        }
+        let match_count = search_matches.len();
+        el.child(
+          gpui_component::h_flex()
+            .id("terminal-find-bar")
+            .w_full()
+            .gap(px(8.))
+            .px(px(8.))
+            .py(px(6.))
+            .mb(px(8.))
+            .rounded(px(6.))
+            .bg(colors.muted)
+            .child(
+              div()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child("Find:"),
+            )
+            .when_some(self.search_input.clone(), |el, input| {
+              el.child(
+                div()
+                  .flex_1()
+                  .child(gpui_component::input::Input::new(&input).appearance(false)),
+              )
+            })
+            .child(
+              div()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child(format!("{match_count} matches")),
+            ),
+        )
+      })
       // Terminal content area — custom Element renders the cell grid.
       .child(
         div()

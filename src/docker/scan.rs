@@ -35,6 +35,64 @@ pub struct Vulnerability {
   pub primary_url: Option<String>,
 }
 
+/// Build a platform-appropriate hint for installing the `trivy` binary.
+/// We try popular package managers per OS so the message points at
+/// something the user can actually run.
+pub fn trivy_install_hint() -> String {
+  let header = "Install trivy:";
+  #[cfg(target_os = "macos")]
+  let suggestions = [
+    "brew install trivy",
+    "or download a release from https://github.com/aquasecurity/trivy/releases",
+  ];
+  #[cfg(target_os = "linux")]
+  let suggestions = {
+    // Detect a few distros via /etc/os-release id.
+    let id = std::fs::read_to_string("/etc/os-release")
+      .ok()
+      .and_then(|s| {
+        s.lines()
+          .find_map(|l| l.strip_prefix("ID=").map(|v| v.trim_matches('"').to_lowercase()))
+      })
+      .unwrap_or_default();
+    match id.as_str() {
+      "arch" | "cachyos" | "manjaro" | "endeavouros" => [
+        "sudo pacman -S trivy",
+        "or see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
+      ],
+      "fedora" | "rhel" | "centos" => [
+        "sudo dnf install trivy",
+        "or see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
+      ],
+      "alpine" => [
+        "apk add trivy",
+        "or see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
+      ],
+      _ => [
+        "see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
+        "common: `sudo apt install trivy` (Debian/Ubuntu) | `sudo pacman -S trivy` (Arch) | `brew install trivy` (Homebrew)",
+      ],
+    }
+  };
+  #[cfg(target_os = "windows")]
+  let suggestions = [
+    "scoop install trivy  (or)  choco install trivy",
+    "or download a release from https://github.com/aquasecurity/trivy/releases",
+  ];
+  #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+  let suggestions = [
+    "see https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
+    "",
+  ];
+
+  let mut out = String::from(header);
+  for s in suggestions.iter().filter(|s| !s.is_empty()) {
+    out.push_str("\n  - ");
+    out.push_str(s);
+  }
+  out
+}
+
 /// True when `trivy` is on PATH.
 pub fn trivy_available() -> bool {
   Command::new("trivy")
@@ -49,7 +107,7 @@ pub fn scan_image(image_ref: &str) -> Result<ScanSummary> {
   let output = Command::new("trivy")
     .args(["image", "--format", "json", "--quiet", "--scanners", "vuln", image_ref])
     .output()
-    .map_err(|e| anyhow!("Failed to invoke trivy: {e}. Install with `brew install trivy` or see https://aquasecurity.github.io/trivy."))?;
+    .map_err(|e| anyhow!("Failed to invoke trivy: {e}.\n{}", trivy_install_hint()))?;
 
   if !output.status.success() {
     let stderr = String::from_utf8_lossy(&output.stderr);

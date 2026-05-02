@@ -642,23 +642,8 @@ impl ContainerDetail {
   }
 
   fn render_sparkline(history: &[f64], color: gpui::Hsla) -> gpui::Div {
-    let max = history.iter().copied().fold(0.0f64, f64::max).max(1.0);
-    h_flex()
-      .w_full()
-      .h_full()
-      .items_end()
-      .gap(px(1.))
-      .children(history.iter().rev().take(60).rev().map(|&v| {
-        let pct = (v / max * 100.0).min(100.0);
-        #[allow(clippy::cast_possible_truncation)]
-        let h = (pct * 0.48) as f32;
-        div()
-          .flex_1()
-          .h_full()
-          .flex()
-          .items_end()
-          .child(div().w_full().h(px(h)).bg(color).rounded_t(px(2.)))
-      }))
+    let data: Vec<f64> = history.iter().rev().take(60).rev().copied().collect();
+    div().w_full().h_full().child(crate::ui::components::Sparkline::new(data, color))
   }
 
   fn render_logs_tab(&self, cx: &App) -> gpui::Div {

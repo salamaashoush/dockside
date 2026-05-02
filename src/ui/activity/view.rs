@@ -421,25 +421,11 @@ impl ActivityMonitorView {
   }
 
   fn render_mini_chart(history: &[f64], color: Hsla) -> impl IntoElement {
-    // Simple bar chart visualization
-    let max_value = history.iter().copied().fold(0.0f64, f64::max).max(1.0);
-
-    h_flex()
+    let data: Vec<f64> = history.iter().rev().take(60).rev().copied().collect();
+    div()
       .w_full()
       .h_full()
-      .items_end()
-      .gap(px(1.))
-      .children(history.iter().rev().take(30).rev().map(|&value| {
-        let height_percent = (value / max_value * 100.0).min(100.0);
-        #[allow(clippy::cast_possible_truncation)]
-        let bar_height = (height_percent * 0.6) as f32; // Max 60px height
-        div()
-          .flex_1()
-          .h_full()
-          .flex()
-          .items_end()
-          .child(div().w_full().h(px(bar_height)).bg(color).rounded_t(px(2.)))
-      }))
+      .child(crate::ui::components::Sparkline::new(data, color))
   }
 
   fn render_empty(cx: &Context<'_, Self>) -> impl IntoElement {
