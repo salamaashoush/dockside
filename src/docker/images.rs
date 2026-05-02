@@ -1,13 +1,14 @@
 use anyhow::Result;
 use bollard::auth::DockerCredentials;
 use bollard::query_parameters::{
-  BuildImageOptionsBuilder, CreateImageOptions, ListImagesOptions, PushImageOptionsBuilder, RemoveImageOptions,
-  SearchImagesOptionsBuilder, TagImageOptionsBuilder,
+  BuildImageOptionsBuilder, CreateImageOptions, ImportImageOptionsBuilder, ListImagesOptions, PushImageOptionsBuilder,
+  RemoveImageOptions, SearchImagesOptionsBuilder, TagImageOptionsBuilder,
 };
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
 use super::DockerClient;
 
@@ -242,7 +243,7 @@ impl DockerClient {
   /// `dockerfile` is relative to the context (e.g. `Dockerfile`).
   pub async fn build_image_with_progress<F>(
     &self,
-    context_dir: &std::path::Path,
+    context_dir: &Path,
     dockerfile: &str,
     tag: &str,
     build_args: Vec<(String, String)>,
@@ -358,6 +359,58 @@ impl DockerClient {
           }
         }
         Err(e) => return Err(anyhow::anyhow!("Push failed: {e}")),
+      }
+    }
+    Ok(())
+  }
+
+  /// Stream `docker save <image_ref>` bytes and write them to `dest`.
+  /// `on_progress` is called as bytes accumulate so the UI can render a
+  /// progress indicator.
+  pub async fn save_image<F>(&self, image_ref: &str, dest: &Path, mut on_progress: F) -> Result<u64>
+  where
+    F: FnMut(u64) + Send,
+  {
+    use tokio::io::AsyncWriteExt;
+    let docker = self.client()?;
+    let mut stream = docker.export_image(image_ref);
+    let mut file = tokio::fs::File::create(dest).await?;
+    let mut total: u64 = 0;
+    while let Some(chunk) = stream.next().await {
+      let bytes = chunk.map_err(|e| anyhow::anyhow!("export_image: {e}"))?;
+      file.write_all(&bytes).await?;
+      total += bytes.len() as u64;
+      on_progress(total);
+    }
+    file.flush().await?;
+    Ok(total)
+  }
+
+  /// POST a tarball at `src` to `/images/load` and stream the daemon
+  /// response. Each event is forwarded to `on_progress` (status string
+  /// or final image id).
+  pub async fn load_image<F>(&self, src: &Path, mut on_progress: F) -> Result<()>
+  where
+    F: FnMut(String) + Send,
+  {
+    let docker = self.client()?;
+    let bytes = tokio::fs::read(src).await?;
+    let opts = ImportImageOptionsBuilder::default().build();
+    let body = bollard::body_full(bytes::Bytes::from(bytes));
+    let mut stream = docker.import_image(opts, body, None);
+    while let Some(result) = stream.next().await {
+      match result {
+        Ok(info) => {
+          let mut line = info.stream.unwrap_or_default();
+          if line.is_empty() {
+            line = info.status.unwrap_or_default();
+          }
+          let line = line.trim();
+          if !line.is_empty() {
+            on_progress(line.to_string());
+          }
+        }
+        Err(e) => return Err(anyhow::anyhow!("import_image: {e}")),
       }
     }
     Ok(())

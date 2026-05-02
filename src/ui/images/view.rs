@@ -46,10 +46,13 @@ impl ImagesView {
           Self::show_pull_dialog(window, cx);
         }
         ImageListEvent::BuildImage => {
-          crate::ui::dialogs::open_build_image_dialog(window, cx);
+          dialogs::open_build_image_dialog(window, cx);
         }
         ImageListEvent::BrowseRegistry => {
-          crate::ui::dialogs::open_registry_browser_dialog(window, cx);
+          dialogs::open_registry_browser_dialog(window, cx);
+        }
+        ImageListEvent::LoadTarball => {
+          dialogs::prompt_load_image_tarball(window, cx);
         }
       },
     )
@@ -201,6 +204,16 @@ impl Render for ImagesView {
             .map(|(i, t)| (i.to_string(), t.to_string()))
             .unwrap_or_else(|| (display, "latest".to_string()));
           open_push_image_dialog(image, tag, window, cx);
+        }
+      }))
+      .on_save(cx.listener(|this, _id: &str, window, cx| {
+        if let Some(img) = this.selected_image(cx) {
+          let image_ref = img
+            .repo_tags
+            .first()
+            .cloned()
+            .unwrap_or_else(|| img.id.clone());
+          dialogs::prompt_save_image_tarball(image_ref, window, cx);
         }
       }))
       .on_scan(cx.listener(|this, id: &str, _window, cx| {

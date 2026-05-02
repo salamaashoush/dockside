@@ -86,6 +86,48 @@ pub fn open_registry_browser_dialog(window: &mut Window, cx: &mut App) {
   });
 }
 
+/// Prompt the user for a path then stream `docker save <image_ref>`
+/// bytes to it. The dialog is OS-native (gpui platform layer); the
+/// task runs in the background and reports completion via the global
+/// dispatcher / task pipeline.
+pub fn prompt_save_image_tarball(image_ref: String, _window: &mut Window, cx: &mut App) {
+  let suggested = format!(
+    "{}.tar",
+    image_ref.replace([':', '/'], "-")
+  );
+  let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+  let rx = cx.prompt_for_new_path(&cwd, Some(&suggested));
+  cx.spawn(async move |cx| {
+    if let Ok(Ok(Some(path))) = rx.await {
+      let _ = cx.update(|cx| {
+        services::save_image(image_ref, path, cx);
+      });
+    }
+  })
+  .detach();
+}
+
+/// Prompt the user for a tarball on disk and POST it to `/images/load`.
+pub fn prompt_load_image_tarball(_window: &mut Window, cx: &mut App) {
+  let opts = gpui::PathPromptOptions {
+    files: true,
+    directories: false,
+    multiple: false,
+    prompt: Some("Open".into()),
+  };
+  let rx = cx.prompt_for_paths(opts);
+  cx.spawn(async move |cx| {
+    if let Ok(Ok(Some(paths))) = rx.await
+      && let Some(path) = paths.into_iter().next()
+    {
+      let _ = cx.update(|cx| {
+        services::load_image(path, cx);
+      });
+    }
+  })
+  .detach();
+}
+
 /// Opens the Build Image dialog with Lint + Build buttons configured.
 /// On Build, the form dialog closes and a streaming output dialog
 /// opens with a libghostty-backed terminal viewer that follows the

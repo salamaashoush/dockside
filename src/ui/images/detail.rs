@@ -27,6 +27,7 @@ pub struct ImageDetail {
   on_tag: Option<ImageNameCallback>,
   on_push: Option<ImageNameCallback>,
   on_scan: Option<ImageNameCallback>,
+  on_save: Option<ImageNameCallback>,
   on_tab_change: Option<TabChangeCallback>,
 }
 
@@ -40,6 +41,7 @@ impl ImageDetail {
       on_tag: None,
       on_push: None,
       on_scan: None,
+      on_save: None,
       on_tab_change: None,
     }
   }
@@ -80,6 +82,14 @@ impl ImageDetail {
     F: Fn(&str, &mut Window, &mut App) + 'static,
   {
     self.on_scan = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_save<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_save = Some(Rc::new(callback));
     self
   }
 
@@ -765,6 +775,19 @@ impl ImageDetail {
               .small()
               .on_click(move |_ev, window, cx| {
                 if let Some(ref cb) = on_scan {
+                  cb(&id, window, cx);
+                }
+              })
+          })
+          .child({
+            let on_save = self.on_save.clone();
+            let id = image_id_for_delete.clone();
+            Button::new("image-save")
+              .label("Save")
+              .ghost()
+              .small()
+              .on_click(move |_ev, window, cx| {
+                if let Some(ref cb) = on_save {
                   cb(&id, window, cx);
                 }
               })

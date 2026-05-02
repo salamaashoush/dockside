@@ -312,6 +312,107 @@ pub fn push_image(image: String, tag: String, username: Option<String>, password
   .detach();
 }
 
+/// Stream `docker save` to a path the user picked. Emits progress
+/// (bytes-written) as a fraction-less status string so the existing
+/// task UI animates without inventing a fake denominator.
+pub fn save_image(image_ref: String, dest: std::path::PathBuf, cx: &mut App) {
+  let task_id = start_task(cx, format!("Saving {image_ref} to {}...", dest.display()));
+  let disp = dispatcher(cx);
+  let client = docker_client();
+  let dest_for_msg = dest.clone();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    docker
+      .save_image(&image_ref, &dest, |bytes| {
+        tracing::debug!(target: "docker.save", image = %image_ref, bytes);
+      })
+      .await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(bytes)) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!(
+              "Saved {} ({})",
+              dest_for_msg.display(),
+              bytesize::ByteSize(bytes)
+            ),
+          });
+        });
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+/// Read a tarball from `src` and POST it to `/images/load`. The image
+/// list is refreshed on success.
+pub fn load_image(src: std::path::PathBuf, cx: &mut App) {
+  let task_id = start_task(cx, format!("Loading {}...", src.display()));
+  let disp = dispatcher(cx);
+  let client = docker_client();
+
+  let tokio_task = Tokio::spawn(cx, async move {
+    let guard = client.read().await;
+    let docker = guard
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("Docker client not connected"))?;
+    docker
+      .load_image(&src, |line| {
+        tracing::debug!(target: "docker.load", "{line}");
+      })
+      .await
+  });
+
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await;
+    cx.update(|cx| match result {
+      Ok(Ok(())) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: "Image loaded".to_string(),
+          });
+        });
+        refresh_images(cx);
+      }
+      Ok(Err(e)) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed { error: e.to_string() });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn pull_image(image: String, platform: Option<String>, cx: &mut App) {
   let task_id = start_task(cx, format!("Pulling image {image}..."));
   let disp = dispatcher(cx);

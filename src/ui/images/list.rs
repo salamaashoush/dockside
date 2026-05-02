@@ -22,6 +22,7 @@ pub enum ImageListEvent {
   PullImage,
   BuildImage,
   BrowseRegistry,
+  LoadTarball,
 }
 
 /// Delegate for the image list
@@ -562,6 +563,15 @@ impl Render for ImageList {
               .compact()
               .on_click(cx.listener(|_this, _ev, _window, cx| {
                 cx.emit(ImageListEvent::PullImage);
+              })),
+          )
+          .child(
+            Button::new("load")
+              .label("Load")
+              .ghost()
+              .compact()
+              .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.emit(ImageListEvent::LoadTarball);
               })),
           ),
       );
