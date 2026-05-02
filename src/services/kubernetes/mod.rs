@@ -1,5 +1,6 @@
 //! Kubernetes resource operations (pods, services, deployments, secrets, configmaps)
 
+pub mod cluster;
 pub mod configmaps;
 pub mod cronjobs;
 pub mod daemonsets;
@@ -12,6 +13,7 @@ pub mod secrets;
 pub mod services;
 pub mod statefulsets;
 
+pub use cluster::*;
 pub use configmaps::*;
 pub use cronjobs::*;
 pub use daemonsets::*;

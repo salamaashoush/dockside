@@ -424,6 +424,140 @@ impl DaemonSetInfo {
 }
 
 // ============================================================================
+// Cluster Overview Types (Node + Event)
+// ============================================================================
+
+#[derive(Debug, Clone)]
+pub struct NodeInfo {
+  pub name: String,
+  pub status: String,
+  pub roles: Vec<String>,
+  pub version: String,
+  pub os: String,
+  pub arch: String,
+  pub internal_ip: Option<String>,
+  pub age: String,
+  /// Allocatable CPU (cores).
+  pub cpu_allocatable: String,
+  /// Allocatable memory (bytes/IEC string).
+  pub mem_allocatable: String,
+}
+
+impl NodeInfo {
+  pub fn from_node(n: &k8s_openapi::api::core::v1::Node) -> Self {
+    let metadata = &n.metadata;
+    let status = n.status.as_ref();
+    let name = metadata.name.clone().unwrap_or_default();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+
+    let conditions = status.and_then(|s| s.conditions.as_ref());
+    let ready = conditions.is_some_and(|c| {
+      c.iter()
+        .find(|c| c.type_ == "Ready")
+        .is_some_and(|c| c.status == "True")
+    });
+    let status_str = if ready {
+      "Ready".to_string()
+    } else {
+      "NotReady".to_string()
+    };
+
+    let roles: Vec<String> = metadata
+      .labels
+      .as_ref()
+      .map(|labels| {
+        labels
+          .keys()
+          .filter_map(|k| k.strip_prefix("node-role.kubernetes.io/"))
+          .map(ToString::to_string)
+          .collect()
+      })
+      .unwrap_or_default();
+
+    let node_info = status.and_then(|s| s.node_info.as_ref());
+    let version = node_info.map(|ni| ni.kubelet_version.clone()).unwrap_or_default();
+    let os = node_info.map(|ni| ni.operating_system.clone()).unwrap_or_default();
+    let arch = node_info.map(|ni| ni.architecture.clone()).unwrap_or_default();
+
+    let internal_ip = status.and_then(|s| s.addresses.as_ref()).and_then(|addrs| {
+      addrs
+        .iter()
+        .find(|a| a.type_ == "InternalIP")
+        .map(|a| a.address.clone())
+    });
+
+    let alloc = status.and_then(|s| s.allocatable.as_ref());
+    let cpu_allocatable = alloc
+      .and_then(|a| a.get("cpu"))
+      .map(|q| q.0.clone())
+      .unwrap_or_default();
+    let mem_allocatable = alloc
+      .and_then(|a| a.get("memory"))
+      .map(|q| q.0.clone())
+      .unwrap_or_default();
+
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+
+    Self {
+      name,
+      status: status_str,
+      roles,
+      version,
+      os,
+      arch,
+      internal_ip,
+      age,
+      cpu_allocatable,
+      mem_allocatable,
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct EventInfo {
+  pub namespace: String,
+  pub event_type: String,
+  pub reason: String,
+  pub object_kind: String,
+  pub object_name: String,
+  pub message: String,
+  pub count: i32,
+  pub age: String,
+}
+
+impl EventInfo {
+  pub fn from_event(ev: &k8s_openapi::api::core::v1::Event) -> Self {
+    let metadata = &ev.metadata;
+    let namespace = metadata.namespace.clone().unwrap_or_default();
+    let event_type = ev.type_.clone().unwrap_or_default();
+    let reason = ev.reason.clone().unwrap_or_default();
+    let object_kind = ev.involved_object.kind.clone().unwrap_or_default();
+    let object_name = ev.involved_object.name.clone().unwrap_or_default();
+    let message = ev.message.clone().unwrap_or_default();
+    let count = ev.count.unwrap_or(1);
+    // Prefer last_timestamp; fall back to event_time then creation.
+    let when = ev
+      .last_timestamp
+      .as_ref()
+      .map(|t| t.0)
+      .or_else(|| ev.event_time.as_ref().map(|t| t.0))
+      .or_else(|| metadata.creation_timestamp.as_ref().map(|t| t.0));
+    let age = when.map_or_else(|| "Unknown".to_string(), format_age);
+
+    Self {
+      namespace,
+      event_type,
+      reason,
+      object_kind,
+      object_name,
+      message,
+      count,
+      age,
+    }
+  }
+}
+
+// ============================================================================
 // Ingress + PVC Types
 // ============================================================================
 

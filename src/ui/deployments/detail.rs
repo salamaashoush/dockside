@@ -4,6 +4,7 @@ use gpui_component::{
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
+  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -520,63 +521,66 @@ impl DeploymentDetail {
       .px(px(12.))
       .py(px(6.))
       .gap(px(6.))
+      .items_center()
+      .justify_between()
       .border_b_1()
       .border_color(colors.border)
       .child(
-        Button::new("yaml-apply")
-          .label("Apply")
-          .icon(Icon::new(AppIcon::Refresh))
-          .primary()
-          .small()
-          .on_click({
+        div()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("Edit YAML and Apply, or use the menu for rollout actions."),
+      )
+      .child(
+        Button::new("yaml-actions")
+          .icon(IconName::Ellipsis)
+          .ghost()
+          .compact()
+          .dropdown_menu({
             let name = name.clone();
             let namespace = namespace.clone();
-            move |_, _, cx| {
-              if let Some(ref editor) = editor_for_apply {
-                let yaml = editor.read(cx).text().to_string();
-                if !yaml.trim().is_empty() {
-                  services::apply_deployment_yaml(name.clone(), namespace.clone(), yaml, cx);
-                }
-              }
+            let editor = editor_for_apply.clone();
+            move |menu, _w, _cx| {
+              let apply_name = name.clone();
+              let apply_namespace = namespace.clone();
+              let apply_editor = editor.clone();
+              let restart_name = name.clone();
+              let restart_namespace = namespace.clone();
+              let rollback_name = name.clone();
+              let rollback_namespace = namespace.clone();
+              let reload_name = name.clone();
+              let reload_namespace = namespace.clone();
+              menu
+                .item(
+                  PopupMenuItem::new("Apply YAML")
+                    .icon(Icon::new(AppIcon::Refresh))
+                    .on_click(move |_, _, cx| {
+                      let Some(ref e) = apply_editor else { return };
+                      let yaml: String = e.read(cx).text().to_string();
+                      if !yaml.trim().is_empty() {
+                        services::apply_deployment_yaml(apply_name.clone(), apply_namespace.clone(), yaml, cx);
+                      }
+                    }),
+                )
+                .item(
+                  PopupMenuItem::new("Rolling Restart")
+                    .icon(Icon::new(AppIcon::Restart))
+                    .on_click(move |_, _, cx| {
+                      services::rollout_restart_kind("Deployment", restart_name.clone(), restart_namespace.clone(), cx);
+                    }),
+                )
+                .item(
+                  PopupMenuItem::new("Rollback to Previous Revision").on_click(move |_, _, cx| {
+                    services::rollback_deployment(rollback_name.clone(), rollback_namespace.clone(), cx);
+                  }),
+                )
+                .separator()
+                .item(PopupMenuItem::new("Reload from Cluster").on_click(move |_, _, cx| {
+                  services::get_deployment_yaml(reload_name.clone(), reload_namespace.clone(), cx);
+                }))
             }
           }),
-      )
-      .child({
-        let name = name.clone();
-        let namespace = namespace.clone();
-        Button::new("yaml-rolling-restart")
-          .label("Rolling Restart")
-          .icon(Icon::new(AppIcon::Restart))
-          .ghost()
-          .small()
-          .on_click(move |_, _, cx| {
-            services::rollout_restart_kind("Deployment", name.clone(), namespace.clone(), cx);
-          })
-      })
-      .child({
-        let name = name.clone();
-        let namespace = namespace.clone();
-        Button::new("yaml-rollback")
-          .label("Rollback")
-          .icon(Icon::new(AppIcon::Restart))
-          .ghost()
-          .small()
-          .on_click(move |_, _, cx| {
-            services::rollback_deployment(name.clone(), namespace.clone(), cx);
-          })
-      })
-      .child({
-        let name = name.clone();
-        let namespace = namespace.clone();
-        Button::new("yaml-reload")
-          .label("Reload")
-          .icon(Icon::new(AppIcon::Refresh))
-          .ghost()
-          .small()
-          .on_click(move |_, _, cx| {
-            services::get_deployment_yaml(name.clone(), namespace.clone(), cx);
-          })
-      });
+      );
 
     if let Some(ref editor) = self.yaml_editor {
       return v_flex().size_full().child(toolbar).child(

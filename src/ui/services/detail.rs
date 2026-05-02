@@ -4,6 +4,7 @@ use gpui_component::{
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
+  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -558,35 +559,48 @@ impl ServiceDetail {
       .px(px(12.))
       .py(px(6.))
       .gap(px(6.))
+      .items_center()
+      .justify_between()
       .border_b_1()
       .border_color(colors.border)
       .child(
-        Button::new("yaml-apply")
-          .label("Apply")
-          .icon(Icon::new(AppIcon::Refresh))
-          .primary()
-          .small()
-          .on_click({
-            let name = name.clone();
-            let namespace = namespace.clone();
-            move |_, _, cx| {
-              if let Some(ref editor) = editor_for_apply {
-                let yaml = editor.read(cx).text().to_string();
-                if !yaml.trim().is_empty() {
-                  services::apply_service_yaml(name.clone(), namespace.clone(), yaml, cx);
-                }
-              }
-            }
-          }),
+        div()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("Edit YAML and Apply via the menu."),
       )
       .child(
-        Button::new("yaml-reload")
-          .label("Reload")
-          .icon(Icon::new(AppIcon::Refresh))
+        Button::new("yaml-actions")
+          .icon(IconName::Ellipsis)
           .ghost()
-          .small()
-          .on_click(move |_, _, cx| {
-            services::get_service_yaml(name.clone(), namespace.clone(), cx);
+          .compact()
+          .dropdown_menu({
+            let name = name.clone();
+            let namespace = namespace.clone();
+            let editor = editor_for_apply.clone();
+            move |menu, _w, _cx| {
+              let apply_name = name.clone();
+              let apply_namespace = namespace.clone();
+              let apply_editor = editor.clone();
+              let reload_name = name.clone();
+              let reload_namespace = namespace.clone();
+              menu
+                .item(
+                  PopupMenuItem::new("Apply YAML")
+                    .icon(Icon::new(AppIcon::Refresh))
+                    .on_click(move |_, _, cx| {
+                      let Some(ref e) = apply_editor else { return };
+                      let yaml: String = e.read(cx).text().to_string();
+                      if !yaml.trim().is_empty() {
+                        services::apply_service_yaml(apply_name.clone(), apply_namespace.clone(), yaml, cx);
+                      }
+                    }),
+                )
+                .separator()
+                .item(PopupMenuItem::new("Reload from Cluster").on_click(move |_, _, cx| {
+                  services::get_service_yaml(reload_name.clone(), reload_namespace.clone(), cx);
+                }))
+            }
           }),
       );
 

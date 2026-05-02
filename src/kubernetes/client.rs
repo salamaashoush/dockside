@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
-use k8s_openapi::api::core::v1::{ConfigMap, Namespace, PersistentVolumeClaim, Pod, Secret};
+use k8s_openapi::api::core::v1::{ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret};
 use k8s_openapi::api::networking::v1::Ingress;
 use kube::{
   Api, Client, Config,
@@ -17,8 +17,8 @@ use k8s_openapi::api::core::v1::Service;
 
 use super::diagnostics::first_existing_known_kubeconfig;
 use super::types::{
-  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, IngressInfo, JobInfo, NamespaceInfo, PodInfo, PvcInfo,
-  SecretInfo, ServiceInfo, StatefulSetInfo,
+  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, EventInfo, IngressInfo, JobInfo, NamespaceInfo, NodeInfo,
+  PodInfo, PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
 };
 
 /// Kubernetes client wrapper
@@ -813,6 +813,72 @@ impl KubeClient {
       .await
       .with_context(|| format!("Failed to roll back deployment {name}"))?;
     Ok(target_rev)
+  }
+
+  // ========================================================================
+  // Cluster Overview Methods (Nodes / Events / Namespaces)
+  // ========================================================================
+
+  pub async fn list_nodes(&self) -> Result<Vec<NodeInfo>> {
+    let api: Api<Node> = Api::all(self.client.clone());
+    let nodes = api.list(&ListParams::default()).await.context("Failed to list nodes")?;
+    Ok(nodes.items.iter().map(NodeInfo::from_node).collect())
+  }
+
+  pub async fn list_events(&self, namespace: Option<&str>) -> Result<Vec<EventInfo>> {
+    let items = if let Some(ns) = namespace {
+      let api: Api<Event> = Api::namespaced(self.client.clone(), ns);
+      api.list(&ListParams::default()).await?
+    } else {
+      let api: Api<Event> = Api::all(self.client.clone());
+      api.list(&ListParams::default()).await?
+    };
+    let mut events: Vec<EventInfo> = items.items.iter().map(EventInfo::from_event).collect();
+    // Most-recent first by event-age string is unreliable; sort by raw
+    // last_timestamp before mapping.
+    let mut indexed: Vec<(usize, Option<chrono::DateTime<Utc>>)> = items
+      .items
+      .iter()
+      .enumerate()
+      .map(|(i, e)| {
+        let when = e
+          .last_timestamp
+          .as_ref()
+          .map(|t| t.0)
+          .or_else(|| e.event_time.as_ref().map(|t| t.0))
+          .or_else(|| e.metadata.creation_timestamp.as_ref().map(|t| t.0));
+        (i, when)
+      })
+      .collect();
+    indexed.sort_by(|a, b| b.1.cmp(&a.1));
+    events = indexed.into_iter().map(|(i, _)| events[i].clone()).collect();
+    Ok(events)
+  }
+
+  pub async fn create_namespace(&self, name: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let api: Api<Namespace> = Api::all(self.client.clone());
+    let ns = Namespace {
+      metadata: kube::api::ObjectMeta {
+        name: Some(name.to_string()),
+        ..Default::default()
+      },
+      ..Default::default()
+    };
+    api
+      .create(&PostParams::default(), &ns)
+      .await
+      .with_context(|| format!("Failed to create namespace {name}"))?;
+    Ok(())
+  }
+
+  pub async fn delete_namespace(&self, name: &str) -> Result<()> {
+    let api: Api<Namespace> = Api::all(self.client.clone());
+    api
+      .delete(name, &DeleteParams::default())
+      .await
+      .with_context(|| format!("Failed to delete namespace {name}"))?;
+    Ok(())
   }
 
   // ========================================================================

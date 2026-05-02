@@ -24,6 +24,7 @@ use crate::colima::MachineId;
 use crate::services::{DispatcherEvent, dispatcher, task_manager};
 use crate::state::{CurrentView, DockerState, Selection, StateChanged, docker_state};
 use crate::ui::activity::ActivityMonitorView;
+use crate::ui::cluster::ClusterView;
 use crate::ui::command_palette::{CommandPalette, CommandPaletteEvent, PaletteAction};
 use crate::ui::compose::ComposeView;
 use crate::ui::config_resources::ConfigResourcesView;
@@ -79,6 +80,7 @@ pub struct DocksideApp {
   ingresses_view: Entity<IngressesView>,
   pvcs_view: Entity<PvcsView>,
   networking_view: Entity<NetworkingView>,
+  cluster_view: Entity<ClusterView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
   pending_notifications: Vec<(NotificationType, String)>,
   // Pending setup check result - triggers dialog when set
@@ -182,6 +184,7 @@ impl DocksideApp {
       let ing = ingresses_view.clone();
       move |_| NetworkingView::new(svcs, ing)
     });
+    let cluster_view = cx.new(|cx| ClusterView::new(window, cx));
 
     // Run setup checks async — only surface the dialog if a *required* piece is
     // missing. Docker is the only universal must-have. Colima is only required
@@ -253,6 +256,7 @@ impl DocksideApp {
       ingresses_view,
       pvcs_view,
       networking_view,
+      cluster_view,
       pending_notifications: Vec::new(),
       pending_setup_check: None,
       focus_handle,
@@ -660,6 +664,14 @@ impl DocksideApp {
                     SidebarGroup::new("Kubernetes").child(
                         SidebarMenu::new()
                             .child(
+                                SidebarMenuItem::new("Cluster")
+                                    .icon(IconName::LayoutDashboard)
+                                    .active(current_view == CurrentView::Cluster)
+                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                        crate::services::set_view(CurrentView::Cluster, cx);
+                                    })),
+                            )
+                            .child(
                                 SidebarMenuItem::new("Workloads")
                                     .icon(AppIcon::Pod)
                                     .active(workloads_active)
@@ -774,6 +786,7 @@ impl DocksideApp {
       CurrentView::Networking => div().size_full().child(self.networking_view.clone()),
       CurrentView::Ingresses => div().size_full().child(self.ingresses_view.clone()),
       CurrentView::Pvcs => div().size_full().child(self.pvcs_view.clone()),
+      CurrentView::Cluster => div().size_full().child(self.cluster_view.clone()),
     }
   }
 

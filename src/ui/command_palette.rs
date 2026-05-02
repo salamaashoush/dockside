@@ -165,6 +165,14 @@ impl CommandPalette {
         action: PaletteAction::Navigate(CurrentView::Networks),
       },
       PaletteCommand {
+        id: "nav-cluster",
+        label: "Go to Cluster Overview",
+        shortcut: None,
+        category: "Navigation",
+        icon: IconName::LayoutDashboard,
+        action: PaletteAction::Navigate(CurrentView::Cluster),
+      },
+      PaletteCommand {
         id: "nav-workloads",
         label: "Go to Workloads",
         shortcut: Some("Cmd+6"),

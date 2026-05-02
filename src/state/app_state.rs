@@ -8,6 +8,7 @@ pub enum CurrentView {
   Volumes,
   Images,
   Networks,
+  Cluster,
   Workloads,
   Pods,
   Networking,
@@ -104,6 +105,7 @@ mod tests {
       CurrentView::Volumes,
       CurrentView::Images,
       CurrentView::Networks,
+      CurrentView::Cluster,
       CurrentView::Workloads,
       CurrentView::Config,
       CurrentView::Pods,
@@ -123,7 +125,7 @@ mod tests {
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 23);
+    assert_eq!(views.len(), 24);
   }
 
   #[test]
