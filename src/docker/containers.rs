@@ -104,6 +104,17 @@ pub struct ContainerCreateConfig {
   pub ports: Vec<(String, String, String)>, // (host_port, container_port, protocol)
   pub volumes: Vec<(String, String, bool)>, // (host_path, container_path, read_only)
   pub network: Option<String>,
+  pub hostname: Option<String>,
+  /// User-supplied labels (key, value).
+  pub labels: Vec<(String, String)>,
+  /// Number of CPU cores allowed (e.g. 1.5 → 1,500,000,000 NanoCPUs).
+  pub cpus: Option<f64>,
+  /// Hard memory cap in bytes.
+  pub memory_bytes: Option<i64>,
+  /// Memory + swap cap in bytes (Docker uses memory_bytes + swap; -1 = unlimited).
+  pub memory_swap_bytes: Option<i64>,
+  /// Max number of pids inside the container.
+  pub pids_limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -456,6 +467,28 @@ impl DockerClient {
       host_config.network_mode = Some(net.clone());
     }
 
+    // Resource limits.
+    if let Some(cpus) = cfg.cpus {
+      // 1 CPU = 1_000_000_000 NanoCPUs.
+      let nano = (cpus * 1_000_000_000.0) as i64;
+      if nano > 0 {
+        host_config.nano_cpus = Some(nano);
+      }
+    }
+    if let Some(mem) = cfg.memory_bytes
+      && mem > 0
+    {
+      host_config.memory = Some(mem);
+    }
+    if let Some(memswap) = cfg.memory_swap_bytes {
+      host_config.memory_swap = Some(memswap);
+    }
+    if let Some(pids) = cfg.pids_limit
+      && pids > 0
+    {
+      host_config.pids_limit = Some(pids);
+    }
+
     // Environment variables
     let env: Option<Vec<String>> = if cfg.env_vars.is_empty() {
       None
@@ -475,6 +508,13 @@ impl DockerClient {
       Some(build_exposed_ports_map(port_keys))
     };
 
+    // Labels.
+    let labels: Option<HashMap<String, String>> = if cfg.labels.is_empty() {
+      None
+    } else {
+      Some(cfg.labels.iter().cloned().collect())
+    };
+
     // Build container config
     let config = ContainerCreateBody {
       image: Some(cfg.image.clone()),
@@ -484,6 +524,8 @@ impl DockerClient {
       env,
       exposed_ports,
       host_config: Some(host_config),
+      hostname: cfg.hostname,
+      labels,
       ..Default::default()
     };
 

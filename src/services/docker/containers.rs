@@ -581,6 +581,12 @@ pub fn create_container(options: crate::ui::containers::CreateContainerOptions, 
       ports: options.ports,
       volumes: options.volumes,
       network: options.network,
+      hostname: options.hostname,
+      labels: options.labels,
+      cpus: options.cpus,
+      memory_bytes: options.memory_bytes,
+      memory_swap_bytes: options.memory_swap_bytes,
+      pids_limit: options.pids_limit,
     };
 
     let container_id = docker.create_container(config).await?;

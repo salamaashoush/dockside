@@ -99,6 +99,27 @@ impl DockerHostInfo {
   }
 }
 
+/// Aggregate disk usage breakdown from `docker system df`.
+#[derive(Debug, Clone, Default)]
+pub struct DiskUsageSummary {
+  pub layer_size_total: i64,
+  pub images_count: usize,
+  pub images_active: i64,
+  pub images_size: i64,
+  pub images_reclaimable: i64,
+  pub containers_count: usize,
+  pub containers_active: i64,
+  pub containers_size: i64,
+  pub containers_reclaimable: i64,
+  pub volumes_count: usize,
+  pub volumes_active: i64,
+  pub volumes_size: i64,
+  pub volumes_reclaimable: i64,
+  pub build_cache_count: usize,
+  pub build_cache_size: i64,
+  pub build_cache_reclaimable: i64,
+}
+
 impl DockerClient {
   /// Get system information from the Docker daemon
   pub async fn get_system_info(&self) -> Result<DockerHostInfo> {
@@ -106,6 +127,76 @@ impl DockerClient {
     let info = docker.info().await?;
     let socket_path = self.connection_string();
     Ok(DockerHostInfo::from_system_info(info, socket_path))
+  }
+
+  /// Get an aggregated disk usage summary (`docker system df`).
+  pub async fn get_disk_usage(&self) -> Result<DiskUsageSummary> {
+    use bollard::query_parameters::DataUsageOptions;
+    let docker = self.client()?;
+    let resp = docker.df(None::<DataUsageOptions>).await?;
+
+    let mut sum = DiskUsageSummary {
+      layer_size_total: resp.layers_size.unwrap_or(0),
+      ..DiskUsageSummary::default()
+    };
+
+    let images = resp.images.unwrap_or_default();
+    sum.images_count = images.len();
+    for img in &images {
+      let size = img.size;
+      let shared = img.shared_size;
+      sum.images_size += size;
+      let containers = img.containers;
+      if containers > 0 {
+        sum.images_active += 1;
+      } else {
+        // Reclaimable = size - shared bytes already counted by another image.
+        let unique = size.saturating_sub(shared);
+        sum.images_reclaimable += unique.max(0);
+      }
+    }
+
+    let containers = resp.containers.unwrap_or_default();
+    sum.containers_count = containers.len();
+    for c in &containers {
+      let size_rw = c.size_rw.unwrap_or(0);
+      sum.containers_size += size_rw;
+      // bollard exposes container.state for "running" detection.
+      let running = matches!(
+        c.state.as_ref(),
+        Some(bollard::models::ContainerSummaryStateEnum::RUNNING)
+      );
+      if running {
+        sum.containers_active += 1;
+      } else {
+        sum.containers_reclaimable += size_rw;
+      }
+    }
+
+    let volumes = resp.volumes.unwrap_or_default();
+    sum.volumes_count = volumes.len();
+    for v in &volumes {
+      if let Some(usage) = v.usage_data.as_ref() {
+        sum.volumes_size += usage.size;
+        if usage.ref_count > 0 {
+          sum.volumes_active += 1;
+        } else {
+          sum.volumes_reclaimable += usage.size;
+        }
+      }
+    }
+
+    let cache = resp.build_cache.unwrap_or_default();
+    sum.build_cache_count = cache.len();
+    for entry in &cache {
+      let size = entry.size.unwrap_or(0);
+      sum.build_cache_size += size;
+      if !entry.in_use.unwrap_or(false) {
+        sum.build_cache_reclaimable += size;
+      }
+    }
+
+    Ok(sum)
   }
 }
 

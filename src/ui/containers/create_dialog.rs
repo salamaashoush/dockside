@@ -20,6 +20,28 @@ use std::rc::Rc;
 /// Type alias for tab change callback to reduce complexity
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
 
+/// Parse a human-readable size like "256m", "1.5g", "100k", or a raw byte
+/// count into a byte total. Returns `None` for empty / unparseable inputs.
+fn parse_size_bytes(s: &str) -> Option<i64> {
+  let trimmed = s.trim();
+  if trimmed.is_empty() {
+    return None;
+  }
+  let (num_str, mul): (&str, i64) = match trimmed.chars().last() {
+    Some('k' | 'K') => (&trimmed[..trimmed.len() - 1], 1024),
+    Some('m' | 'M') => (&trimmed[..trimmed.len() - 1], 1024 * 1024),
+    Some('g' | 'G') => (&trimmed[..trimmed.len() - 1], 1024 * 1024 * 1024),
+    Some('t' | 'T') => (&trimmed[..trimmed.len() - 1], 1024_i64 * 1024 * 1024 * 1024),
+    _ => (trimmed, 1),
+  };
+  let n: f64 = num_str.parse().ok()?;
+  if n <= 0.0 {
+    return None;
+  }
+  let bytes = (n * mul as f64) as i64;
+  Some(bytes)
+}
+
 /// Theme colors struct for passing to helper methods
 #[derive(Clone)]
 struct DialogColors {
@@ -175,6 +197,13 @@ pub struct CreateContainerOptions {
   pub ports: Vec<(String, String, String)>, // (host_port, container_port, protocol)
   pub volumes: Vec<(String, String, bool)>, // (host_path, container_path, read_only)
   pub network: Option<String>,
+  /// Advanced fields (resource limits, labels, hostname).
+  pub hostname: Option<String>,
+  pub labels: Vec<(String, String)>,
+  pub cpus: Option<f64>,
+  pub memory_bytes: Option<i64>,
+  pub memory_swap_bytes: Option<i64>,
+  pub pids_limit: Option<i64>,
 }
 
 /// Dialog for creating a new container
@@ -218,6 +247,16 @@ pub struct CreateContainerDialog {
 
   // Network
   network_input: Option<Entity<InputState>>,
+
+  // Advanced inputs
+  hostname_input: Option<Entity<InputState>>,
+  cpus_input: Option<Entity<InputState>>,
+  memory_input: Option<Entity<InputState>>,
+  memory_swap_input: Option<Entity<InputState>>,
+  pids_limit_input: Option<Entity<InputState>>,
+  labels: Vec<(String, String)>,
+  label_key_input: Option<Entity<InputState>>,
+  label_value_input: Option<Entity<InputState>>,
 }
 
 impl CreateContainerDialog {
@@ -250,6 +289,14 @@ impl CreateContainerDialog {
       volume_container_input: None,
       volume_readonly: false,
       network_input: None,
+      hostname_input: None,
+      cpus_input: None,
+      memory_input: None,
+      memory_swap_input: None,
+      pids_limit_input: None,
+      labels: Vec::new(),
+      label_key_input: None,
+      label_value_input: None,
     }
   }
 
@@ -310,6 +357,29 @@ impl CreateContainerDialog {
     // Network input
     if self.network_input.is_none() {
       self.network_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("Network name (optional)")));
+    }
+
+    // Advanced inputs.
+    if self.hostname_input.is_none() {
+      self.hostname_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("Hostname (optional)")));
+    }
+    if self.cpus_input.is_none() {
+      self.cpus_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. 1.5")));
+    }
+    if self.memory_input.is_none() {
+      self.memory_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. 512m, 2g")));
+    }
+    if self.memory_swap_input.is_none() {
+      self.memory_swap_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. 1g, -1 = unlimited")));
+    }
+    if self.pids_limit_input.is_none() {
+      self.pids_limit_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. 200")));
+    }
+    if self.label_key_input.is_none() {
+      self.label_key_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("Key")));
+    }
+    if self.label_value_input.is_none() {
+      self.label_value_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("Value")));
     }
   }
 
@@ -386,6 +456,38 @@ impl CreateContainerDialog {
       .map(|v| (v.host_path.clone(), v.container_path.clone(), v.read_only))
       .collect();
 
+    let hostname = self
+      .hostname_input
+      .as_ref()
+      .map(|s| s.read(cx).text().to_string())
+      .filter(|s| !s.is_empty());
+    let cpus = self
+      .cpus_input
+      .as_ref()
+      .and_then(|s| s.read(cx).text().to_string().parse::<f64>().ok())
+      .filter(|n| *n > 0.0);
+    let memory_bytes = self
+      .memory_input
+      .as_ref()
+      .map(|s| s.read(cx).text().to_string())
+      .and_then(|s| parse_size_bytes(&s));
+    let memory_swap_bytes = self
+      .memory_swap_input
+      .as_ref()
+      .map(|s| s.read(cx).text().to_string())
+      .and_then(|s| parse_size_bytes(&s));
+    let pids_limit = self
+      .pids_limit_input
+      .as_ref()
+      .and_then(|s| s.read(cx).text().to_string().parse::<i64>().ok())
+      .filter(|n| *n > 0);
+    let labels: Vec<(String, String)> = self
+      .labels
+      .iter()
+      .filter(|(k, _)| !k.is_empty())
+      .cloned()
+      .collect();
+
     CreateContainerOptions {
       image,
       platform,
@@ -403,6 +505,12 @@ impl CreateContainerDialog {
       ports,
       volumes,
       network,
+      hostname,
+      labels,
+      cpus,
+      memory_bytes,
+      memory_swap_bytes,
+      pids_limit,
     }
   }
 
@@ -914,6 +1022,135 @@ impl CreateContainerDialog {
           .child("Leave empty for default bridge network"),
       )
   }
+
+  fn render_advanced_tab(&mut self, colors: &DialogColors, cx: &mut Context<'_, Self>) -> gpui::Div {
+    let hostname = self.hostname_input.clone().unwrap();
+    let cpus = self.cpus_input.clone().unwrap();
+    let mem = self.memory_input.clone().unwrap();
+    let mem_swap = self.memory_swap_input.clone().unwrap();
+    let pids = self.pids_limit_input.clone().unwrap();
+    let label_key = self.label_key_input.clone().unwrap();
+    let label_value = self.label_value_input.clone().unwrap();
+
+    let _ = cx;
+
+    let row = |label: &'static str, content: gpui::AnyElement| {
+      h_flex()
+        .w_full()
+        .py(px(10.))
+        .px(px(16.))
+        .justify_between()
+        .items_center()
+        .border_b_1()
+        .border_color(colors.border)
+        .child(Label::new(label).text_color(colors.foreground))
+        .child(content)
+    };
+
+    let mut col = v_flex()
+      .w_full()
+      .child(
+        div()
+          .px(px(16.))
+          .py(px(8.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("Resource limits"),
+      )
+      .child(row(
+        "CPUs",
+        div().w(px(180.)).child(Input::new(&cpus).small()).into_any_element(),
+      ))
+      .child(row(
+        "Memory",
+        div().w(px(180.)).child(Input::new(&mem).small()).into_any_element(),
+      ))
+      .child(row(
+        "Memory + swap",
+        div().w(px(180.)).child(Input::new(&mem_swap).small()).into_any_element(),
+      ))
+      .child(row(
+        "PIDs limit",
+        div().w(px(180.)).child(Input::new(&pids).small()).into_any_element(),
+      ))
+      .child(row(
+        "Hostname",
+        div().w(px(220.)).child(Input::new(&hostname).small()).into_any_element(),
+      ))
+      .child(
+        div()
+          .px(px(16.))
+          .py(px(8.))
+          .mt(px(4.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("Labels"),
+      );
+
+    // Existing labels.
+    for (idx, (k, v)) in self.labels.iter().enumerate() {
+      let entry = format!("{k}={v}");
+      let i = idx;
+      col = col.child(
+        h_flex()
+          .w_full()
+          .py(px(8.))
+          .px(px(16.))
+          .gap(px(8.))
+          .border_b_1()
+          .border_color(colors.border)
+          .child(
+            div()
+              .flex_1()
+              .text_xs()
+              .font_family("monospace")
+              .text_color(colors.foreground)
+              .child(entry),
+          )
+          .child(
+            Button::new(("label-rm", i))
+              .icon(gpui_component::Icon::new(IconName::Close))
+              .ghost()
+              .small()
+              .on_click(cx.listener(move |this, _ev, _window, cx| {
+                if i < this.labels.len() {
+                  this.labels.remove(i);
+                  cx.notify();
+                }
+              })),
+          ),
+      );
+    }
+
+    // Add-label row.
+    col = col.child(
+      h_flex()
+        .w_full()
+        .py(px(8.))
+        .px(px(16.))
+        .gap(px(8.))
+        .child(div().flex_1().child(Input::new(&label_key).small()))
+        .child(div().flex_1().child(Input::new(&label_value).small()))
+        .child(
+          Button::new("label-add")
+            .label("Add")
+            .ghost()
+            .small()
+            .on_click(cx.listener(|this, _ev, _window, cx| {
+              if let (Some(k_input), Some(v_input)) = (this.label_key_input.clone(), this.label_value_input.clone()) {
+                let k = k_input.read(cx).text().to_string();
+                let v = v_input.read(cx).text().to_string();
+                if !k.is_empty() {
+                  this.labels.push((k, v));
+                }
+                cx.notify();
+              }
+            })),
+        ),
+    );
+
+    col
+  }
 }
 
 impl Focusable for CreateContainerDialog {
@@ -940,12 +1177,14 @@ impl Render for CreateContainerDialog {
     let volumes_count = self.volumes.len();
     let env_count = self.env_vars.len();
 
+    let labels_count = self.labels.len();
     let tabs = [
       "General".to_string(),
       format!("Ports ({ports_count})"),
       format!("Volumes ({volumes_count})"),
       format!("Env ({env_count})"),
       "Network".to_string(),
+      format!("Advanced ({labels_count} lbls)"),
     ];
 
     let on_tab_change: TabChangeCallback = Rc::new(cx.listener(|this, idx: &usize, _window, cx| {
@@ -984,7 +1223,8 @@ impl Render for CreateContainerDialog {
                     .when(active_tab == 1, |el| el.child(self.render_ports_tab(&colors, cx)))
                     .when(active_tab == 2, |el| el.child(self.render_volumes_tab(&colors, cx)))
                     .when(active_tab == 3, |el| el.child(self.render_env_tab(&colors, cx)))
-                    .when(active_tab == 4, |el| el.child(self.render_network_tab(&colors, cx))),
+                    .when(active_tab == 4, |el| el.child(self.render_network_tab(&colors, cx)))
+                    .when(active_tab == 5, |el| el.child(self.render_advanced_tab(&colors, cx))),
             )
   }
 }

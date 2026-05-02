@@ -44,17 +44,47 @@ pub struct PruneDialog {
   focus_handle: FocusHandle,
   options: PruneOptions,
   result_display: PruneResultDisplay,
+  disk_usage: Option<crate::docker::DiskUsageSummary>,
 }
 
 impl PruneDialog {
   pub fn new(cx: &mut Context<'_, Self>) -> Self {
     let focus_handle = cx.focus_handle();
-
-    Self {
+    let view = Self {
       focus_handle,
       options: PruneOptions::default(),
       result_display: PruneResultDisplay::default(),
-    }
+      disk_usage: None,
+    };
+    Self::refresh_disk_usage(cx);
+    view
+  }
+
+  fn refresh_disk_usage(cx: &mut Context<'_, Self>) {
+    let tokio_handle = crate::services::Tokio::runtime_handle();
+    let client = crate::services::docker_client();
+    cx.spawn(async move |this, cx| {
+      let usage = cx
+        .background_executor()
+        .spawn(async move {
+          tokio_handle.block_on(async {
+            let guard = client.read().await;
+            match guard.as_ref() {
+              Some(c) => c.get_disk_usage().await.ok(),
+              None => None,
+            }
+          })
+        })
+        .await;
+
+      let _ = this.update(cx, |this, cx| {
+        if let Some(u) = usage {
+          this.disk_usage = Some(u);
+          cx.notify();
+        }
+      });
+    })
+    .detach();
   }
 
   pub fn get_options(&self) -> PruneOptions {
@@ -236,10 +266,94 @@ impl Render for PruneDialog {
       }
     };
 
+    let disk_section = self.disk_usage.as_ref().map(|u| {
+      let row = |label: &'static str, count: usize, active: i64, size: i64, reclaimable: i64| {
+        h_flex()
+          .w_full()
+          .py(px(8.))
+          .px(px(16.))
+          .gap(px(8.))
+          .border_b_1()
+          .border_color(colors.border)
+          .child(
+            div()
+              .w(px(110.))
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child(label.to_string()),
+          )
+          .child(
+            div()
+              .w(px(70.))
+              .text_xs()
+              .text_color(colors.foreground)
+              .child(format!("{count}")),
+          )
+          .child(
+            div()
+              .w(px(80.))
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child(format!("{active} active")),
+          )
+          .child(
+            div()
+              .w(px(110.))
+              .text_xs()
+              .text_color(colors.foreground)
+              .child(bytesize::ByteSize(u64::try_from(size).unwrap_or(0)).to_string()),
+          )
+          .child(
+            div()
+              .flex_1()
+              .text_xs()
+              .text_color(if reclaimable > 0 { colors.warning } else { colors.muted_foreground })
+              .child(format!(
+                "{} reclaimable",
+                bytesize::ByteSize(u64::try_from(reclaimable).unwrap_or(0))
+              )),
+          )
+      };
+
+      v_flex()
+        .w_full()
+        .child(
+          div()
+            .px(px(16.))
+            .py(px(8.))
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child("Disk usage (docker system df)"),
+        )
+        .child(row("Images", u.images_count, u.images_active, u.images_size, u.images_reclaimable))
+        .child(row(
+          "Containers",
+          u.containers_count,
+          u.containers_active,
+          u.containers_size,
+          u.containers_reclaimable,
+        ))
+        .child(row(
+          "Local volumes",
+          u.volumes_count,
+          u.volumes_active,
+          u.volumes_size,
+          u.volumes_reclaimable,
+        ))
+        .child(row(
+          "Build cache",
+          u.build_cache_count,
+          0,
+          u.build_cache_size,
+          u.build_cache_reclaimable,
+        ))
+    });
+
     v_flex()
             .w_full()
             .max_h(px(500.))
             .overflow_y_scrollbar()
+            .when_some(disk_section, |el, section| el.child(section))
             // Header description
             .child(
                 div()
