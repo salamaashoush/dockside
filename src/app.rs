@@ -26,13 +26,16 @@ use crate::state::{CurrentView, DockerState, Selection, StateChanged, docker_sta
 use crate::ui::activity::ActivityMonitorView;
 use crate::ui::command_palette::{CommandPalette, CommandPaletteEvent, PaletteAction};
 use crate::ui::compose::ComposeView;
+use crate::ui::config_resources::ConfigResourcesView;
 use crate::ui::configmaps::ConfigMapsView;
 use crate::ui::containers::ContainersView;
+use crate::ui::cronjobs::CronJobsView;
 use crate::ui::daemonsets::DaemonSetsView;
 use crate::ui::deployments::DeploymentsView;
 use crate::ui::dialogs;
 use crate::ui::global_search::{GlobalSearch, GlobalSearchEvent};
 use crate::ui::images::ImagesView;
+use crate::ui::jobs::JobsView;
 use crate::ui::machines::MachinesView;
 use crate::ui::models::ModelsView;
 use crate::ui::networks::NetworksView;
@@ -45,6 +48,7 @@ use crate::ui::setup_dialog::{
 };
 use crate::ui::statefulsets::StatefulSetsView;
 use crate::ui::volumes::VolumesView;
+use crate::ui::workloads::WorkloadsView;
 
 /// Main application - only handles layout and view switching
 pub struct DocksideApp {
@@ -65,6 +69,10 @@ pub struct DocksideApp {
   configmaps_view: Entity<ConfigMapsView>,
   statefulsets_view: Entity<StatefulSetsView>,
   daemonsets_view: Entity<DaemonSetsView>,
+  jobs_view: Entity<JobsView>,
+  cronjobs_view: Entity<CronJobsView>,
+  workloads_view: Entity<WorkloadsView>,
+  config_resources_view: Entity<ConfigResourcesView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
   pending_notifications: Vec<(NotificationType, String)>,
   // Pending setup check result - triggers dialog when set
@@ -144,6 +152,23 @@ impl DocksideApp {
     let configmaps_view = cx.new(|cx| ConfigMapsView::new(window, cx));
     let statefulsets_view = cx.new(|cx| StatefulSetsView::new(window, cx));
     let daemonsets_view = cx.new(|cx| DaemonSetsView::new(window, cx));
+    let jobs_view = cx.new(|cx| JobsView::new(window, cx));
+    let cronjobs_view = cx.new(|cx| CronJobsView::new(window, cx));
+
+    let workloads_view = cx.new({
+      let pods = pods_view.clone();
+      let deployments = deployments_view.clone();
+      let statefulsets = statefulsets_view.clone();
+      let daemonsets = daemonsets_view.clone();
+      let jobs = jobs_view.clone();
+      let cronjobs = cronjobs_view.clone();
+      move |_| WorkloadsView::new(pods, deployments, statefulsets, daemonsets, jobs, cronjobs)
+    });
+    let config_resources_view = cx.new({
+      let cm = configmaps_view.clone();
+      let s = secrets_view.clone();
+      move |_| ConfigResourcesView::new(cm, s)
+    });
 
     // Run setup checks async — only surface the dialog if a *required* piece is
     // missing. Docker is the only universal must-have. Colima is only required
@@ -208,6 +233,10 @@ impl DocksideApp {
       configmaps_view,
       statefulsets_view,
       daemonsets_view,
+      jobs_view,
+      cronjobs_view,
+      workloads_view,
+      config_resources_view,
       pending_notifications: Vec::new(),
       pending_setup_check: None,
       focus_handle,
@@ -589,23 +618,33 @@ impl DocksideApp {
                 ),
             )
             .when(show_kubernetes, |sidebar| {
+                // Workload + Config + Service tabs collapse the per-resource
+                // sidebar entries (was 9, now 3) — the deep-link CurrentView
+                // variants for individual resources still resolve via command
+                // palette / global search.
+                let workloads_active = matches!(
+                    current_view,
+                    CurrentView::Workloads
+                        | CurrentView::Pods
+                        | CurrentView::Deployments
+                        | CurrentView::StatefulSets
+                        | CurrentView::DaemonSets
+                        | CurrentView::Jobs
+                        | CurrentView::CronJobs
+                );
+                let config_active = matches!(
+                    current_view,
+                    CurrentView::Config | CurrentView::ConfigMaps | CurrentView::Secrets
+                );
                 sidebar.child(
                     SidebarGroup::new("Kubernetes").child(
                         SidebarMenu::new()
                             .child(
-                                SidebarMenuItem::new("Pods")
+                                SidebarMenuItem::new("Workloads")
                                     .icon(AppIcon::Pod)
-                                    .active(current_view == CurrentView::Pods)
+                                    .active(workloads_active)
                                     .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        crate::services::set_view(CurrentView::Pods, cx);
-                                    })),
-                            )
-                            .child(
-                                SidebarMenuItem::new("Deployments")
-                                    .icon(AppIcon::Deployment)
-                                    .active(current_view == CurrentView::Deployments)
-                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        crate::services::set_view(CurrentView::Deployments, cx);
+                                        crate::services::set_view(CurrentView::Workloads, cx);
                                     })),
                             )
                             .child(
@@ -617,35 +656,11 @@ impl DocksideApp {
                                     })),
                             )
                             .child(
-                                SidebarMenuItem::new("StatefulSets")
-                                    .icon(AppIcon::Deployment)
-                                    .active(current_view == CurrentView::StatefulSets)
+                                SidebarMenuItem::new("Config")
+                                    .icon(IconName::Settings)
+                                    .active(config_active)
                                     .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        crate::services::set_view(CurrentView::StatefulSets, cx);
-                                    })),
-                            )
-                            .child(
-                                SidebarMenuItem::new("DaemonSets")
-                                    .icon(AppIcon::Deployment)
-                                    .active(current_view == CurrentView::DaemonSets)
-                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        crate::services::set_view(CurrentView::DaemonSets, cx);
-                                    })),
-                            )
-                            .child(
-                                SidebarMenuItem::new("Secrets")
-                                    .icon(AppIcon::Settings)
-                                    .active(current_view == CurrentView::Secrets)
-                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        crate::services::set_view(CurrentView::Secrets, cx);
-                                    })),
-                            )
-                            .child(
-                                SidebarMenuItem::new("ConfigMaps")
-                                    .icon(AppIcon::Settings)
-                                    .active(current_view == CurrentView::ConfigMaps)
-                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        crate::services::set_view(CurrentView::ConfigMaps, cx);
+                                        crate::services::set_view(CurrentView::Config, cx);
                                     })),
                             ),
                     ),
@@ -665,7 +680,7 @@ impl DocksideApp {
                     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                     let menu = menu.child(
                         SidebarMenuItem::new("Models")
-                            .icon(AppIcon::Activity)
+                            .icon(IconName::Bot)
                             .active(current_view == CurrentView::Models)
                             .on_click(cx.listener(|_this, _ev, _window, cx| {
                                 crate::services::set_view(CurrentView::Models, cx);
@@ -724,6 +739,10 @@ impl DocksideApp {
       CurrentView::ConfigMaps => div().size_full().child(self.configmaps_view.clone()),
       CurrentView::StatefulSets => div().size_full().child(self.statefulsets_view.clone()),
       CurrentView::DaemonSets => div().size_full().child(self.daemonsets_view.clone()),
+      CurrentView::Jobs => div().size_full().child(self.jobs_view.clone()),
+      CurrentView::CronJobs => div().size_full().child(self.cronjobs_view.clone()),
+      CurrentView::Workloads => div().size_full().child(self.workloads_view.clone()),
+      CurrentView::Config => div().size_full().child(self.config_resources_view.clone()),
     }
   }
 

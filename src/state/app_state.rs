@@ -8,19 +8,22 @@ pub enum CurrentView {
   Volumes,
   Images,
   Networks,
+  Workloads,
   Pods,
   Services,
   Deployments,
   StatefulSets,
   DaemonSets,
-  #[allow(dead_code)]
+  Jobs,
+  CronJobs,
+  Config,
   Secrets,
-  #[allow(dead_code)]
   ConfigMaps,
   Machines,
-  /// AI Models — sidebar entry only on macOS aarch64, but variant is
-  /// always defined so match arms compile on every platform.
-  #[allow(dead_code)]
+  /// AI Models — only constructed on macOS aarch64 (sidebar + palette
+  /// gated), but variant is always defined so match arms compile on
+  /// every platform.
+  #[cfg_attr(not(all(target_os = "macos", target_arch = "aarch64")), allow(dead_code))]
   Models,
   ActivityMonitor,
   Settings,
@@ -98,11 +101,15 @@ mod tests {
       CurrentView::Volumes,
       CurrentView::Images,
       CurrentView::Networks,
+      CurrentView::Workloads,
+      CurrentView::Config,
       CurrentView::Pods,
       CurrentView::Services,
       CurrentView::Deployments,
       CurrentView::StatefulSets,
       CurrentView::DaemonSets,
+      CurrentView::Jobs,
+      CurrentView::CronJobs,
       CurrentView::Secrets,
       CurrentView::ConfigMaps,
       CurrentView::Machines,
@@ -110,7 +117,7 @@ mod tests {
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 16);
+    assert_eq!(views.len(), 20);
   }
 
   #[test]

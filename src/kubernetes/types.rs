@@ -424,6 +424,125 @@ impl DaemonSetInfo {
 }
 
 // ============================================================================
+// Job + CronJob Types
+// ============================================================================
+
+#[derive(Debug, Clone)]
+pub struct JobInfo {
+  pub name: String,
+  pub namespace: String,
+  pub completions: i32,
+  pub succeeded: i32,
+  pub failed: i32,
+  pub duration: String,
+  pub age: String,
+  #[allow(dead_code)]
+  pub labels: HashMap<String, String>,
+}
+
+impl JobInfo {
+  pub fn from_job(j: &k8s_openapi::api::batch::v1::Job) -> Self {
+    let metadata = &j.metadata;
+    let spec = j.spec.as_ref();
+    let status = j.status.as_ref();
+
+    let name = metadata.name.clone().unwrap_or_default();
+    let namespace = metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+    let labels: HashMap<String, String> = metadata.labels.clone().unwrap_or_default().into_iter().collect();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+
+    let completions = spec.and_then(|s| s.completions).unwrap_or(1);
+    let succeeded = status.and_then(|s| s.succeeded).unwrap_or(0);
+    let failed = status.and_then(|s| s.failed).unwrap_or(0);
+
+    // Duration: completion_time - start_time, or "running" / "—"
+    let duration = match (
+      status.and_then(|s| s.start_time.as_ref()).map(|t| t.0),
+      status.and_then(|s| s.completion_time.as_ref()).map(|t| t.0),
+    ) {
+      (Some(start), Some(end)) => {
+        let secs = end.signed_duration_since(start).num_seconds();
+        format_seconds(secs)
+      }
+      (Some(start), None) => format!("running {}", format_age(start)),
+      _ => "—".to_string(),
+    };
+
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+
+    Self {
+      name,
+      namespace,
+      completions,
+      succeeded,
+      failed,
+      duration,
+      age,
+      labels,
+    }
+  }
+
+  pub fn completions_display(&self) -> String {
+    format!("{}/{}", self.succeeded, self.completions)
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct CronJobInfo {
+  pub name: String,
+  pub namespace: String,
+  pub schedule: String,
+  pub suspend: bool,
+  pub active: i32,
+  pub last_schedule: String,
+  pub age: String,
+  #[allow(dead_code)]
+  pub labels: HashMap<String, String>,
+}
+
+impl CronJobInfo {
+  pub fn from_cronjob(cj: &k8s_openapi::api::batch::v1::CronJob) -> Self {
+    let metadata = &cj.metadata;
+    let spec = cj.spec.as_ref();
+    let status = cj.status.as_ref();
+
+    let name = metadata.name.clone().unwrap_or_default();
+    let namespace = metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+    let labels: HashMap<String, String> = metadata.labels.clone().unwrap_or_default().into_iter().collect();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+
+    let schedule = spec.map(|s| s.schedule.clone()).unwrap_or_default();
+    let suspend = spec.and_then(|s| s.suspend).unwrap_or(false);
+    let active = i32::try_from(status.and_then(|s| s.active.as_ref()).map_or(0, Vec::len)).unwrap_or(0);
+    let last_schedule = status
+      .and_then(|s| s.last_schedule_time.as_ref())
+      .map_or_else(|| "Never".to_string(), |t| format_age(t.0));
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+
+    Self {
+      name,
+      namespace,
+      schedule,
+      suspend,
+      active,
+      last_schedule,
+      age,
+      labels,
+    }
+  }
+}
+
+fn format_seconds(secs: i64) -> String {
+  if secs < 60 {
+    format!("{secs}s")
+  } else if secs < 3600 {
+    format!("{}m{}s", secs / 60, secs % 60)
+  } else {
+    format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+  }
+}
+
+// ============================================================================
 // Secret + ConfigMap Types
 // ============================================================================
 

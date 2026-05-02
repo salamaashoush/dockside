@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, Secret};
 use kube::{
   Api, Client, Config,
@@ -15,7 +16,8 @@ use k8s_openapi::api::core::v1::Service;
 
 use super::diagnostics::first_existing_known_kubeconfig;
 use super::types::{
-  ConfigMapInfo, DaemonSetInfo, DeploymentInfo, NamespaceInfo, PodInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, JobInfo, NamespaceInfo, PodInfo, SecretInfo, ServiceInfo,
+  StatefulSetInfo,
 };
 
 /// Kubernetes client wrapper
@@ -619,6 +621,102 @@ impl KubeClient {
       other => return Err(anyhow::anyhow!("Cannot rollout-restart kind: {other}")),
     }
     Ok(())
+  }
+
+  // ========================================================================
+  // Job + CronJob Methods
+  // ========================================================================
+
+  pub async fn list_jobs(&self, namespace: Option<&str>) -> Result<Vec<JobInfo>> {
+    let items = if let Some(ns) = namespace {
+      let api: Api<Job> = Api::namespaced(self.client.clone(), ns);
+      api.list(&ListParams::default()).await?
+    } else {
+      let api: Api<Job> = Api::all(self.client.clone());
+      api.list(&ListParams::default()).await?
+    };
+    Ok(items.items.iter().map(JobInfo::from_job).collect())
+  }
+
+  pub async fn delete_job(&self, name: &str, namespace: &str) -> Result<()> {
+    let api: Api<Job> = Api::namespaced(self.client.clone(), namespace);
+    let dp = DeleteParams {
+      propagation_policy: Some(kube::api::PropagationPolicy::Background),
+      ..DeleteParams::default()
+    };
+    api.delete(name, &dp).await?;
+    Ok(())
+  }
+
+  pub async fn list_cronjobs(&self, namespace: Option<&str>) -> Result<Vec<CronJobInfo>> {
+    let items = if let Some(ns) = namespace {
+      let api: Api<CronJob> = Api::namespaced(self.client.clone(), ns);
+      api.list(&ListParams::default()).await?
+    } else {
+      let api: Api<CronJob> = Api::all(self.client.clone());
+      api.list(&ListParams::default()).await?
+    };
+    Ok(items.items.iter().map(CronJobInfo::from_cronjob).collect())
+  }
+
+  pub async fn delete_cronjob(&self, name: &str, namespace: &str) -> Result<()> {
+    let api: Api<CronJob> = Api::namespaced(self.client.clone(), namespace);
+    api.delete(name, &DeleteParams::default()).await?;
+    Ok(())
+  }
+
+  pub async fn set_cronjob_suspend(&self, name: &str, namespace: &str, suspend: bool) -> Result<()> {
+    let api: Api<CronJob> = Api::namespaced(self.client.clone(), namespace);
+    let patch = json!({ "spec": { "suspend": suspend } });
+    api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to suspend cronjob {name}"))?;
+    Ok(())
+  }
+
+  /// Create a one-shot `Job` from a `CronJob`'s `jobTemplate`. Mirrors
+  /// `kubectl create job --from=cronjob/<name>` behavior.
+  pub async fn trigger_cronjob(&self, name: &str, namespace: &str) -> Result<String> {
+    let cj_api: Api<CronJob> = Api::namespaced(self.client.clone(), namespace);
+    let cj = cj_api
+      .get(name)
+      .await
+      .with_context(|| format!("Failed to read cronjob {name}"))?;
+    let template = cj
+      .spec
+      .as_ref()
+      .map(|s| s.job_template.clone())
+      .ok_or_else(|| anyhow::anyhow!("CronJob {name} has no jobTemplate"))?;
+
+    let suffix = Utc::now().timestamp();
+    let job_name = format!("{name}-manual-{suffix}");
+    let mut job = Job {
+      metadata: kube::api::ObjectMeta {
+        name: Some(job_name.clone()),
+        namespace: Some(namespace.to_string()),
+        annotations: Some(
+          [("cronjob.kubernetes.io/instantiate".to_string(), "manual".to_string())]
+            .into_iter()
+            .collect(),
+        ),
+        ..Default::default()
+      },
+      spec: template.spec.clone(),
+      status: None,
+    };
+    if let Some(ref mut spec) = job.spec
+      && let Some(ref mut tmpl_meta) = spec.template.metadata
+    {
+      tmpl_meta.labels.get_or_insert_with(Default::default);
+    }
+
+    let job_api: Api<Job> = Api::namespaced(self.client.clone(), namespace);
+    job_api
+      .create(&PostParams::default(), &job)
+      .await
+      .with_context(|| format!("Failed to create job from cronjob {name}"))?;
+    Ok(job_name)
   }
 
   pub async fn read_configmap_entries(&self, name: &str, namespace: &str) -> Result<Vec<(String, String)>> {

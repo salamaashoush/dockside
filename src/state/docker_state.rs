@@ -3,7 +3,7 @@ use gpui::{App, AppContext, Entity, EventEmitter, Global};
 use crate::colima::{ColimaVm, Machine, MachineId};
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
 use crate::kubernetes::{
-  ConfigMapInfo, DaemonSetInfo, DeploymentInfo, PodInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, JobInfo, PodInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
 };
 
 use super::app_state::CurrentView;
@@ -328,6 +328,8 @@ pub enum StateChanged {
   // StatefulSets / DaemonSets
   StatefulSetsUpdated,
   DaemonSetsUpdated,
+  JobsUpdated,
+  CronJobsUpdated,
 
   // ConfigMaps
   ConfigMapsUpdated,
@@ -376,6 +378,8 @@ pub struct DockerState {
   pub configmaps: Vec<ConfigMapInfo>,
   pub statefulsets: Vec<StatefulSetInfo>,
   pub daemonsets: Vec<DaemonSetInfo>,
+  pub jobs: Vec<JobInfo>,
+  pub cronjobs: Vec<CronJobInfo>,
   pub namespaces: Vec<String>,
   pub selected_namespace: String,
   pub k8s_available: bool,
@@ -405,6 +409,8 @@ pub struct DockerState {
   pub configmaps_state: LoadState,
   pub statefulsets_state: LoadState,
   pub daemonsets_state: LoadState,
+  pub jobs_state: LoadState,
+  pub cronjobs_state: LoadState,
   pub machines_state: LoadState,
 }
 
@@ -424,8 +430,10 @@ impl DockerState {
       configmaps: Vec::new(),
       statefulsets: Vec::new(),
       daemonsets: Vec::new(),
+      jobs: Vec::new(),
+      cronjobs: Vec::new(),
       namespaces: vec!["default".to_string()],
-      selected_namespace: "default".to_string(),
+      selected_namespace: "all".to_string(),
       k8s_available: false,
       k8s_error: None,
       current_view: CurrentView::default(),
@@ -444,6 +452,8 @@ impl DockerState {
       configmaps_state: LoadState::NotLoaded,
       statefulsets_state: LoadState::NotLoaded,
       daemonsets_state: LoadState::NotLoaded,
+      jobs_state: LoadState::NotLoaded,
+      cronjobs_state: LoadState::NotLoaded,
       deployments_state: LoadState::NotLoaded,
       machines_state: LoadState::NotLoaded,
     }
