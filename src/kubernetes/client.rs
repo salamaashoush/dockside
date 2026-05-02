@@ -721,6 +721,101 @@ impl KubeClient {
   }
 
   // ========================================================================
+  // Generic YAML apply / Deployment rollback
+  // ========================================================================
+
+  /// Server-side apply YAML for a Deployment. Parses the user-edited
+  /// YAML and `replace`s the existing object preserving resourceVersion
+  /// to detect concurrent edits.
+  pub async fn apply_deployment_yaml(&self, name: &str, namespace: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut dep: Deployment = serde_yaml::from_str(yaml_str).context("Failed to parse deployment YAML")?;
+    // Force metadata.name + namespace to match the resource being edited
+    // so a typo can't accidentally rename the object.
+    dep.metadata.name = Some(name.to_string());
+    dep.metadata.namespace = Some(namespace.to_string());
+    let api: Api<Deployment> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .replace(name, &PostParams::default(), &dep)
+      .await
+      .with_context(|| format!("Failed to apply deployment {name}"))?;
+    Ok(())
+  }
+
+  pub async fn apply_service_yaml(&self, name: &str, namespace: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut svc: Service = serde_yaml::from_str(yaml_str).context("Failed to parse service YAML")?;
+    svc.metadata.name = Some(name.to_string());
+    svc.metadata.namespace = Some(namespace.to_string());
+    let api: Api<Service> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .replace(name, &PostParams::default(), &svc)
+      .await
+      .with_context(|| format!("Failed to apply service {name}"))?;
+    Ok(())
+  }
+
+  /// Rollback a Deployment to its previous revision. Walks owned
+  /// `ReplicaSet`s, finds the one whose `deployment.kubernetes.io/revision`
+  /// annotation is `current - 1`, and patches the deployment's pod
+  /// template back to that `ReplicaSet`'s template.
+  pub async fn rollback_deployment(&self, name: &str, namespace: &str) -> Result<i64> {
+    let dep_api: Api<Deployment> = Api::namespaced(self.client.clone(), namespace);
+    let dep = dep_api
+      .get(name)
+      .await
+      .with_context(|| format!("Failed to read deployment {name}"))?;
+
+    let current_rev = dep
+      .metadata
+      .annotations
+      .as_ref()
+      .and_then(|a| a.get("deployment.kubernetes.io/revision"))
+      .and_then(|s| s.parse::<i64>().ok())
+      .unwrap_or(0);
+    let target_rev = current_rev - 1;
+    if target_rev < 1 {
+      return Err(anyhow::anyhow!(
+        "Deployment {name} has no previous revision to roll back to"
+      ));
+    }
+
+    let rs_api: Api<ReplicaSet> = Api::namespaced(self.client.clone(), namespace);
+    let rss = rs_api.list(&ListParams::default()).await?;
+    let target = rss.items.into_iter().find(|rs| {
+      let owned = rs
+        .metadata
+        .owner_references
+        .as_ref()
+        .is_some_and(|owners| owners.iter().any(|o| o.kind == "Deployment" && o.name == name));
+      let rev_match = rs
+        .metadata
+        .annotations
+        .as_ref()
+        .and_then(|a| a.get("deployment.kubernetes.io/revision"))
+        .and_then(|s| s.parse::<i64>().ok())
+        == Some(target_rev);
+      owned && rev_match
+    });
+
+    let target_rs = target.ok_or_else(|| anyhow::anyhow!("ReplicaSet for revision {target_rev} not found"))?;
+    let template = target_rs
+      .spec
+      .as_ref()
+      .map(|s| s.template.clone())
+      .ok_or_else(|| anyhow::anyhow!("Target ReplicaSet has no pod template"))?;
+
+    let patch = json!({
+      "spec": { "template": template }
+    });
+    dep_api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to roll back deployment {name}"))?;
+    Ok(target_rev)
+  }
+
+  // ========================================================================
   // Ingress + PVC Methods
   // ========================================================================
 

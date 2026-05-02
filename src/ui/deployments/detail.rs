@@ -499,7 +499,7 @@ impl DeploymentDetail {
     )
   }
 
-  fn render_yaml_tab(&self, _deployment: &DeploymentInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_yaml_tab(&self, deployment: &DeploymentInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
 
     if self.yaml_content.is_empty() {
@@ -511,23 +511,94 @@ impl DeploymentDetail {
       );
     }
 
+    let name = deployment.name.clone();
+    let namespace = deployment.namespace.clone();
+    let editor_for_apply = self.yaml_editor.clone();
+
+    let toolbar = h_flex()
+      .w_full()
+      .px(px(12.))
+      .py(px(6.))
+      .gap(px(6.))
+      .border_b_1()
+      .border_color(colors.border)
+      .child(
+        Button::new("yaml-apply")
+          .label("Apply")
+          .icon(Icon::new(AppIcon::Refresh))
+          .primary()
+          .small()
+          .on_click({
+            let name = name.clone();
+            let namespace = namespace.clone();
+            move |_, _, cx| {
+              if let Some(ref editor) = editor_for_apply {
+                let yaml = editor.read(cx).text().to_string();
+                if !yaml.trim().is_empty() {
+                  services::apply_deployment_yaml(name.clone(), namespace.clone(), yaml, cx);
+                }
+              }
+            }
+          }),
+      )
+      .child({
+        let name = name.clone();
+        let namespace = namespace.clone();
+        Button::new("yaml-rolling-restart")
+          .label("Rolling Restart")
+          .icon(Icon::new(AppIcon::Restart))
+          .ghost()
+          .small()
+          .on_click(move |_, _, cx| {
+            services::rollout_restart_kind("Deployment", name.clone(), namespace.clone(), cx);
+          })
+      })
+      .child({
+        let name = name.clone();
+        let namespace = namespace.clone();
+        Button::new("yaml-rollback")
+          .label("Rollback")
+          .icon(Icon::new(AppIcon::Restart))
+          .ghost()
+          .small()
+          .on_click(move |_, _, cx| {
+            services::rollback_deployment(name.clone(), namespace.clone(), cx);
+          })
+      })
+      .child({
+        let name = name.clone();
+        let namespace = namespace.clone();
+        Button::new("yaml-reload")
+          .label("Reload")
+          .icon(Icon::new(AppIcon::Refresh))
+          .ghost()
+          .small()
+          .on_click(move |_, _, cx| {
+            services::get_deployment_yaml(name.clone(), namespace.clone(), cx);
+          })
+      });
+
     if let Some(ref editor) = self.yaml_editor {
-      return div()
-        .size_full()
-        .child(Input::new(editor).size_full().appearance(false).disabled(true));
+      return v_flex().size_full().child(toolbar).child(
+        div()
+          .flex_1()
+          .min_h_0()
+          .child(Input::new(editor).size_full().appearance(false)),
+      );
     }
 
-    // Fallback to plain text
-    div().size_full().child(
-      div()
-        .size_full()
-        .overflow_y_scrollbar()
-        .bg(colors.sidebar)
-        .p(px(12.))
-        .font_family("monospace")
-        .text_xs()
-        .text_color(colors.foreground)
-        .child(self.yaml_content.clone()),
+    v_flex().size_full().child(toolbar).child(
+      div().flex_1().min_h_0().child(
+        div()
+          .size_full()
+          .overflow_y_scrollbar()
+          .bg(colors.sidebar)
+          .p(px(12.))
+          .font_family("monospace")
+          .text_xs()
+          .text_color(colors.foreground)
+          .child(self.yaml_content.clone()),
+      ),
     )
   }
 

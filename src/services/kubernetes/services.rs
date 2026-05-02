@@ -125,6 +125,39 @@ pub fn get_service_yaml(name: String, namespace: String, cx: &mut App) {
 }
 
 /// Create a new Kubernetes service
+pub fn apply_service_yaml(name: String, namespace: String, yaml: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Applying service '{name}'..."));
+  let disp = dispatcher(cx);
+  let label = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.apply_service_yaml(&name, &namespace, &yaml).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Service '{label}' applied"),
+          });
+        });
+        refresh_services(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to apply service '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn create_service(options: crate::kubernetes::CreateServiceOptions, cx: &mut App) {
   let task_id = start_task(cx, format!("Creating service '{}'...", options.name));
   let name = options.name.clone();

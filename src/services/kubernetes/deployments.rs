@@ -198,6 +198,72 @@ pub fn get_deployment_yaml(name: String, namespace: String, cx: &mut App) {
 }
 
 /// Create a new Kubernetes deployment
+pub fn apply_deployment_yaml(name: String, namespace: String, yaml: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Applying deployment '{name}'..."));
+  let disp = dispatcher(cx);
+  let label = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.apply_deployment_yaml(&name, &namespace, &yaml).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Deployment '{label}' applied"),
+          });
+        });
+        refresh_deployments(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to apply deployment '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+pub fn rollback_deployment(name: String, namespace: String, cx: &mut App) {
+  let task_id = start_task(cx, format!("Rolling back '{name}'..."));
+  let disp = dispatcher(cx);
+  let label = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.rollback_deployment(&name, &namespace).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(rev) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Deployment '{label}' rolled back to revision {rev}"),
+          });
+        });
+        refresh_deployments(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to roll back '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn create_deployment(options: crate::kubernetes::CreateDeploymentOptions, cx: &mut App) {
   let task_id = start_task(cx, format!("Creating deployment '{}'...", options.name));
   let name = options.name.clone();
