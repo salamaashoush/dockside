@@ -603,11 +603,18 @@ impl SettingsView {
       .child(
         v_flex()
           .flex_1()
+          .min_w_0()
           .gap(px(2.))
           .child(Label::new(label).text_color(colors.foreground))
-          .child(div().text_xs().text_color(colors.muted_foreground).child(description)),
+          .child(
+            div()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .whitespace_normal()
+              .child(description),
+          ),
       )
-      .child(div().min_w(px(220.)).max_w(px(320.)).child(control))
+      .child(div().flex_shrink_0().min_w(px(220.)).max_w(px(320.)).child(control))
   }
 
   // ==========================================================================
@@ -865,105 +872,255 @@ impl SettingsView {
   }
 
   fn render_dns(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    let colors = cx.theme().colors;
     let settings = self.settings_state.read(cx).settings.clone();
     let dns_mgr = crate::services::dns::manager(cx);
     let dns_running = dns_mgr.is_running();
     let dns_port = dns_mgr.bound_port();
-    let route_count = dns_mgr.route_map().map_or(0, |m| m.read().distinct_container_count());
     let proxy_mgr = crate::services::proxy::manager(cx);
     let proxy_running = proxy_mgr.is_running();
     let proxy_ports = proxy_mgr.bound_ports();
+    let route_count = dns_mgr.route_map().map_or(0, |m| m.read().distinct_container_count());
     let suffix_input = self.dns_suffix_input.clone().unwrap();
-    let suffix_for_helper = settings.dns_suffix.clone();
-    let suffix_for_uninstall = settings.dns_suffix.clone();
     let suffix_for_status = settings.dns_suffix.clone();
 
-    let dns_label = match (dns_running, dns_port) {
-      (true, Some(p)) => format!("running :{p}"),
-      (true, None) => "running".to_string(),
-      (false, _) => "stopped".to_string(),
+    let dot = |running: bool| {
+      div()
+        .size(px(8.))
+        .rounded_full()
+        .bg(if running {
+          colors.success
+        } else {
+          colors.muted_foreground
+        })
+        .flex_shrink_0()
     };
-    let proxy_label = match (proxy_running, proxy_ports) {
-      (true, Some((http, Some(https)))) => format!("running :{http}/:{https}"),
-      (true, Some((http, None))) => format!("running :{http} (HTTP-only)"),
-      (true, _) => "running".to_string(),
-      (false, _) => "stopped".to_string(),
+    let kv = |k: &str, v: SharedString| {
+      h_flex()
+        .w_full()
+        .py(px(4.))
+        .gap(px(12.))
+        .items_center()
+        .child(
+          div()
+            .w(px(140.))
+            .flex_shrink_0()
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(k.to_string()),
+        )
+        .child(
+          div()
+            .flex_1()
+            .min_w_0()
+            .text_sm()
+            .font_family("monospace")
+            .text_color(colors.foreground)
+            .text_ellipsis()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .child(v),
+        )
     };
-    let status_line = format!(
-      "DNS: {dns_label}, proxy: {proxy_label}, suffix: *.{suffix_for_status}, routed containers: {route_count}"
+
+    let dns_value: SharedString = match (dns_running, dns_port) {
+      (true, Some(p)) => format!("running on :{p}").into(),
+      (true, None) => "running".into(),
+      (false, _) => "stopped".into(),
+    };
+    let proxy_value: SharedString = match (proxy_running, proxy_ports) {
+      (true, Some((http, Some(https)))) => format!("running on :{http} (HTTP) and :{https} (HTTPS)").into(),
+      (true, Some((http, None))) => format!("running on :{http} (HTTP-only — HTTPS failed to bind)").into(),
+      (true, _) => "running".into(),
+      (false, _) => "stopped".into(),
+    };
+    let status_card = v_flex()
+      .w_full()
+      .gap(px(2.))
+      .p(px(16.))
+      .my(px(12.))
+      .rounded(px(8.))
+      .bg(colors.sidebar)
+      .border_1()
+      .border_color(colors.border.opacity(0.6))
+      .child(
+        h_flex()
+          .w_full()
+          .pb(px(8.))
+          .gap(px(8.))
+          .items_center()
+          .child(dot(dns_running && proxy_running))
+          .child(
+            div()
+              .text_sm()
+              .font_weight(gpui::FontWeight::SEMIBOLD)
+              .text_color(colors.foreground)
+              .child(if dns_running && proxy_running {
+                "Active"
+              } else if dns_running || proxy_running {
+                "Partial"
+              } else {
+                "Stopped"
+              }),
+          ),
+      )
+      .child(kv("DNS resolver", dns_value))
+      .child(kv("Reverse proxy", proxy_value))
+      .child(kv("Suffix", format!("*.{suffix_for_status}").into()))
+      .child(kv("Routed containers", route_count.to_string().into()));
+
+    let port = settings.dns_port;
+    let toggle_row = Self::render_row(
+      "Enable local DNS",
+      "Resolve *.dockside.test to your containers. Prompts for password to install OS resolver.",
+      Switch::new("dns-enabled")
+        .checked(settings.dns_enabled)
+        .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
+          let suffix = this.settings_state.read(cx).settings.dns_suffix.clone();
+          let new_state = *checked;
+          this.settings_state.update(cx, |state, cx| {
+            state.settings.dns_enabled = new_state;
+            let _ = state.settings.save();
+            cx.emit(SettingsChanged::SettingsUpdated);
+          });
+          crate::services::apply_dns_settings(cx);
+          if new_state {
+            if let Err(e) = crate::services::install_dns_resolver(&suffix, port) {
+              tracing::warn!("dns: install_dns_resolver failed: {e}");
+            }
+          } else if let Err(e) = crate::services::uninstall_dns_resolver(&suffix) {
+            tracing::warn!("dns: uninstall_dns_resolver failed: {e}");
+          }
+          cx.notify();
+        })),
+      cx,
     );
+
+    let suffix_row = Self::render_row(
+      "Suffix",
+      "Wildcard host suffix. .test is RFC 6761; avoid .local (mDNS).",
+      Input::new(&suffix_input).small().w_full(),
+      cx,
+    );
+
+    let ca_row = Self::render_row(
+      "HTTPS root certificate",
+      "Trust dockside-issued certs so https://*.dockside.test shows a green lock.",
+      h_flex()
+        .gap(px(6.))
+        .child(
+          Button::new("dns-install-ca")
+            .label("Install")
+            .primary()
+            .small()
+            .on_click(cx.listener(|_this, _ev, _w, cx| {
+              if let Err(e) = crate::services::install_local_ca() {
+                tracing::warn!("dns: install_local_ca failed: {e}");
+              }
+              cx.notify();
+            })),
+        )
+        .child(
+          Button::new("dns-uninstall-ca")
+            .label("Remove")
+            .ghost()
+            .small()
+            .on_click(cx.listener(|_this, _ev, _w, cx| {
+              if let Err(e) = crate::services::uninstall_local_ca() {
+                tracing::warn!("dns: uninstall_local_ca failed: {e}");
+              }
+              cx.notify();
+            })),
+        ),
+      cx,
+    );
+
+    // Live route list — surfaces every <name>.<suffix> currently routed.
+    let routes_panel = {
+      let routes_snapshot: Vec<(String, String)> = dns_mgr
+        .route_map()
+        .map_or_else(Vec::new, |map| map.read().route_summaries());
+      let mut block = v_flex()
+        .w_full()
+        .gap(px(2.))
+        .p(px(16.))
+        .my(px(12.))
+        .rounded(px(8.))
+        .bg(colors.sidebar)
+        .border_1()
+        .border_color(colors.border.opacity(0.6))
+        .child(
+          div()
+            .pb(px(8.))
+            .text_sm()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(colors.foreground)
+            .child("Live routes"),
+        );
+      if routes_snapshot.is_empty() {
+        block = block.child(
+          div()
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(if dns_running {
+              "No running containers yet."
+            } else {
+              "Enable Local DNS above to start routing containers."
+            }),
+        );
+      } else {
+        for (name, target) in routes_snapshot {
+          block = block.child(kv(&name, target.into()));
+        }
+      }
+      block
+    };
+
+    let test_panel = v_flex()
+      .w_full()
+      .gap(px(6.))
+      .p(px(16.))
+      .my(px(12.))
+      .rounded(px(8.))
+      .bg(colors.sidebar)
+      .border_1()
+      .border_color(colors.border.opacity(0.6))
+      .child(
+        div()
+          .text_sm()
+          .font_weight(gpui::FontWeight::SEMIBOLD)
+          .text_color(colors.foreground)
+          .child("Test it"),
+      )
+      .child(
+        div()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .whitespace_normal()
+          .child(
+            "1. Run a container that exposes a port: `docker run -d --name nginx -p 8080:80 nginx`.\n\
+             2. Verify resolution: `dig @127.0.0.1 -p 15353 nginx.dockside.test +short` → 127.0.0.1.\n\
+             3. Open `http://nginx.dockside.test/` in your browser.\n\
+             4. For HTTPS, install the root CA above, then `https://nginx.dockside.test/`.\n\
+             Linux dnsmasq users: dockside writes /etc/NetworkManager/dnsmasq.d/dockside-*.conf.\n\
+             systemd-resolved users: dockside writes /etc/systemd/resolved.conf.d/dockside-*.conf.\n\
+             Check the resolver registered: `resolvectl status` or `cat /etc/resolver/dockside.test` (macOS).",
+          ),
+      );
 
     v_flex()
       .w_full()
-      .child(Self::render_row(
-        "Enable *.dockside.test resolution",
-        "Run a local DNS server + reverse proxy on this machine. Toggling on installs a per-domain resolver via the privileged helper (you'll be prompted for your password).",
-        Switch::new("dns-enabled").checked(settings.dns_enabled).on_click(cx.listener({
-          let port = settings.dns_port;
-          move |this, checked: &bool, _window, cx| {
-            let suffix = this.settings_state.read(cx).settings.dns_suffix.clone();
-            let new_state = *checked;
-            this.settings_state.update(cx, |state, cx| {
-              state.settings.dns_enabled = new_state;
-              let _ = state.settings.save();
-              cx.emit(SettingsChanged::SettingsUpdated);
-            });
-            crate::services::apply_dns_settings(cx);
-            if new_state {
-              if let Err(e) = crate::services::install_dns_resolver(&suffix, port) {
-                tracing::warn!("dns: install_dns_resolver failed: {e}");
-              }
-            } else if let Err(e) = crate::services::uninstall_dns_resolver(&suffix) {
-              tracing::warn!("dns: uninstall_dns_resolver failed: {e}");
-            }
-            cx.notify();
-          }
-        })),
-        cx,
-      ))
-      .child(Self::render_row(
-        "Suffix",
-        "Wildcard host suffix. `.test` is RFC 6761; avoid `.local` (mDNS).",
-        Input::new(&suffix_input).small().w_full(),
-        cx,
-      ))
-      .child(Self::render_row(
-        "Status",
-        "Live status of the resolver and reverse proxy.",
-        Label::new(SharedString::from(status_line)),
-        cx,
-      ))
-      .child(Self::render_row(
-        "Install HTTPS root certificate",
-        "Trust dockside-issued leaf certificates so the browser shows a green lock for `https://*.dockside.test`. Runs `security add-trusted-cert` (macOS) or `update-ca-certificates` (Linux) via the privileged helper.",
-        Button::new("dns-install-ca")
-          .label("Install root CA")
-          .small()
-          .on_click(cx.listener(|_this, _ev, _w, cx| {
-            if let Err(e) = crate::services::install_local_ca() {
-              tracing::warn!("dns: install_local_ca failed: {e}");
-            }
-            cx.notify();
-          })),
-        cx,
-      ))
-      .child(Self::render_row(
-        "Remove HTTPS root certificate",
-        "Reverse the install above.",
-        Button::new("dns-uninstall-ca")
-          .label("Remove root CA")
-          .ghost()
-          .small()
-          .on_click(cx.listener(move |_this, _ev, _w, cx| {
-            let _ = &suffix_for_helper;
-            let _ = &suffix_for_uninstall;
-            if let Err(e) = crate::services::uninstall_local_ca() {
-              tracing::warn!("dns: uninstall_local_ca failed: {e}");
-            }
-            cx.notify();
-          })),
-        cx,
-      ))
+      .child(Self::render_section("Resolver", cx))
+      .child(toggle_row)
+      .child(suffix_row)
+      .child(Self::render_section("Status", cx))
+      .child(status_card)
+      .child(Self::render_section("HTTPS", cx))
+      .child(ca_row)
+      .child(Self::render_section("Routes", cx))
+      .child(routes_panel)
+      .child(Self::render_section("How to test", cx))
+      .child(test_panel)
       .into_any_element()
   }
 

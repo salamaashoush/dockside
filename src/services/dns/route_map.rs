@@ -89,6 +89,25 @@ impl RouteMap {
     ids.len()
   }
 
+  /// Snapshot for the Settings UI: `(hostname, backend description)` pairs,
+  /// one per registered hostname (primary + aliases). Sorted by hostname.
+  pub fn route_summaries(&self) -> Vec<(String, String)> {
+    let mut entries: Vec<(String, String)> = self
+      .by_name
+      .iter()
+      .map(|(name, route)| {
+        let target = match &route.backend {
+          Backend::Bridge { ip, port } => format!("{ip}:{port} (bridge)"),
+          Backend::HostPort { port } => format!("127.0.0.1:{port} (host port)"),
+          Backend::Unreachable { reason } => format!("unreachable — {reason}"),
+        };
+        (name.clone(), target)
+      })
+      .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
+  }
+
   fn insert_route(&mut self, route: &Route) {
     let primary = route.primary.clone();
     self.by_name.insert(primary, route.clone());
