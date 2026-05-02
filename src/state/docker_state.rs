@@ -2,7 +2,9 @@ use gpui::{App, AppContext, Entity, EventEmitter, Global};
 
 use crate::colima::{ColimaVm, Machine, MachineId};
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
-use crate::kubernetes::{ConfigMapInfo, DeploymentInfo, PodInfo, SecretInfo, ServiceInfo};
+use crate::kubernetes::{
+  ConfigMapInfo, DaemonSetInfo, DeploymentInfo, PodInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+};
 
 use super::app_state::CurrentView;
 
@@ -323,6 +325,10 @@ pub enum StateChanged {
     entries: Vec<(String, String)>,
   },
 
+  // StatefulSets / DaemonSets
+  StatefulSetsUpdated,
+  DaemonSetsUpdated,
+
   // ConfigMaps
   ConfigMapsUpdated,
   #[allow(dead_code)]
@@ -368,6 +374,8 @@ pub struct DockerState {
   pub deployments: Vec<DeploymentInfo>,
   pub secrets: Vec<SecretInfo>,
   pub configmaps: Vec<ConfigMapInfo>,
+  pub statefulsets: Vec<StatefulSetInfo>,
+  pub daemonsets: Vec<DaemonSetInfo>,
   pub namespaces: Vec<String>,
   pub selected_namespace: String,
   pub k8s_available: bool,
@@ -395,6 +403,8 @@ pub struct DockerState {
   pub deployments_state: LoadState,
   pub secrets_state: LoadState,
   pub configmaps_state: LoadState,
+  pub statefulsets_state: LoadState,
+  pub daemonsets_state: LoadState,
   pub machines_state: LoadState,
 }
 
@@ -412,6 +422,8 @@ impl DockerState {
       deployments: Vec::new(),
       secrets: Vec::new(),
       configmaps: Vec::new(),
+      statefulsets: Vec::new(),
+      daemonsets: Vec::new(),
       namespaces: vec!["default".to_string()],
       selected_namespace: "default".to_string(),
       k8s_available: false,
@@ -430,6 +442,8 @@ impl DockerState {
       services_state: LoadState::NotLoaded,
       secrets_state: LoadState::NotLoaded,
       configmaps_state: LoadState::NotLoaded,
+      statefulsets_state: LoadState::NotLoaded,
+      daemonsets_state: LoadState::NotLoaded,
       deployments_state: LoadState::NotLoaded,
       machines_state: LoadState::NotLoaded,
     }

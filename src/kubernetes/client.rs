@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, Secret};
 use kube::{
   Api, Client, Config,
@@ -14,7 +14,9 @@ use std::time::Duration;
 use k8s_openapi::api::core::v1::Service;
 
 use super::diagnostics::first_existing_known_kubeconfig;
-use super::types::{ConfigMapInfo, DeploymentInfo, NamespaceInfo, PodInfo, SecretInfo, ServiceInfo};
+use super::types::{
+  ConfigMapInfo, DaemonSetInfo, DeploymentInfo, NamespaceInfo, PodInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+};
 
 /// Kubernetes client wrapper
 pub struct KubeClient {
@@ -534,6 +536,89 @@ impl KubeClient {
     let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
     let cm = api.get(name).await.context(format!("Failed to get configmap {name}"))?;
     serde_yaml::to_string(&cm).context("Failed to serialize configmap to YAML")
+  }
+
+  // ========================================================================
+  // StatefulSet + DaemonSet Methods
+  // ========================================================================
+
+  pub async fn list_statefulsets(&self, namespace: Option<&str>) -> Result<Vec<StatefulSetInfo>> {
+    let items = if let Some(ns) = namespace {
+      let api: Api<StatefulSet> = Api::namespaced(self.client.clone(), ns);
+      api.list(&ListParams::default()).await?
+    } else {
+      let api: Api<StatefulSet> = Api::all(self.client.clone());
+      api.list(&ListParams::default()).await?
+    };
+    Ok(items.items.iter().map(StatefulSetInfo::from_statefulset).collect())
+  }
+
+  pub async fn delete_statefulset(&self, name: &str, namespace: &str) -> Result<()> {
+    let api: Api<StatefulSet> = Api::namespaced(self.client.clone(), namespace);
+    api.delete(name, &DeleteParams::default()).await?;
+    Ok(())
+  }
+
+  pub async fn scale_statefulset(&self, name: &str, namespace: &str, replicas: i32) -> Result<()> {
+    let api: Api<StatefulSet> = Api::namespaced(self.client.clone(), namespace);
+    let patch = json!({ "spec": { "replicas": replicas } });
+    api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to scale statefulset {name}"))?;
+    Ok(())
+  }
+
+  pub async fn list_daemonsets(&self, namespace: Option<&str>) -> Result<Vec<DaemonSetInfo>> {
+    let items = if let Some(ns) = namespace {
+      let api: Api<DaemonSet> = Api::namespaced(self.client.clone(), ns);
+      api.list(&ListParams::default()).await?
+    } else {
+      let api: Api<DaemonSet> = Api::all(self.client.clone());
+      api.list(&ListParams::default()).await?
+    };
+    Ok(items.items.iter().map(DaemonSetInfo::from_daemonset).collect())
+  }
+
+  pub async fn delete_daemonset(&self, name: &str, namespace: &str) -> Result<()> {
+    let api: Api<DaemonSet> = Api::namespaced(self.client.clone(), namespace);
+    api.delete(name, &DeleteParams::default()).await?;
+    Ok(())
+  }
+
+  /// Force a rolling restart by patching the pod template's
+  /// `kubectl.kubernetes.io/restartedAt` annotation. Works for
+  /// `Deployments` / `StatefulSets` / `DaemonSets`.
+  pub async fn rollout_restart_apps(&self, kind: &str, name: &str, namespace: &str) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    let patch = json!({
+      "spec": {
+        "template": {
+          "metadata": {
+            "annotations": {
+              "kubectl.kubernetes.io/restartedAt": now,
+            }
+          }
+        }
+      }
+    });
+    let pp = PatchParams::default();
+    match kind {
+      "Deployment" => {
+        let api: Api<Deployment> = Api::namespaced(self.client.clone(), namespace);
+        api.patch(name, &pp, &Patch::Merge(&patch)).await?;
+      }
+      "StatefulSet" => {
+        let api: Api<StatefulSet> = Api::namespaced(self.client.clone(), namespace);
+        api.patch(name, &pp, &Patch::Merge(&patch)).await?;
+      }
+      "DaemonSet" => {
+        let api: Api<DaemonSet> = Api::namespaced(self.client.clone(), namespace);
+        api.patch(name, &pp, &Patch::Merge(&patch)).await?;
+      }
+      other => return Err(anyhow::anyhow!("Cannot rollout-restart kind: {other}")),
+    }
+    Ok(())
   }
 
   pub async fn read_configmap_entries(&self, name: &str, namespace: &str) -> Result<Vec<(String, String)>> {

@@ -11,6 +11,8 @@ pub enum CurrentView {
   Pods,
   Services,
   Deployments,
+  StatefulSets,
+  DaemonSets,
   #[allow(dead_code)]
   Secrets,
   #[allow(dead_code)]
@@ -99,6 +101,8 @@ mod tests {
       CurrentView::Pods,
       CurrentView::Services,
       CurrentView::Deployments,
+      CurrentView::StatefulSets,
+      CurrentView::DaemonSets,
       CurrentView::Secrets,
       CurrentView::ConfigMaps,
       CurrentView::Machines,
@@ -106,7 +110,7 @@ mod tests {
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 14);
+    assert_eq!(views.len(), 16);
   }
 
   #[test]

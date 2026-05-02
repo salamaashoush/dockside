@@ -28,6 +28,7 @@ use crate::ui::command_palette::{CommandPalette, CommandPaletteEvent, PaletteAct
 use crate::ui::compose::ComposeView;
 use crate::ui::configmaps::ConfigMapsView;
 use crate::ui::containers::ContainersView;
+use crate::ui::daemonsets::DaemonSetsView;
 use crate::ui::deployments::DeploymentsView;
 use crate::ui::dialogs;
 use crate::ui::global_search::{GlobalSearch, GlobalSearchEvent};
@@ -42,6 +43,7 @@ use crate::ui::settings::SettingsView;
 use crate::ui::setup_dialog::{
   SetupDialog, diagnose_k8s_quick, is_colima_installed, is_colima_running, is_docker_installed,
 };
+use crate::ui::statefulsets::StatefulSetsView;
 use crate::ui::volumes::VolumesView;
 
 /// Main application - only handles layout and view switching
@@ -61,6 +63,8 @@ pub struct DocksideApp {
   models_view: Entity<ModelsView>,
   secrets_view: Entity<SecretsView>,
   configmaps_view: Entity<ConfigMapsView>,
+  statefulsets_view: Entity<StatefulSetsView>,
+  daemonsets_view: Entity<DaemonSetsView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
   pending_notifications: Vec<(NotificationType, String)>,
   // Pending setup check result - triggers dialog when set
@@ -138,6 +142,8 @@ impl DocksideApp {
     let models_view = cx.new(|cx| ModelsView::new(window, cx));
     let secrets_view = cx.new(|cx| SecretsView::new(window, cx));
     let configmaps_view = cx.new(|cx| ConfigMapsView::new(window, cx));
+    let statefulsets_view = cx.new(|cx| StatefulSetsView::new(window, cx));
+    let daemonsets_view = cx.new(|cx| DaemonSetsView::new(window, cx));
 
     // Run setup checks async — only surface the dialog if a *required* piece is
     // missing. Docker is the only universal must-have. Colima is only required
@@ -200,6 +206,8 @@ impl DocksideApp {
       models_view,
       secrets_view,
       configmaps_view,
+      statefulsets_view,
+      daemonsets_view,
       pending_notifications: Vec::new(),
       pending_setup_check: None,
       focus_handle,
@@ -609,6 +617,22 @@ impl DocksideApp {
                                     })),
                             )
                             .child(
+                                SidebarMenuItem::new("StatefulSets")
+                                    .icon(AppIcon::Deployment)
+                                    .active(current_view == CurrentView::StatefulSets)
+                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                        crate::services::set_view(CurrentView::StatefulSets, cx);
+                                    })),
+                            )
+                            .child(
+                                SidebarMenuItem::new("DaemonSets")
+                                    .icon(AppIcon::Deployment)
+                                    .active(current_view == CurrentView::DaemonSets)
+                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                        crate::services::set_view(CurrentView::DaemonSets, cx);
+                                    })),
+                            )
+                            .child(
                                 SidebarMenuItem::new("Secrets")
                                     .icon(AppIcon::Settings)
                                     .active(current_view == CurrentView::Secrets)
@@ -698,6 +722,8 @@ impl DocksideApp {
       CurrentView::Models => div().size_full().child(self.models_view.clone()),
       CurrentView::Secrets => div().size_full().child(self.secrets_view.clone()),
       CurrentView::ConfigMaps => div().size_full().child(self.configmaps_view.clone()),
+      CurrentView::StatefulSets => div().size_full().child(self.statefulsets_view.clone()),
+      CurrentView::DaemonSets => div().size_full().child(self.daemonsets_view.clone()),
     }
   }
 

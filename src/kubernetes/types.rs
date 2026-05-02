@@ -322,6 +322,108 @@ impl DeploymentInfo {
 }
 
 // ============================================================================
+// StatefulSet + DaemonSet Types
+// ============================================================================
+
+#[derive(Debug, Clone)]
+pub struct StatefulSetInfo {
+  pub name: String,
+  pub namespace: String,
+  pub replicas: i32,
+  pub ready_replicas: i32,
+  pub age: String,
+  #[allow(dead_code)]
+  pub labels: HashMap<String, String>,
+  pub images: Vec<String>,
+}
+
+impl StatefulSetInfo {
+  pub fn from_statefulset(s: &k8s_openapi::api::apps::v1::StatefulSet) -> Self {
+    let metadata = &s.metadata;
+    let spec = s.spec.as_ref();
+    let status = s.status.as_ref();
+
+    let name = metadata.name.clone().unwrap_or_default();
+    let namespace = metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+    let labels: HashMap<String, String> = metadata.labels.clone().unwrap_or_default().into_iter().collect();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+
+    let replicas = spec.and_then(|s| s.replicas).unwrap_or(0);
+    let ready_replicas = status.and_then(|s| s.ready_replicas).unwrap_or(0);
+    let images: Vec<String> = spec
+      .and_then(|s| s.template.spec.as_ref())
+      .map(|pod_spec| pod_spec.containers.iter().filter_map(|c| c.image.clone()).collect())
+      .unwrap_or_default();
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+
+    Self {
+      name,
+      namespace,
+      replicas,
+      ready_replicas,
+      age,
+      labels,
+      images,
+    }
+  }
+
+  pub fn ready_display(&self) -> String {
+    format!("{}/{}", self.ready_replicas, self.replicas)
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct DaemonSetInfo {
+  pub name: String,
+  pub namespace: String,
+  pub desired: i32,
+  #[allow(dead_code)]
+  pub current: i32,
+  pub ready: i32,
+  pub age: String,
+  #[allow(dead_code)]
+  pub labels: HashMap<String, String>,
+  pub images: Vec<String>,
+}
+
+impl DaemonSetInfo {
+  pub fn from_daemonset(d: &k8s_openapi::api::apps::v1::DaemonSet) -> Self {
+    let metadata = &d.metadata;
+    let spec = d.spec.as_ref();
+    let status = d.status.as_ref();
+
+    let name = metadata.name.clone().unwrap_or_default();
+    let namespace = metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+    let labels: HashMap<String, String> = metadata.labels.clone().unwrap_or_default().into_iter().collect();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+
+    let desired = status.map_or(0, |s| s.desired_number_scheduled);
+    let current = status.map_or(0, |s| s.current_number_scheduled);
+    let ready = status.map_or(0, |s| s.number_ready);
+    let images: Vec<String> = spec
+      .and_then(|s| s.template.spec.as_ref())
+      .map(|pod_spec| pod_spec.containers.iter().filter_map(|c| c.image.clone()).collect())
+      .unwrap_or_default();
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+
+    Self {
+      name,
+      namespace,
+      desired,
+      current,
+      ready,
+      age,
+      labels,
+      images,
+    }
+  }
+
+  pub fn ready_display(&self) -> String {
+    format!("{}/{}", self.ready, self.desired)
+  }
+}
+
+// ============================================================================
 // Secret + ConfigMap Types
 // ============================================================================
 

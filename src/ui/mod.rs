@@ -4,6 +4,7 @@ pub mod components;
 pub mod compose;
 pub mod configmaps;
 pub mod containers;
+pub mod daemonsets;
 pub mod deployments;
 pub mod dialogs;
 pub mod global_search;
@@ -17,6 +18,7 @@ pub mod secrets;
 pub mod services;
 pub mod settings;
 pub mod setup_dialog;
+pub mod statefulsets;
 pub mod volumes;
 
 pub use prune_dialog::{PruneDialog, PruneOptions};
