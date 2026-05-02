@@ -133,6 +133,7 @@ impl ClusterView {
             .child(
               div()
                 .flex_1()
+                .min_w_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("NAME"),
@@ -140,6 +141,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(80.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("STATUS"),
@@ -147,6 +149,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(120.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("ROLES"),
@@ -154,6 +157,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(100.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("VERSION"),
@@ -161,6 +165,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(80.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("CPU"),
@@ -168,6 +173,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(100.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("MEMORY"),
@@ -175,6 +181,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(120.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("INTERNAL IP"),
@@ -182,6 +189,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(80.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("OS"),
@@ -189,6 +197,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(60.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("AGE"),
@@ -219,6 +228,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(80.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(status_color)
                   .child(n.status.clone()),
@@ -226,6 +236,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(120.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child(if n.roles.is_empty() {
@@ -237,6 +248,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(100.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child(n.version.clone()),
@@ -244,6 +256,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(80.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.foreground)
                   .child(n.cpu_allocatable.clone()),
@@ -251,6 +264,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(100.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.foreground)
                   .child(n.mem_allocatable.clone()),
@@ -258,6 +272,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(120.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child(n.internal_ip.clone().unwrap_or_else(|| "—".to_string())),
@@ -265,6 +280,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(80.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child(format!("{}/{}", n.os, n.arch)),
@@ -272,6 +288,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child(n.age.clone()),
@@ -313,6 +330,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(60.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("TYPE"),
@@ -320,6 +338,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(140.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("REASON"),
@@ -327,6 +346,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(100.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("NAMESPACE"),
@@ -334,6 +354,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(220.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("OBJECT"),
@@ -341,6 +362,7 @@ impl ClusterView {
             .child(
               div()
                 .flex_1()
+                .min_w_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("MESSAGE"),
@@ -348,6 +370,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(40.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("#"),
@@ -355,6 +378,7 @@ impl ClusterView {
             .child(
               div()
                 .w(px(60.))
+                .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.muted_foreground)
                 .child("AGE"),
@@ -378,6 +402,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(type_color)
                   .child(e.event_type.clone()),
@@ -385,6 +410,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(140.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.foreground)
                   .child(e.reason.clone()),
@@ -392,6 +418,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(100.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child(e.namespace.clone()),
@@ -399,6 +426,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(220.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .text_ellipsis()
@@ -408,6 +436,7 @@ impl ClusterView {
               .child(
                 div()
                   .flex_1()
+                  .min_w_0()
                   .text_xs()
                   .text_color(colors.foreground)
                   .whitespace_normal()
@@ -416,6 +445,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(40.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child(e.count.to_string()),
@@ -423,6 +453,7 @@ impl ClusterView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child(e.age.clone()),
@@ -453,6 +484,7 @@ impl ClusterView {
         .child(
           div()
             .w(px(120.))
+            .flex_shrink_0()
             .text_xs()
             .text_color(colors.muted_foreground)
             .child("New namespace:"),
@@ -515,6 +547,7 @@ impl ClusterView {
         .child(
           div()
             .flex_1()
+            .min_w_0()
             .text_xs()
             .text_color(colors.muted_foreground)
             .child("NAME"),

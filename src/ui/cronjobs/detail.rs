@@ -272,6 +272,7 @@ impl CronJobDetail {
       .child(
         div()
           .w(px(80.))
+          .flex_shrink_0()
           .text_xs()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.muted_foreground)
@@ -280,6 +281,7 @@ impl CronJobDetail {
       .child(
         div()
           .w(px(120.))
+          .flex_shrink_0()
           .text_xs()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.muted_foreground)
@@ -288,6 +290,7 @@ impl CronJobDetail {
       .child(
         div()
           .w(px(60.))
+          .flex_shrink_0()
           .text_xs()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.muted_foreground)

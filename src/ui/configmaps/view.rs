@@ -124,6 +124,7 @@ impl ConfigMapsView {
       .child(
         div()
           .w(px(140.))
+          .flex_shrink_0()
           .text_xs()
           .text_color(colors.muted_foreground)
           .child(cm.namespace.clone()),
@@ -131,6 +132,7 @@ impl ConfigMapsView {
       .child(
         div()
           .w(px(60.))
+          .flex_shrink_0()
           .text_xs()
           .text_color(colors.muted_foreground)
           .child(format!("{key_count} keys")),
@@ -138,6 +140,7 @@ impl ConfigMapsView {
       .child(
         div()
           .w(px(60.))
+          .flex_shrink_0()
           .text_xs()
           .text_color(colors.muted_foreground)
           .child(cm.age.clone()),
@@ -190,6 +193,7 @@ impl ConfigMapsView {
           .child(
             div()
               .w(px(180.))
+              .flex_shrink_0()
               .text_xs()
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(colors.foreground)
@@ -198,6 +202,7 @@ impl ConfigMapsView {
           .child(
             div()
               .flex_1()
+              .min_w_0()
               .text_xs()
               .font_family("monospace")
               .text_color(colors.foreground)
@@ -283,6 +288,7 @@ impl Render for ConfigMapsView {
               .child(
                 div()
                   .flex_1()
+                  .min_w_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAME"),
@@ -290,6 +296,7 @@ impl Render for ConfigMapsView {
               .child(
                 div()
                   .w(px(140.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAMESPACE"),
@@ -297,6 +304,7 @@ impl Render for ConfigMapsView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("KEYS"),
@@ -304,6 +312,7 @@ impl Render for ConfigMapsView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("AGE"),

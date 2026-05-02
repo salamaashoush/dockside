@@ -82,6 +82,7 @@ impl Render for PvcsView {
               .child(
                 div()
                   .flex_1()
+                  .min_w_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAME"),
@@ -89,6 +90,7 @@ impl Render for PvcsView {
               .child(
                 div()
                   .w(px(140.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAMESPACE"),
@@ -96,6 +98,7 @@ impl Render for PvcsView {
               .child(
                 div()
                   .w(px(80.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("STATUS"),
@@ -103,6 +106,7 @@ impl Render for PvcsView {
               .child(
                 div()
                   .w(px(80.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("CAPACITY"),
@@ -110,6 +114,7 @@ impl Render for PvcsView {
               .child(
                 div()
                   .w(px(120.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("ACCESS"),
@@ -117,6 +122,7 @@ impl Render for PvcsView {
               .child(
                 div()
                   .w(px(140.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("STORAGE CLASS"),
@@ -124,6 +130,7 @@ impl Render for PvcsView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("AGE"),
@@ -158,6 +165,7 @@ impl Render for PvcsView {
                 .child(
                   div()
                     .w(px(140.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.muted_foreground)
                     .child(p.namespace.clone()),
@@ -165,6 +173,7 @@ impl Render for PvcsView {
                 .child(
                   div()
                     .w(px(80.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(status_color)
                     .child(p.status.clone()),
@@ -172,6 +181,7 @@ impl Render for PvcsView {
                 .child(
                   div()
                     .w(px(80.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.foreground)
                     .child(if p.capacity.is_empty() {
@@ -183,6 +193,7 @@ impl Render for PvcsView {
                 .child(
                   div()
                     .w(px(120.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.muted_foreground)
                     .text_ellipsis()
@@ -196,6 +207,7 @@ impl Render for PvcsView {
                 .child(
                   div()
                     .w(px(140.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.muted_foreground)
                     .text_ellipsis()
@@ -205,6 +217,7 @@ impl Render for PvcsView {
                 .child(
                   div()
                     .w(px(60.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.muted_foreground)
                     .child(p.age.clone()),

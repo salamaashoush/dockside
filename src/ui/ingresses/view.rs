@@ -109,6 +109,7 @@ impl Render for IngressesView {
               .child(
                 div()
                   .flex_1()
+                  .min_w_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAME"),
@@ -116,6 +117,7 @@ impl Render for IngressesView {
               .child(
                 div()
                   .w(px(140.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAMESPACE"),
@@ -123,6 +125,7 @@ impl Render for IngressesView {
               .child(
                 div()
                   .w(px(120.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("CLASS"),
@@ -130,6 +133,7 @@ impl Render for IngressesView {
               .child(
                 div()
                   .flex_1()
+                  .min_w_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("HOSTS"),
@@ -137,6 +141,7 @@ impl Render for IngressesView {
               .child(
                 div()
                   .w(px(160.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("ADDRESS"),
@@ -144,6 +149,7 @@ impl Render for IngressesView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("AGE"),
@@ -172,6 +178,7 @@ impl Render for IngressesView {
                 .child(
                   div()
                     .w(px(140.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.muted_foreground)
                     .child(i.namespace.clone()),
@@ -179,6 +186,7 @@ impl Render for IngressesView {
                 .child(
                   div()
                     .w(px(120.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.muted_foreground)
                     .child(i.class_name.clone().unwrap_or_else(|| "—".to_string())),
@@ -186,6 +194,7 @@ impl Render for IngressesView {
                 .child(
                   div()
                     .flex_1()
+                    .min_w_0()
                     .text_xs()
                     .text_color(colors.foreground)
                     .text_ellipsis()
@@ -199,6 +208,7 @@ impl Render for IngressesView {
                 .child(
                   div()
                     .w(px(160.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.muted_foreground)
                     .text_ellipsis()
@@ -212,6 +222,7 @@ impl Render for IngressesView {
                 .child(
                   div()
                     .w(px(60.))
+                    .flex_shrink_0()
                     .text_xs()
                     .text_color(colors.muted_foreground)
                     .child(i.age.clone()),

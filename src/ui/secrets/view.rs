@@ -140,6 +140,7 @@ impl SecretsView {
       .child(
         div()
           .w(px(140.))
+          .flex_shrink_0()
           .text_xs()
           .text_color(colors.muted_foreground)
           .child(secret.namespace.clone()),
@@ -147,6 +148,7 @@ impl SecretsView {
       .child(
         div()
           .w(px(180.))
+          .flex_shrink_0()
           .text_xs()
           .text_color(colors.muted_foreground)
           .child(secret.secret_type.clone()),
@@ -154,6 +156,7 @@ impl SecretsView {
       .child(
         div()
           .w(px(60.))
+          .flex_shrink_0()
           .text_xs()
           .text_color(colors.muted_foreground)
           .child(format!("{key_count} keys")),
@@ -161,6 +164,7 @@ impl SecretsView {
       .child(
         div()
           .w(px(60.))
+          .flex_shrink_0()
           .text_xs()
           .text_color(colors.muted_foreground)
           .child(secret.age.clone()),
@@ -217,6 +221,7 @@ impl SecretsView {
           .child(
             div()
               .w(px(180.))
+              .flex_shrink_0()
               .text_xs()
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(colors.foreground)
@@ -225,6 +230,7 @@ impl SecretsView {
           .child(
             div()
               .flex_1()
+              .min_w_0()
               .text_xs()
               .font_family("monospace")
               .text_color(colors.foreground)
@@ -317,6 +323,7 @@ impl Render for SecretsView {
               .child(
                 div()
                   .flex_1()
+                  .min_w_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAME"),
@@ -324,6 +331,7 @@ impl Render for SecretsView {
               .child(
                 div()
                   .w(px(140.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("NAMESPACE"),
@@ -331,6 +339,7 @@ impl Render for SecretsView {
               .child(
                 div()
                   .w(px(180.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("TYPE"),
@@ -338,6 +347,7 @@ impl Render for SecretsView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("KEYS"),
@@ -345,6 +355,7 @@ impl Render for SecretsView {
               .child(
                 div()
                   .w(px(60.))
+                  .flex_shrink_0()
                   .text_xs()
                   .text_color(colors.muted_foreground)
                   .child("AGE"),

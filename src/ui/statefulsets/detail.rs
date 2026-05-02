@@ -297,6 +297,7 @@ impl StatefulSetDetail {
       .child(
         div()
           .w(px(80.))
+          .flex_shrink_0()
           .text_xs()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.muted_foreground)
@@ -305,6 +306,7 @@ impl StatefulSetDetail {
       .child(
         div()
           .w(px(50.))
+          .flex_shrink_0()
           .text_xs()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.muted_foreground)
@@ -313,6 +315,7 @@ impl StatefulSetDetail {
       .child(
         div()
           .w(px(60.))
+          .flex_shrink_0()
           .text_xs()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.muted_foreground)
@@ -321,6 +324,7 @@ impl StatefulSetDetail {
       .child(
         div()
           .w(px(50.))
+          .flex_shrink_0()
           .text_xs()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.muted_foreground)
