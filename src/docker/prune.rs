@@ -195,6 +195,15 @@ mod tests {
     };
     assert!(!with_containers.is_empty());
 
+    let with_build_cache = PruneResult {
+      build_cache_deleted: vec!["bc1".to_string(), "bc2".to_string()],
+      space_reclaimed: 4096,
+      ..Default::default()
+    };
+    assert!(!with_build_cache.is_empty());
+    assert_eq!(with_build_cache.total_items_deleted(), 2);
+    assert_eq!(with_build_cache.display_space_reclaimed(), "4.0 KiB");
+
     let with_images = PruneResult {
       images_deleted: vec!["i1".to_string()],
       ..Default::default()

@@ -254,9 +254,24 @@ pub fn lint_dockerfile(path: &Path) -> Result<LintReport> {
     let stderr = String::from_utf8_lossy(&output.stderr);
     return Err(anyhow!("hadolint produced no output: {stderr}"));
   }
-  let raw: Vec<HadolintEntry> =
-    serde_json::from_str(&stdout).map_err(|e| anyhow!("Failed to parse hadolint output: {e}"))?;
+  parse_hadolint_json(&stdout)
+}
 
+#[derive(Deserialize, Default)]
+struct HadolintEntry {
+  line: Option<u32>,
+  column: Option<u32>,
+  code: Option<String>,
+  level: Option<String>,
+  message: Option<String>,
+}
+
+/// Parse the JSON body of `hadolint --format json` into a `LintReport`.
+/// Pulled out of `lint_dockerfile` so we can unit-test the parsing
+/// logic without spawning the binary.
+pub(crate) fn parse_hadolint_json(stdout: &str) -> Result<LintReport> {
+  let raw: Vec<HadolintEntry> =
+    serde_json::from_str(stdout).map_err(|e| anyhow!("Failed to parse hadolint output: {e}"))?;
   let mut report = LintReport::default();
   for entry in raw {
     let level = entry.level.unwrap_or_else(|| "warning".to_string());
@@ -274,7 +289,6 @@ pub fn lint_dockerfile(path: &Path) -> Result<LintReport> {
       message: entry.message.unwrap_or_default(),
     });
   }
-  // Sort by severity weight then line.
   report.findings.sort_by(|a, b| {
     let weight = |s: &str| match s {
       "error" => 0,
@@ -290,13 +304,59 @@ pub fn lint_dockerfile(path: &Path) -> Result<LintReport> {
   Ok(report)
 }
 
-#[derive(Deserialize, Default)]
-struct HadolintEntry {
-  line: Option<u32>,
-  column: Option<u32>,
-  code: Option<String>,
-  level: Option<String>,
-  message: Option<String>,
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn parse_empty_hadolint() {
+    let r = parse_hadolint_json("[]").unwrap();
+    assert_eq!(r.findings.len(), 0);
+    assert_eq!(r.error + r.warning + r.info + r.style, 0);
+  }
+
+  #[test]
+  fn parse_mixed_levels_and_sort() {
+    let json = r#"[
+      {"line":10,"column":1,"code":"DL3008","level":"warning","message":"Pin versions"},
+      {"line":3,"column":1,"code":"DL3001","level":"error","message":"For some bash command"},
+      {"line":7,"column":1,"code":"SC2086","level":"info","message":"Quote variable"},
+      {"line":2,"column":1,"code":"DL4006","level":"style","message":"Set the SHELL option"}
+    ]"#;
+    let r = parse_hadolint_json(json).unwrap();
+    assert_eq!(r.error, 1);
+    assert_eq!(r.warning, 1);
+    assert_eq!(r.info, 1);
+    assert_eq!(r.style, 1);
+    // error (DL3001) sorts before warning (DL3008).
+    assert_eq!(r.findings[0].code, "DL3001");
+    assert_eq!(r.findings[1].code, "DL3008");
+    assert_eq!(r.findings[2].code, "SC2086");
+    assert_eq!(r.findings[3].code, "DL4006");
+  }
+
+  #[test]
+  fn parse_unknown_level_buckets_as_warning() {
+    let json = r#"[{"line":1,"column":1,"code":"X","level":"weird","message":"?"}]"#;
+    let r = parse_hadolint_json(json).unwrap();
+    assert_eq!(r.warning, 1);
+    assert_eq!(r.findings[0].level, "weird");
+  }
+
+  #[test]
+  fn parse_missing_fields_defaults() {
+    let json = r#"[{"code":"DL3000","message":"hi"}]"#;
+    let r = parse_hadolint_json(json).unwrap();
+    assert_eq!(r.findings.len(), 1);
+    assert_eq!(r.findings[0].line, 0);
+    assert_eq!(r.findings[0].level, "warning");
+    assert_eq!(r.warning, 1);
+  }
+
+  #[test]
+  fn parse_invalid_json_errors() {
+    assert!(parse_hadolint_json("not json").is_err());
+  }
 }
 
 #[derive(Deserialize, Default)]

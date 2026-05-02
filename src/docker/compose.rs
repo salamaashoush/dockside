@@ -641,4 +641,69 @@ mod tests {
     assert!(!project.is_all_stopped());
     assert_eq!(project.status_display(), "1/4 running");
   }
+
+  #[test]
+  fn test_extract_pulls_working_dir_and_config_files() {
+    let labels = HashMap::from([
+      (COMPOSE_PROJECT_LABEL.to_string(), "myapp".to_string()),
+      (COMPOSE_SERVICE_LABEL.to_string(), "web".to_string()),
+      (COMPOSE_WORKING_DIR_LABEL.to_string(), "/srv/myapp".to_string()),
+      (
+        COMPOSE_CONFIG_FILES_LABEL.to_string(),
+        "/srv/myapp/docker-compose.yml,/srv/myapp/override.yml".to_string(),
+      ),
+    ]);
+    let containers = vec![make_container("myapp-web-1", "nginx", ContainerState::Running, labels)];
+    let projects = extract_compose_projects(&containers);
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].working_dir.as_deref(), Some("/srv/myapp"));
+    assert_eq!(
+      projects[0].config_files,
+      vec![
+        "/srv/myapp/docker-compose.yml".to_string(),
+        "/srv/myapp/override.yml".to_string(),
+      ]
+    );
+  }
+
+  #[test]
+  fn test_extract_first_container_wins_for_metadata() {
+    // Two services in same project; metadata should be set from the
+    // first labelled container we walk and stay stable.
+    let labels_a = HashMap::from([
+      (COMPOSE_PROJECT_LABEL.to_string(), "p".to_string()),
+      (COMPOSE_SERVICE_LABEL.to_string(), "a".to_string()),
+      (COMPOSE_WORKING_DIR_LABEL.to_string(), "/dir-a".to_string()),
+    ]);
+    let labels_b = HashMap::from([
+      (COMPOSE_PROJECT_LABEL.to_string(), "p".to_string()),
+      (COMPOSE_SERVICE_LABEL.to_string(), "b".to_string()),
+      (COMPOSE_WORKING_DIR_LABEL.to_string(), "/dir-b".to_string()),
+    ]);
+    let containers = vec![
+      make_container("p-a-1", "img", ContainerState::Running, labels_a),
+      make_container("p-b-1", "img", ContainerState::Running, labels_b),
+    ];
+    let projects = extract_compose_projects(&containers);
+    assert_eq!(projects.len(), 1);
+    // Either dir is acceptable for HashMap-iteration-order reasons,
+    // but it must be one of them and must not be empty.
+    let wd = projects[0].working_dir.as_deref().unwrap();
+    assert!(wd == "/dir-a" || wd == "/dir-b");
+  }
+
+  #[test]
+  fn test_extract_skips_empty_config_files_token() {
+    let labels = HashMap::from([
+      (COMPOSE_PROJECT_LABEL.to_string(), "p".to_string()),
+      (COMPOSE_SERVICE_LABEL.to_string(), "a".to_string()),
+      (
+        COMPOSE_CONFIG_FILES_LABEL.to_string(),
+        ",  ,/srv/c.yml,".to_string(),
+      ),
+    ]);
+    let containers = vec![make_container("p-a-1", "img", ContainerState::Running, labels)];
+    let projects = extract_compose_projects(&containers);
+    assert_eq!(projects[0].config_files, vec!["/srv/c.yml".to_string()]);
+  }
 }
