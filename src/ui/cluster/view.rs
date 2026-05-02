@@ -10,6 +10,7 @@ use gpui_component::{
   input::{Input, InputState},
   label::Label,
   menu::{DropdownMenu, PopupMenuItem},
+  scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
   v_flex,
@@ -277,7 +278,9 @@ impl ClusterView {
               ),
           );
         }
-        div().size_full().overflow_hidden().child(list)
+        div()
+          .size_full()
+          .child(div().id("nodes-scroll").size_full().overflow_y_scrollbar().child(list))
       }
     }
   }
@@ -426,7 +429,9 @@ impl ClusterView {
               ),
           );
         }
-        div().size_full().overflow_hidden().child(list)
+        div()
+          .size_full()
+          .child(div().id("events-scroll").size_full().overflow_y_scrollbar().child(list))
       }
     }
   }
@@ -549,7 +554,13 @@ impl ClusterView {
           ),
       );
     }
-    div().size_full().overflow_hidden().child(list)
+    div().size_full().child(
+      div()
+        .id("namespaces-scroll")
+        .size_full()
+        .overflow_y_scrollbar()
+        .child(list),
+    )
   }
 }
 

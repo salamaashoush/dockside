@@ -9,6 +9,7 @@ use gpui_component::{
   h_flex,
   label::Label,
   menu::{DropdownMenu, PopupMenuItem},
+  scroll::ScrollableElement,
   theme::ActiveTheme,
   v_flex,
 };
@@ -270,11 +271,18 @@ impl Render for IngressesView {
                 ),
             );
           }
-          div().size_full().overflow_hidden().child(list)
+          div().w_full().child(list)
         }
       }
     };
 
-    v_flex().size_full().child(toolbar).child(body)
+    v_flex().size_full().child(toolbar).child(
+      div()
+        .id("ingresses-scroll")
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scrollbar()
+        .child(body),
+    )
   }
 }
