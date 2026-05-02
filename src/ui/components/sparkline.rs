@@ -27,10 +27,7 @@ impl Sparkline {
     Self {
       data,
       stroke,
-      fill: Hsla {
-        a: 0.25,
-        ..stroke
-      },
+      fill: Hsla { a: 0.25, ..stroke },
       stroke_width: px(1.5),
       max_override: None,
     }

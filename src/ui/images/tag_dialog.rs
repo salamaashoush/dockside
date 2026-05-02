@@ -39,7 +39,11 @@ impl TagImageDialog {
       self.repo_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. my-org/my-app")));
     }
     if self.tag_input.is_none() {
-      self.tag_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. v1.0.0").default_value("latest")));
+      self.tag_input = Some(cx.new(|cx| {
+        InputState::new(window, cx)
+          .placeholder("e.g. v1.0.0")
+          .default_value("latest")
+      }));
     }
   }
 
@@ -101,13 +105,19 @@ impl Render for TagImageDialog {
       )
       .child(row(
         "Repository",
-        div().w(px(300.)).child(Input::new(&repo_input).small()).into_any_element(),
+        div()
+          .w(px(300.))
+          .child(Input::new(&repo_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))
       .child(row(
         "Tag",
-        div().w(px(300.)).child(Input::new(&tag_input).small()).into_any_element(),
+        div()
+          .w(px(300.))
+          .child(Input::new(&tag_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))

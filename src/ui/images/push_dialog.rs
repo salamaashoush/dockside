@@ -51,17 +51,17 @@ impl PushImageDialog {
       self.username_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("username (optional)")));
     }
     if self.password_input.is_none() {
-      self.password_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("password (optional)").masked(true)));
+      self.password_input = Some(cx.new(|cx| {
+        InputState::new(window, cx)
+          .placeholder("password (optional)")
+          .masked(true)
+      }));
     }
   }
 
   pub fn get_options(&self, cx: &App) -> PushImageOptions {
-    let read = |opt: &Option<Entity<InputState>>| {
-      opt
-        .as_ref()
-        .map(|s| s.read(cx).text().to_string())
-        .unwrap_or_default()
-    };
+    let read =
+      |opt: &Option<Entity<InputState>>| opt.as_ref().map(|s| s.read(cx).text().to_string()).unwrap_or_default();
     let image = read(&self.image_input);
     let tag = read(&self.tag_input);
     let username = read(&self.username_input);
@@ -118,25 +118,37 @@ impl Render for PushImageDialog {
       )
       .child(row(
         "Image",
-        div().w(px(320.)).child(Input::new(&image_input).small()).into_any_element(),
+        div()
+          .w(px(320.))
+          .child(Input::new(&image_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))
       .child(row(
         "Tag",
-        div().w(px(160.)).child(Input::new(&tag_input).small()).into_any_element(),
+        div()
+          .w(px(160.))
+          .child(Input::new(&tag_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))
       .child(row(
         "Username",
-        div().w(px(220.)).child(Input::new(&username_input).small()).into_any_element(),
+        div()
+          .w(px(220.))
+          .child(Input::new(&username_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))
       .child(row(
         "Password",
-        div().w(px(220.)).child(Input::new(&password_input).small()).into_any_element(),
+        div()
+          .w(px(220.))
+          .child(Input::new(&password_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))

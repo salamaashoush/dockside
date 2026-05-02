@@ -165,7 +165,10 @@ pub fn prune_docker(options: &crate::ui::PruneOptions, cx: &mut App) -> Entity<P
             parts.push(format!("{} networks", prune_result.networks_deleted.len()));
           }
           if !prune_result.build_cache_deleted.is_empty() {
-            parts.push(format!("{} build cache entries", prune_result.build_cache_deleted.len()));
+            parts.push(format!(
+              "{} build cache entries",
+              prune_result.build_cache_deleted.len()
+            ));
           }
           if !prune_result.pods_deleted.is_empty() {
             parts.push(format!("{} pods", prune_result.pods_deleted.len()));

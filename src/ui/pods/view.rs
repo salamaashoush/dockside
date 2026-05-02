@@ -303,12 +303,17 @@ impl PodsView {
           }
         };
         if let Err(e) = kube
-          .stream_pod_logs(&pod_name, &namespace, container.as_deref(), Some(max_lines), false, tx.clone())
+          .stream_pod_logs(
+            &pod_name,
+            &namespace,
+            container.as_deref(),
+            Some(max_lines),
+            false,
+            tx.clone(),
+          )
           .await
         {
-          let _ = tx
-            .send(format!("\r\n[log stream ended: {e}]\r\n").into_bytes())
-            .await;
+          let _ = tx.send(format!("\r\n[log stream ended: {e}]\r\n").into_bytes()).await;
         }
       });
 

@@ -187,12 +187,7 @@ impl Render for RegistryBrowserDialog {
                     )
                   }),
               )
-              .child(
-                div()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child(description),
-              ),
+              .child(div().text_xs().text_color(colors.muted_foreground).child(description)),
           )
           .child(
             div()

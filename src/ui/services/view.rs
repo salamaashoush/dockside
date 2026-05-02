@@ -142,7 +142,6 @@ impl ServicesView {
       detail,
     }
   }
-
 }
 
 impl Render for ServicesView {

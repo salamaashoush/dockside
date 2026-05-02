@@ -229,12 +229,10 @@ impl Render for PruneDialog {
             )
           })
           .when(!result.build_cache_deleted.is_empty(), |this| {
-            this.child(
-              div()
-                .text_sm()
-                .text_color(colors.secondary_foreground)
-                .child(format!("Build cache entries removed: {}", result.build_cache_deleted.len())),
-            )
+            this.child(div().text_sm().text_color(colors.secondary_foreground).child(format!(
+              "Build cache entries removed: {}",
+              result.build_cache_deleted.len()
+            )))
           })
           .when(!result.pods_deleted.is_empty(), |this| {
             this.child(
@@ -320,7 +318,11 @@ impl Render for PruneDialog {
             div()
               .flex_1()
               .text_xs()
-              .text_color(if reclaimable > 0 { colors.warning } else { colors.muted_foreground })
+              .text_color(if reclaimable > 0 {
+                colors.warning
+              } else {
+                colors.muted_foreground
+              })
               .child(format!(
                 "{} reclaimable",
                 bytesize::ByteSize(u64::try_from(reclaimable).unwrap_or(0))
@@ -338,7 +340,13 @@ impl Render for PruneDialog {
             .text_color(colors.muted_foreground)
             .child("Disk usage (docker system df)"),
         )
-        .child(row("Images", u.images_count, u.images_active, u.images_size, u.images_reclaimable))
+        .child(row(
+          "Images",
+          u.images_count,
+          u.images_active,
+          u.images_size,
+          u.images_reclaimable,
+        ))
         .child(row(
           "Containers",
           u.containers_count,

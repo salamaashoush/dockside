@@ -487,13 +487,11 @@ impl VolumeDetail {
             let mut menu = menu;
             if let Some(cb) = on_delete.clone() {
               let name = name.clone();
-              menu = menu.item(
-                PopupMenuItem::new("Delete")
-                  .icon(Icon::new(AppIcon::Trash))
-                  .on_click(move |_, window, cx| {
-                    cb(&name, window, cx);
-                  }),
-              );
+              menu = menu.item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click(
+                move |_, window, cx| {
+                  cb(&name, window, cx);
+                },
+              ));
             }
             menu
           })

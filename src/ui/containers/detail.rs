@@ -26,9 +26,7 @@ fn sparkline_summary(label: &str, series: &[f64], unit: &str) -> String {
   let max = series.iter().copied().fold(f64::NEG_INFINITY, f64::max);
   #[allow(clippy::cast_precision_loss)]
   let avg = series.iter().sum::<f64>() / series.len() as f64;
-  format!(
-    "{label} last {last:.1}{unit} (min {min:.1}{unit} / max {max:.1}{unit} / avg {avg:.1}{unit})"
-  )
+  format!("{label} last {last:.1}{unit} (min {min:.1}{unit} / max {max:.1}{unit} / avg {avg:.1}{unit})")
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -375,10 +373,7 @@ impl ContainerDetail {
     let is_running = container.state.is_running();
     let status_color = if is_running { colors.success } else { colors.danger };
 
-    let extras = self
-      .container_state
-      .as_ref()
-      .and_then(|s| s.container_extras.clone());
+    let extras = self.container_state.as_ref().and_then(|s| s.container_extras.clone());
 
     let mut col = v_flex()
       .w_full()
@@ -426,10 +421,18 @@ impl ContainerDetail {
       {
         col = col.child(info_row("Exit code", ec.to_string()));
       }
-      if let Some(start) = ex.started_at.as_ref().filter(|s| !s.is_empty() && *s != "0001-01-01T00:00:00Z") {
+      if let Some(start) = ex
+        .started_at
+        .as_ref()
+        .filter(|s| !s.is_empty() && *s != "0001-01-01T00:00:00Z")
+      {
         col = col.child(info_row("Started", start.clone()));
       }
-      if let Some(end) = ex.finished_at.as_ref().filter(|s| !s.is_empty() && *s != "0001-01-01T00:00:00Z") {
+      if let Some(end) = ex
+        .finished_at
+        .as_ref()
+        .filter(|s| !s.is_empty() && *s != "0001-01-01T00:00:00Z")
+      {
         col = col.child(info_row("Finished", end.clone()));
       }
 
@@ -458,7 +461,11 @@ impl ContainerDetail {
                   div()
                     .text_sm()
                     .text_color(colors.foreground)
-                    .child(if h.status.is_empty() { "n/a".to_string() } else { h.status.clone() }),
+                    .child(if h.status.is_empty() {
+                      "n/a".to_string()
+                    } else {
+                      h.status.clone()
+                    }),
                 )
                 .when_some(h.failing_streak.filter(|n| *n > 0), |el, n| {
                   el.child(
@@ -481,8 +488,20 @@ impl ContainerDetail {
               h_flex()
                 .gap(px(8.))
                 .items_start()
-                .child(div().w(px(60.)).text_xs().text_color(line_color).child(format!("exit {exit}")))
-                .child(div().w(px(160.)).text_xs().text_color(colors.muted_foreground).child(when))
+                .child(
+                  div()
+                    .w(px(60.))
+                    .text_xs()
+                    .text_color(line_color)
+                    .child(format!("exit {exit}")),
+                )
+                .child(
+                  div()
+                    .w(px(160.))
+                    .text_xs()
+                    .text_color(colors.muted_foreground)
+                    .child(when),
+                )
                 .child(
                   div()
                     .flex_1()
@@ -532,7 +551,13 @@ impl ContainerDetail {
                   .text_color(colors.foreground)
                   .child(title),
               )
-              .child(div().w(px(40.)).text_xs().text_color(colors.muted_foreground).child(rw_label))
+              .child(
+                div()
+                  .w(px(40.))
+                  .text_xs()
+                  .text_color(colors.muted_foreground)
+                  .child(rw_label),
+              )
               .child(
                 div()
                   .w(px(80.))
@@ -552,22 +577,14 @@ impl ContainerDetail {
     let colors = &cx.theme().colors;
     let state = self.container_state.as_ref();
     let Some(state) = state else {
-      return v_flex().w_full().p(px(16.)).child(
-        div()
-          .text_sm()
-          .text_color(colors.muted_foreground)
-          .child("No stats."),
-      );
+      return v_flex()
+        .w_full()
+        .p(px(16.))
+        .child(div().text_sm().text_color(colors.muted_foreground).child("No stats."));
     };
 
-    let cpu = state
-      .stats_latest
-      .as_ref()
-      .map_or(0.0, |s| s.cpu_percent);
-    let mem_pct = state
-      .stats_latest
-      .as_ref()
-      .map_or(0.0, |s| s.memory_percent);
+    let cpu = state.stats_latest.as_ref().map_or(0.0, |s| s.cpu_percent);
+    let mem_pct = state.stats_latest.as_ref().map_or(0.0, |s| s.memory_percent);
     let mem_usage = state.stats_latest.as_ref().map_or(0, |s| s.memory_usage);
     let mem_limit = state.stats_latest.as_ref().map_or(0, |s| s.memory_limit);
     let net_rx = state.stats_latest.as_ref().map_or(0, |s| s.network_rx);
@@ -680,9 +697,7 @@ impl ContainerDetail {
       .w_full()
       .h_full()
       .child(crate::ui::components::Sparkline::new(data, color))
-      .tooltip(move |window, cx| {
-        gpui_component::tooltip::Tooltip::new(tooltip_text.clone()).build(window, cx)
-      })
+      .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(tooltip_text.clone()).build(window, cx))
   }
 
   fn render_logs_tab(&self, cx: &App) -> gpui::Div {
@@ -1051,73 +1066,59 @@ impl ContainerDetail {
               })
           })),
       )
-      .child(
-        h_flex()
-          .gap(px(8.))
-          .child({
-            let on_start = on_start.clone();
-            let on_stop = on_stop.clone();
-            let on_restart = on_restart.clone();
-            let on_delete = on_delete.clone();
-            let id_start = container_id.clone();
-            let id_stop = container_id_for_stop.clone();
-            let id_restart = container_id_for_restart.clone();
-            let id_delete = container_id_for_delete.clone();
-            Button::new("container-actions")
-              .icon(IconName::Ellipsis)
-              .ghost()
-              .compact()
-              .dropdown_menu(move |menu, _window, _cx| {
-                let mut menu = menu;
-                if !is_running
-                  && let Some(cb) = on_start.clone()
-                {
-                  let id = id_start.clone();
-                  menu = menu.item(
-                    PopupMenuItem::new("Start")
-                      .icon(Icon::new(AppIcon::Play))
-                      .on_click(move |_, window, cx| {
-                        cb(&id, window, cx);
-                      }),
-                  );
-                }
-                if is_running
-                  && let Some(cb) = on_stop.clone()
-                {
-                  let id = id_stop.clone();
-                  menu = menu.item(
-                    PopupMenuItem::new("Stop")
-                      .icon(Icon::new(AppIcon::Stop))
-                      .on_click(move |_, window, cx| {
-                        cb(&id, window, cx);
-                      }),
-                  );
-                }
-                if let Some(cb) = on_restart.clone() {
-                  let id = id_restart.clone();
-                  menu = menu.item(
-                    PopupMenuItem::new("Restart")
-                      .icon(Icon::new(AppIcon::Restart))
-                      .on_click(move |_, window, cx| {
-                        cb(&id, window, cx);
-                      }),
-                  );
-                }
-                menu = menu.separator();
-                if let Some(cb) = on_delete.clone() {
-                  let id = id_delete.clone();
-                  menu = menu.item(
-                    PopupMenuItem::new("Delete")
-                      .icon(Icon::new(AppIcon::Trash))
-                      .on_click(move |_, window, cx| {
-                        cb(&id, window, cx);
-                      }),
-                  );
-                }
-                menu
-              })
-          }),
-      );
+      .child(h_flex().gap(px(8.)).child({
+        let on_start = on_start.clone();
+        let on_stop = on_stop.clone();
+        let on_restart = on_restart.clone();
+        let on_delete = on_delete.clone();
+        let id_start = container_id.clone();
+        let id_stop = container_id_for_stop.clone();
+        let id_restart = container_id_for_restart.clone();
+        let id_delete = container_id_for_delete.clone();
+        Button::new("container-actions")
+          .icon(IconName::Ellipsis)
+          .ghost()
+          .compact()
+          .dropdown_menu(move |menu, _window, _cx| {
+            let mut menu = menu;
+            if !is_running && let Some(cb) = on_start.clone() {
+              let id = id_start.clone();
+              menu = menu.item(PopupMenuItem::new("Start").icon(Icon::new(AppIcon::Play)).on_click(
+                move |_, window, cx| {
+                  cb(&id, window, cx);
+                },
+              ));
+            }
+            if is_running && let Some(cb) = on_stop.clone() {
+              let id = id_stop.clone();
+              menu = menu.item(PopupMenuItem::new("Stop").icon(Icon::new(AppIcon::Stop)).on_click(
+                move |_, window, cx| {
+                  cb(&id, window, cx);
+                },
+              ));
+            }
+            if let Some(cb) = on_restart.clone() {
+              let id = id_restart.clone();
+              menu = menu.item(
+                PopupMenuItem::new("Restart")
+                  .icon(Icon::new(AppIcon::Restart))
+                  .on_click(move |_, window, cx| {
+                    cb(&id, window, cx);
+                  }),
+              );
+            }
+            menu = menu.separator();
+            if let Some(cb) = on_delete.clone() {
+              let id = id_delete.clone();
+              menu = menu.item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click(
+                move |_, window, cx| {
+                  cb(&id, window, cx);
+                },
+              ));
+            }
+            menu
+          })
+      }));
 
     // Terminal, Logs, Processes, and Files tabs need full height without scroll
     let is_full_height_tab = matches!(

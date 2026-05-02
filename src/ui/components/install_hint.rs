@@ -99,12 +99,7 @@ pub fn render_install_hint(hint: &InstallHint, cx: &App) -> gpui::Div {
     h_flex()
       .gap(px(8.))
       .items_center()
-      .child(
-        gpui::div()
-          .text_xs()
-          .text_color(colors.muted_foreground)
-          .child("Docs:"),
-      )
+      .child(gpui::div().text_xs().text_color(colors.muted_foreground).child("Docs:"))
       .child(
         gpui::div()
           .text_xs()

@@ -171,7 +171,6 @@ impl ContainersView {
     }
   }
 
-
   fn show_rename_dialog(container_id: String, current_name: String, window: &mut Window, cx: &mut Context<'_, Self>) {
     use gpui_component::input::{Input, InputState};
 
@@ -221,7 +220,8 @@ impl ContainersView {
     let comment_input = cx.new(|cx| {
       InputState::new(window, cx).placeholder(format!("Comment (optional, from container: {container_name})"))
     });
-    let author_input = cx.new(|cx| InputState::new(window, cx).placeholder("Author (optional, e.g. Jane Doe <jane@x>)"));
+    let author_input =
+      cx.new(|cx| InputState::new(window, cx).placeholder("Author (optional, e.g. Jane Doe <jane@x>)"));
     let container_id = container_id.to_string();
 
     window.open_dialog(cx, move |dialog, _window, cx| {
@@ -763,9 +763,7 @@ impl ContainersView {
                 .await
               {
                 tracing::warn!(target: "dockside.logs", err = %e, "stream ended with error");
-                let _ = tx
-                  .send(format!("\r\n[log stream ended: {e}]\r\n").into_bytes())
-                  .await;
+                let _ = tx.send(format!("\r\n[log stream ended: {e}]\r\n").into_bytes()).await;
               } else {
                 tracing::info!(target: "dockside.logs", container = %id_for_log, "stream ended cleanly");
               }

@@ -153,7 +153,6 @@ impl MachinesView {
     }
   }
 
-
   fn show_host_dialog(host_info: crate::docker::DockerHostInfo, window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(|cx| HostDialog::new(host_info, window, cx));
 

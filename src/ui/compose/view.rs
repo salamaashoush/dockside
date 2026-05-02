@@ -75,9 +75,7 @@ impl ComposeView {
       cx.spawn(async move |this, cx| {
         let result = cx
           .background_executor()
-          .spawn(async move {
-            std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))
-          })
+          .spawn(async move { std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}")) })
           .await;
         let _ = cx.update(|cx| {
           if let Some(this) = this.upgrade() {
@@ -119,7 +117,12 @@ impl ComposeView {
     )
   }
 
-  fn render_project(&self, project: &ComposeProject, is_expanded: bool, cx: &mut Context<'_, Self>) -> impl IntoElement {
+  fn render_project(
+    &self,
+    project: &ComposeProject,
+    is_expanded: bool,
+    cx: &mut Context<'_, Self>,
+  ) -> impl IntoElement {
     let colors = cx.theme().colors;
     let project_name = project.name.clone();
     let project_name_for_toggle = project_name.clone();
@@ -352,12 +355,7 @@ impl ComposeView {
       .pr(px(16.))
       .py(px(8.))
       .gap(px(4.))
-      .child(
-        div()
-          .text_xs()
-          .text_color(colors.muted_foreground)
-          .child(header_text),
-      )
+      .child(div().text_xs().text_color(colors.muted_foreground).child(header_text))
       .child(
         div()
           .w_full()

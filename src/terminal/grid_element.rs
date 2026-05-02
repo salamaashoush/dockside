@@ -313,7 +313,15 @@ impl Element for TerminalGrid {
 
         let mut buf = [0u8; 4];
         let ch_str = cell.char.encode_utf8(&mut buf);
-        text_runs.push(make_text_run(origin, row_y, col, ch_str, &attrs, cell_width, &self.font_family));
+        text_runs.push(make_text_run(
+          origin,
+          row_y,
+          col,
+          ch_str,
+          &attrs,
+          cell_width,
+          &self.font_family,
+        ));
       }
 
       // ----- Cursor overlay (Bar / Underline). Block was painted inline. -----
@@ -333,11 +341,7 @@ impl Element for TerminalGrid {
     let mut selection_rects: Vec<Bounds<Pixels>> = Vec::new();
     if let Some(sel) = self.selection {
       let total_rows = self.content.lines.len();
-      let total_cols = self
-        .content
-        .lines
-        .first()
-        .map_or(0usize, |l| l.cells.len());
+      let total_cols = self.content.lines.first().map_or(0usize, |l| l.cells.len());
       if total_rows > 0 && total_cols > 0 {
         let last_row = u16::try_from(total_rows - 1).unwrap_or(u16::MAX);
         let last_col = u16::try_from(total_cols - 1).unwrap_or(u16::MAX);
@@ -363,10 +367,7 @@ impl Element for TerminalGrid {
           let w = f32::from(cell_width) * span;
           #[allow(clippy::cast_precision_loss)]
           let y = origin.y + line_height * f32::from(row);
-          selection_rects.push(Bounds::new(
-            point(px(x.floor()), y),
-            size(px(w.ceil()), line_height),
-          ));
+          selection_rects.push(Bounds::new(point(px(x.floor()), y), size(px(w.ceil()), line_height)));
         }
       }
     }
@@ -388,10 +389,7 @@ impl Element for TerminalGrid {
           let w = f32::from(cell_width) * span;
           #[allow(clippy::cast_precision_loss)]
           let y = origin.y + line_height * f32::from(row);
-          search_rects.push(Bounds::new(
-            point(px(x.floor()), y),
-            size(px(w.ceil()), line_height),
-          ));
+          search_rects.push(Bounds::new(point(px(x.floor()), y), size(px(w.ceil()), line_height)));
         }
       }
     }

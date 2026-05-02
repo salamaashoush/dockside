@@ -504,9 +504,7 @@ impl ActivityMonitorView {
       .w_full()
       .h_full()
       .child(crate::ui::components::Sparkline::new(data, color))
-      .tooltip(move |window, cx| {
-        gpui_component::tooltip::Tooltip::new(tooltip_text.clone()).build(window, cx)
-      })
+      .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(tooltip_text.clone()).build(window, cx))
   }
 
   /// Status breakdown badges: running / paused / exited container
@@ -539,9 +537,17 @@ impl ActivityMonitorView {
     let badge = move |label: &'static str, count: usize, color: Hsla| -> gpui::Div {
       let active = count > 0;
       let dot_color = if active { color } else { colors.muted_foreground };
-      let label_color = if active { colors.foreground } else { colors.muted_foreground };
+      let label_color = if active {
+        colors.foreground
+      } else {
+        colors.muted_foreground
+      };
       let count_color = if active { color } else { colors.muted_foreground };
-      let bg = if active { color.opacity(0.10) } else { colors.muted.opacity(0.4) };
+      let bg = if active {
+        color.opacity(0.10)
+      } else {
+        colors.muted.opacity(0.4)
+      };
       let border = if active { color.opacity(0.35) } else { colors.border };
       h_flex()
         .px(px(10.))
@@ -552,12 +558,7 @@ impl ActivityMonitorView {
         .border_1()
         .border_color(border)
         .bg(bg)
-        .child(
-          div()
-            .size(px(6.))
-            .rounded_full()
-            .bg(dot_color),
-        )
+        .child(div().size(px(6.)).rounded_full().bg(dot_color))
         .child(
           div()
             .text_xs()
@@ -610,9 +611,7 @@ fn sparkline_summary(label: &str, series: &[f64], unit: &str) -> String {
   let max = series.iter().copied().fold(f64::NEG_INFINITY, f64::max);
   #[allow(clippy::cast_precision_loss)]
   let avg = series.iter().sum::<f64>() / series.len() as f64;
-  format!(
-    "{label} last {last:.1}{unit} (min {min:.1}{unit} / max {max:.1}{unit} / avg {avg:.1}{unit})"
-  )
+  format!("{label} last {last:.1}{unit} (min {min:.1}{unit} / max {max:.1}{unit} / avg {avg:.1}{unit})")
 }
 
 fn format_bytes(bytes: u64) -> String {

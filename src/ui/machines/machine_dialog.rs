@@ -271,8 +271,10 @@ impl MachineDialog {
 
     // Memory input
     if self.memory_input.is_none() {
-      let default_memory =
-        machine.map_or_else(|| app.colima_default_memory_gb.to_string(), |m| format!("{:.0}", m.memory_gb()));
+      let default_memory = machine.map_or_else(
+        || app.colima_default_memory_gb.to_string(),
+        |m| format!("{:.0}", m.memory_gb()),
+      );
       self.memory_input = Some(cx.new(|cx| {
         let mut state = InputState::new(window, cx).placeholder("Memory (GB)");
         state.insert(&default_memory, window, cx);
@@ -282,8 +284,10 @@ impl MachineDialog {
 
     // Disk input
     if self.disk_input.is_none() {
-      let default_disk =
-        machine.map_or_else(|| app.colima_default_disk_gb.to_string(), |m| format!("{:.0}", m.disk_gb()));
+      let default_disk = machine.map_or_else(
+        || app.colima_default_disk_gb.to_string(),
+        |m| format!("{:.0}", m.disk_gb()),
+      );
       self.disk_input = Some(cx.new(|cx| {
         let mut state = InputState::new(window, cx).placeholder("Disk (GB)");
         state.insert(&default_disk, window, cx);

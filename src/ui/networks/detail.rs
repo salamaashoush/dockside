@@ -507,13 +507,11 @@ impl NetworkDetail {
                 let mut menu = menu;
                 if let Some(cb) = on_delete.clone() {
                   let id = id.clone();
-                  menu = menu.item(
-                    PopupMenuItem::new("Delete")
-                      .icon(Icon::new(AppIcon::Trash))
-                      .on_click(move |_, window, cx| {
-                        cb(&id, window, cx);
-                      }),
-                  );
+                  menu = menu.item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click(
+                    move |_, window, cx| {
+                      cb(&id, window, cx);
+                    },
+                  ));
                 }
                 menu
               }),

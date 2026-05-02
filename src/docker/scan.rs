@@ -112,8 +112,7 @@ pub fn scan_image(image_ref: &str) -> Result<ScanSummary> {
   }
 
   let stdout = String::from_utf8_lossy(&output.stdout);
-  let report: TrivyReport =
-    serde_json::from_str(&stdout).map_err(|e| anyhow!("Failed to parse trivy output: {e}"))?;
+  let report: TrivyReport = serde_json::from_str(&stdout).map_err(|e| anyhow!("Failed to parse trivy output: {e}"))?;
 
   let mut summary = ScanSummary::default();
   for result in report.results.unwrap_or_default() {

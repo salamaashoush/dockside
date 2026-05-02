@@ -260,7 +260,9 @@ impl DockerClient {
         builder
           .append_dir_all(".", &context_dir)
           .map_err(|e| anyhow::anyhow!("tar build failed: {e}"))?;
-        builder.finish().map_err(|e| anyhow::anyhow!("tar finalize failed: {e}"))?;
+        builder
+          .finish()
+          .map_err(|e| anyhow::anyhow!("tar finalize failed: {e}"))?;
       }
       Ok(buf)
     })
@@ -281,10 +283,7 @@ impl DockerClient {
       builder = builder.platform(p);
     }
     let build_args_owned: HashMap<String, String> = build_args.into_iter().collect();
-    let build_args_ref: HashMap<&str, &str> = build_args_owned
-      .iter()
-      .map(|(k, v)| (k.as_str(), v.as_str()))
-      .collect();
+    let build_args_ref: HashMap<&str, &str> = build_args_owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     if !build_args_ref.is_empty() {
       builder = builder.buildargs(&build_args_ref);
     }
@@ -409,20 +408,13 @@ impl DockerClient {
 
   /// Pull an image from a registry
   pub async fn pull_image(&self, image: &str, platform: Option<&str>) -> Result<()> {
-    self
-      .pull_image_with_progress(image, platform, |_| {})
-      .await
+    self.pull_image_with_progress(image, platform, |_| {}).await
   }
 
   /// Pull an image from a registry, calling `on_progress` for each
   /// streamed event. Each event reports a layer id, status, and current
   /// / total bytes (when available) so callers can render a progress UI.
-  pub async fn pull_image_with_progress<F>(
-    &self,
-    image: &str,
-    platform: Option<&str>,
-    mut on_progress: F,
-  ) -> Result<()>
+  pub async fn pull_image_with_progress<F>(&self, image: &str, platform: Option<&str>, mut on_progress: F) -> Result<()>
   where
     F: FnMut(PullProgressEvent) + Send,
   {

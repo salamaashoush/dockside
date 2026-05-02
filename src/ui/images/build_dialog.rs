@@ -1,7 +1,11 @@
-use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Hsla, PathPromptOptions, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui::{
+  App, AppContext, Context, Entity, FocusHandle, Focusable, Hsla, PathPromptOptions, Render, Styled, Timer, Window,
+  div, prelude::*, px,
+};
 use gpui_component::{
-  IndexPath, Sizable, h_flex,
+  IndexPath, Sizable,
   button::{Button, ButtonVariants},
+  h_flex,
   input::{Input, InputEvent, InputState},
   label::Label,
   scroll::ScrollableElement,
@@ -148,14 +152,10 @@ impl BuildImageDialog {
 
   fn ensure_inputs(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
     if self.context_input.is_none() {
-      self.context_input = Some(cx.new(|cx| {
-        InputState::new(window, cx).placeholder("Absolute path to build context")
-      }));
+      self.context_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("Absolute path to build context")));
     }
     if self.dockerfile_input.is_none() {
-      self.dockerfile_input = Some(cx.new(|cx| {
-        InputState::new(window, cx).default_value("Dockerfile")
-      }));
+      self.dockerfile_input = Some(cx.new(|cx| InputState::new(window, cx).default_value("Dockerfile")));
     }
     // Subscribe once both inputs exist so edits to either field
     // schedule a debounced auto-lint. Idempotent via the `lint_subscribed`
@@ -191,19 +191,14 @@ impl BuildImageDialog {
       }));
     }
     if self.platform_select.is_none() {
-      self.platform_select = Some(cx.new(|cx| {
-        SelectState::new(PullPlatform::all(), Some(IndexPath::new(0)), window, cx)
-      }));
+      self.platform_select =
+        Some(cx.new(|cx| SelectState::new(PullPlatform::all(), Some(IndexPath::new(0)), window, cx)));
     }
   }
 
   pub fn get_options(&self, cx: &App) -> BuildImageOptions {
-    let read = |opt: &Option<Entity<InputState>>| {
-      opt
-        .as_ref()
-        .map(|s| s.read(cx).text().to_string())
-        .unwrap_or_default()
-    };
+    let read =
+      |opt: &Option<Entity<InputState>>| opt.as_ref().map(|s| s.read(cx).text().to_string()).unwrap_or_default();
     let context_dir = read(&self.context_input);
     let dockerfile = {
       let v = read(&self.dockerfile_input);
@@ -278,72 +273,66 @@ impl Render for BuildImageDialog {
         .child(content)
     };
 
-    let lint_banner: Option<gpui::Div> = if self.lint_loading {
-      Some(
-        div()
-          .w_full()
-          .px(px(16.))
-          .py(px(8.))
-          .text_xs()
-          .text_color(colors.muted_foreground)
-          .child("Running hadolint..."),
-      )
-    } else {
-      match self.lint_result.as_ref() {
-        Some(Err(err)) if err == ERR_HADOLINT_NOT_INSTALLED => {
-          Some(div().w_full().child(render_install_hint(&hadolint_install_hint(), cx)))
-        }
-        Some(Err(err)) => Some(div().w_full().child(render_error_panel("Lint failed", err, &colors))),
-        Some(Ok(report)) => {
-          let path = self.lint_dockerfile_path.clone().unwrap_or_else(|| "Dockerfile".to_string());
-          let report_clone = report.clone();
-          let path_clone = path.clone();
-          let summary_color = if report.error > 0 {
-            colors.danger
-          } else if report.warning > 0 {
-            colors.warning
-          } else {
-            colors.success
-          };
-          let summary_text = if report.findings.is_empty() {
-            format!("Hadolint: clean — {path}")
-          } else {
-            format!(
-              "Hadolint: {} error / {} warning / {} info / {} style",
-              report.error, report.warning, report.info, report.style
-            )
-          };
-          Some(
-            h_flex()
-              .w_full()
-              .px(px(16.))
-              .py(px(8.))
-              .gap(px(8.))
-              .items_center()
-              .border_b_1()
-              .border_color(colors.border)
-              .bg(summary_color.opacity(0.08))
-              .child(
-                div()
-                  .flex_1()
-                  .text_xs()
-                  .text_color(summary_color)
-                  .child(summary_text),
+    let lint_banner: Option<gpui::Div> =
+      if self.lint_loading {
+        Some(
+          div()
+            .w_full()
+            .px(px(16.))
+            .py(px(8.))
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child("Running hadolint..."),
+        )
+      } else {
+        match self.lint_result.as_ref() {
+          Some(Err(err)) if err == ERR_HADOLINT_NOT_INSTALLED => {
+            Some(div().w_full().child(render_install_hint(&hadolint_install_hint(), cx)))
+          }
+          Some(Err(err)) => Some(div().w_full().child(render_error_panel("Lint failed", err, &colors))),
+          Some(Ok(report)) => {
+            let path = self
+              .lint_dockerfile_path
+              .clone()
+              .unwrap_or_else(|| "Dockerfile".to_string());
+            let report_clone = report.clone();
+            let path_clone = path.clone();
+            let summary_color = if report.error > 0 {
+              colors.danger
+            } else if report.warning > 0 {
+              colors.warning
+            } else {
+              colors.success
+            };
+            let summary_text = if report.findings.is_empty() {
+              format!("Hadolint: clean — {path}")
+            } else {
+              format!(
+                "Hadolint: {} error / {} warning / {} info / {} style",
+                report.error, report.warning, report.info, report.style
               )
-              .child(
-                Button::new("lint-view")
-                  .label("View report")
-                  .ghost()
-                  .small()
-                  .on_click(move |_ev, window, cx| {
+            };
+            Some(
+              h_flex()
+                .w_full()
+                .px(px(16.))
+                .py(px(8.))
+                .gap(px(8.))
+                .items_center()
+                .border_b_1()
+                .border_color(colors.border)
+                .bg(summary_color.opacity(0.08))
+                .child(div().flex_1().text_xs().text_color(summary_color).child(summary_text))
+                .child(Button::new("lint-view").label("View report").ghost().small().on_click(
+                  move |_ev, window, cx| {
                     crate::ui::dialogs::open_lint_report_dialog(path_clone.clone(), report_clone.clone(), window, cx);
-                  }),
-              ),
-          )
+                  },
+                )),
+            )
+          }
+          None => None,
         }
-        None => None,
-      }
-    };
+      };
 
     v_flex()
       .w_full()
@@ -365,64 +354,70 @@ impl Render for BuildImageDialog {
           .gap(px(6.))
           .w(px(360.))
           .child(div().flex_1().child(Input::new(&context_input).small()))
-          .child(
-            Button::new("ctx-browse")
-              .label("Browse")
-              .ghost()
-              .small()
-              .on_click({
-                let ctx_input = context_input.clone();
-                move |_ev, window, cx| {
-                  let opts = PathPromptOptions {
-                    files: false,
-                    directories: true,
-                    multiple: false,
-                    prompt: Some("Select build context".into()),
-                  };
-                  let rx = cx.prompt_for_paths(opts);
-                  let ctx_input = ctx_input.clone();
-                  let window_handle = window.window_handle();
-                  cx.spawn(async move |cx| {
-                    if let Ok(Ok(Some(paths))) = rx.await
-                      && let Some(p) = paths.into_iter().next()
-                    {
-                      let path_str = p.display().to_string();
-                      let _ = cx.update_window(window_handle, |_root, window, cx| {
-                        ctx_input.update(cx, |state, cx| {
-                          state.set_value(path_str.clone(), window, cx);
-                        });
-                      });
-                    }
-                  })
-                  .detach();
+          .child(Button::new("ctx-browse").label("Browse").ghost().small().on_click({
+            let ctx_input = context_input.clone();
+            move |_ev, window, cx| {
+              let opts = PathPromptOptions {
+                files: false,
+                directories: true,
+                multiple: false,
+                prompt: Some("Select build context".into()),
+              };
+              let rx = cx.prompt_for_paths(opts);
+              let ctx_input = ctx_input.clone();
+              let window_handle = window.window_handle();
+              cx.spawn(async move |cx| {
+                if let Ok(Ok(Some(paths))) = rx.await
+                  && let Some(p) = paths.into_iter().next()
+                {
+                  let path_str = p.display().to_string();
+                  let _ = cx.update_window(window_handle, |_root, window, cx| {
+                    ctx_input.update(cx, |state, cx| {
+                      state.set_value(path_str.clone(), window, cx);
+                    });
+                  });
                 }
-              }),
-          )
+              })
+              .detach();
+            }
+          }))
           .into_any_element(),
         colors.border,
         colors.foreground,
       ))
       .child(row(
         "Dockerfile",
-        div().w(px(220.)).child(Input::new(&dockerfile_input).small()).into_any_element(),
+        div()
+          .w(px(220.))
+          .child(Input::new(&dockerfile_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))
       .child(row(
         "Tag",
-        div().w(px(220.)).child(Input::new(&tag_input).small()).into_any_element(),
+        div()
+          .w(px(220.))
+          .child(Input::new(&tag_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))
       .child(row(
         "Target stage",
-        div().w(px(220.)).child(Input::new(&target_input).small()).into_any_element(),
+        div()
+          .w(px(220.))
+          .child(Input::new(&target_input).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))
       .child(row(
         "Platform",
-        div().w(px(160.)).child(Select::new(&platform_select).small()).into_any_element(),
+        div()
+          .w(px(160.))
+          .child(Select::new(&platform_select).small())
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))

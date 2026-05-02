@@ -49,7 +49,12 @@ fn level_color(level: &str, colors: &gpui_component::theme::ThemeColor) -> Hsla 
   }
 }
 
-fn severity_badge(label: &'static str, count: usize, color: Hsla, colors: &gpui_component::theme::ThemeColor) -> gpui::Div {
+fn severity_badge(
+  label: &'static str,
+  count: usize,
+  color: Hsla,
+  colors: &gpui_component::theme::ThemeColor,
+) -> gpui::Div {
   v_flex()
     .px(px(10.))
     .py(px(6.))
@@ -95,10 +100,34 @@ impl Render for LintReportDialog {
       .border_b_1()
       .border_color(colors.border)
       .bg(colors.muted)
-      .child(div().w(px(60.)).text_xs().text_color(colors.muted_foreground).child("LINE"))
-      .child(div().w(px(80.)).text_xs().text_color(colors.muted_foreground).child("LEVEL"))
-      .child(div().w(px(80.)).text_xs().text_color(colors.muted_foreground).child("RULE"))
-      .child(div().flex_1().text_xs().text_color(colors.muted_foreground).child("MESSAGE"))
+      .child(
+        div()
+          .w(px(60.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("LINE"),
+      )
+      .child(
+        div()
+          .w(px(80.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("LEVEL"),
+      )
+      .child(
+        div()
+          .w(px(80.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("RULE"),
+      )
+      .child(
+        div()
+          .flex_1()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("MESSAGE"),
+      )
       .child(div().w(px(40.)).text_xs().text_color(colors.muted_foreground).child(""));
 
     let rows = report.findings.iter().enumerate().map(|(i, f)| {
@@ -123,13 +152,7 @@ impl Render for LintReportDialog {
             .text_color(colors.foreground)
             .child(f.line.to_string()),
         )
-        .child(
-          div()
-            .w(px(80.))
-            .text_xs()
-            .text_color(lvl)
-            .child(f.level.clone()),
-        )
+        .child(div().w(px(80.)).text_xs().text_color(lvl).child(f.level.clone()))
         .child(
           div()
             .w(px(80.))
@@ -157,16 +180,12 @@ impl Render for LintReportDialog {
     });
 
     let body = if report.findings.is_empty() {
-      v_flex()
-        .w_full()
-        .p(px(24.))
-        .items_center()
-        .child(
-          div()
-            .text_sm()
-            .text_color(colors.success)
-            .child(format!("No issues found in {}", self.dockerfile)),
-        )
+      v_flex().w_full().p(px(24.)).items_center().child(
+        div()
+          .text_sm()
+          .text_color(colors.success)
+          .child(format!("No issues found in {}", self.dockerfile)),
+      )
     } else {
       v_flex().w_full().child(counts).child(header).children(rows)
     };

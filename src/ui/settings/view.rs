@@ -254,7 +254,10 @@ impl SettingsView {
 
     // Editor select.
     let editors = EditorOption::all();
-    let current_editor_idx = editors.iter().position(|e| e.editor == settings.external_editor).unwrap_or(0);
+    let current_editor_idx = editors
+      .iter()
+      .position(|e| e.editor == settings.external_editor)
+      .unwrap_or(0);
     let editor_select = cx.new(|cx| SelectState::new(editors, Some(IndexPath::new(current_editor_idx)), window, cx));
     cx.subscribe(
       &editor_select,
@@ -606,7 +609,11 @@ impl SettingsView {
       .children(Category::ALL.iter().map(|cat| {
         let cat = *cat;
         let is_active = cat == active;
-        let bg = if is_active { colors.accent } else { gpui::transparent_black() };
+        let bg = if is_active {
+          colors.accent
+        } else {
+          gpui::transparent_black()
+        };
         let fg = if is_active {
           colors.accent_foreground
         } else {
@@ -679,31 +686,31 @@ impl SettingsView {
       .child(Self::render_row(
         "Confirm destructive actions",
         "Prompt before delete / prune / kill operations",
-        Switch::new("confirm-destructive").checked(confirm).on_click(cx.listener(
-          |this, checked: &bool, _window, cx| {
+        Switch::new("confirm-destructive")
+          .checked(confirm)
+          .on_click(cx.listener(|this, checked: &bool, _window, cx| {
             this.settings_state.update(cx, |state, cx| {
               state.settings.confirm_destructive = *checked;
               let _ = state.settings.save();
               cx.emit(SettingsChanged::SettingsUpdated);
             });
             cx.notify();
-          },
-        )),
+          })),
         cx,
       ))
       .child(Self::render_row(
         "Show notifications",
         "Surface OS notifications when background tasks finish",
-        Switch::new("show-notifications").checked(notify).on_click(cx.listener(
-          |this, checked: &bool, _window, cx| {
+        Switch::new("show-notifications")
+          .checked(notify)
+          .on_click(cx.listener(|this, checked: &bool, _window, cx| {
             this.settings_state.update(cx, |state, cx| {
               state.settings.show_notifications = *checked;
               let _ = state.settings.save();
               cx.emit(SettingsChanged::SettingsUpdated);
             });
             cx.notify();
-          },
-        )),
+          })),
         cx,
       ))
       .into_any_element()
@@ -765,16 +772,16 @@ impl SettingsView {
       .child(Self::render_row(
         "Cursor blink",
         "Blink the terminal cursor",
-        Switch::new("cursor-blink").checked(blink).on_click(cx.listener(
-          move |this, checked: &bool, _window, cx| {
+        Switch::new("cursor-blink")
+          .checked(blink)
+          .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
             this.settings_state.update(cx, |state, cx| {
               state.settings.terminal_cursor_blink = *checked;
               let _ = state.settings.save();
               cx.emit(SettingsChanged::SettingsUpdated);
             });
             cx.notify();
-          },
-        )),
+          })),
         cx,
       ))
       .into_any_element()
@@ -809,16 +816,16 @@ impl SettingsView {
       .child(Self::render_row(
         "Enable Kubernetes",
         "Show Pods, Deployments and Services in the sidebar (requires kubectl + kubeconfig)",
-        Switch::new("kubernetes-enabled")
-          .checked(enabled)
-          .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+        Switch::new("kubernetes-enabled").checked(enabled).on_click(cx.listener(
+          |this, checked: &bool, _window, cx| {
             this.settings_state.update(cx, |state, cx| {
               state.settings.kubernetes_enabled = *checked;
               let _ = state.settings.save();
               cx.emit(SettingsChanged::SettingsUpdated);
             });
             cx.notify();
-          })),
+          },
+        )),
         cx,
       ))
       .child(Self::render_row(
@@ -953,16 +960,16 @@ impl SettingsView {
       .child(Self::render_row(
         "Wait for editor to close",
         "Block the calling task until the editor process exits",
-        Switch::new("editor-wait").checked(wait_close).on_click(cx.listener(
-          |this, checked: &bool, _window, cx| {
+        Switch::new("editor-wait")
+          .checked(wait_close)
+          .on_click(cx.listener(|this, checked: &bool, _window, cx| {
             this.settings_state.update(cx, |state, cx| {
               state.settings.editor_wait_close = *checked;
               let _ = state.settings.save();
               cx.emit(SettingsChanged::SettingsUpdated);
             });
             cx.notify();
-          },
-        )),
+          })),
         cx,
       ))
       .into_any_element()
@@ -1060,7 +1067,12 @@ impl SettingsView {
                 .text_color(colors.foreground)
                 .child("Colima is not installed. It is required to manage Docker VMs from this app."),
             )
-            .child(div().text_xs().text_color(colors.muted_foreground).child(install_description))
+            .child(
+              div()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child(install_description),
+            )
             .when(has_command, |el| {
               el.child(
                 div()
@@ -1122,20 +1134,15 @@ impl Render for SettingsView {
       Category::Editor => self.render_editor(cx),
     };
 
-    let pane = v_flex()
-      .flex_1()
-      .h_full()
-      .min_w(px(0.))
-      .bg(colors.background)
-      .child(
-        div()
-          .id("settings-scroll")
-          .flex_1()
-          .overflow_y_scrollbar()
-          .px(px(32.))
-          .py(px(24.))
-          .child(div().w_full().max_w(px(720.)).child(body)),
-      );
+    let pane = v_flex().flex_1().h_full().min_w(px(0.)).bg(colors.background).child(
+      div()
+        .id("settings-scroll")
+        .flex_1()
+        .overflow_y_scrollbar()
+        .px(px(32.))
+        .py(px(24.))
+        .child(div().w_full().max_w(px(720.)).child(body)),
+    );
 
     h_flex()
       .size_full()

@@ -21,7 +21,7 @@ use std::rc::Rc;
 type TabChangeCallback = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
 
 /// Parse a human-readable size like "256m", "1.5g", "100k", or a raw byte
-/// count into a byte total. Returns `None` for empty / unparseable inputs.
+/// count into a byte total. Returns `None` for empty / unparsable inputs.
 fn parse_size_bytes(s: &str) -> Option<i64> {
   let trimmed = s.trim();
   if trimmed.is_empty() {
@@ -399,7 +399,8 @@ impl CreateContainerDialog {
       self.label_value_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("Value")));
     }
     if self.healthcheck_cmd_input.is_none() {
-      self.healthcheck_cmd_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. curl -f http://localhost/")));
+      self.healthcheck_cmd_input =
+        Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. curl -f http://localhost/")));
     }
     if self.healthcheck_interval_input.is_none() {
       self.healthcheck_interval_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("seconds")));
@@ -513,12 +514,7 @@ impl CreateContainerDialog {
       .as_ref()
       .and_then(|s| s.read(cx).text().to_string().parse::<i64>().ok())
       .filter(|n| *n > 0);
-    let labels: Vec<(String, String)> = self
-      .labels
-      .iter()
-      .filter(|(k, _)| !k.is_empty())
-      .cloned()
-      .collect();
+    let labels: Vec<(String, String)> = self.labels.iter().filter(|(k, _)| !k.is_empty()).cloned().collect();
 
     CreateContainerOptions {
       image,
@@ -549,11 +545,7 @@ impl CreateContainerDialog {
           .as_ref()
           .map(|s| s.read(cx).text().to_string())
           .unwrap_or_default();
-        if txt.trim().is_empty() {
-          None
-        } else {
-          Some(vec![txt])
-        }
+        if txt.trim().is_empty() { None } else { Some(vec![txt]) }
       },
       healthcheck_interval_ns: {
         self
@@ -1159,7 +1151,10 @@ impl CreateContainerDialog {
       ))
       .child(row(
         "Memory + swap",
-        div().w(px(180.)).child(Input::new(&mem_swap).small()).into_any_element(),
+        div()
+          .w(px(180.))
+          .child(Input::new(&mem_swap).small())
+          .into_any_element(),
       ))
       .child(row(
         "PIDs limit",
@@ -1167,7 +1162,10 @@ impl CreateContainerDialog {
       ))
       .child(row(
         "Hostname",
-        div().w(px(220.)).child(Input::new(&hostname).small()).into_any_element(),
+        div()
+          .w(px(220.))
+          .child(Input::new(&hostname).small())
+          .into_any_element(),
       ))
       .child(
         div()
@@ -1257,19 +1255,31 @@ impl CreateContainerDialog {
       ))
       .child(row(
         "Interval",
-        div().w(px(140.)).child(Input::new(&hc_interval).small()).into_any_element(),
+        div()
+          .w(px(140.))
+          .child(Input::new(&hc_interval).small())
+          .into_any_element(),
       ))
       .child(row(
         "Timeout",
-        div().w(px(140.)).child(Input::new(&hc_timeout).small()).into_any_element(),
+        div()
+          .w(px(140.))
+          .child(Input::new(&hc_timeout).small())
+          .into_any_element(),
       ))
       .child(row(
         "Start period",
-        div().w(px(140.)).child(Input::new(&hc_start).small()).into_any_element(),
+        div()
+          .w(px(140.))
+          .child(Input::new(&hc_start).small())
+          .into_any_element(),
       ))
       .child(row(
         "Retries",
-        div().w(px(140.)).child(Input::new(&hc_retries).small()).into_any_element(),
+        div()
+          .w(px(140.))
+          .child(Input::new(&hc_retries).small())
+          .into_any_element(),
       ));
 
     col

@@ -32,8 +32,8 @@ impl KubeClient {
     let config = if custom_path.is_empty() {
       Config::infer().await.context("Failed to load kubeconfig")?
     } else {
-      let kubeconfig = Kubeconfig::read_from(&custom_path)
-        .with_context(|| format!("Failed to read kubeconfig at {custom_path}"))?;
+      let kubeconfig =
+        Kubeconfig::read_from(&custom_path).with_context(|| format!("Failed to read kubeconfig at {custom_path}"))?;
       Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
         .await
         .context("Failed to build kube config from custom path")?

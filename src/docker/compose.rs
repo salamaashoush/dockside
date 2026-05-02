@@ -97,17 +97,21 @@ pub fn extract_compose_projects(containers: &[ContainerInfo]) -> Vec<ComposeProj
       let config_files: Vec<String> = container
         .labels
         .get(COMPOSE_CONFIG_FILES_LABEL)
-        .map(|raw| raw.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .map(|raw| {
+          raw
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+        })
         .unwrap_or_default();
 
-      let entry = projects
-        .entry(project_name.clone())
-        .or_insert_with(|| ComposeProject {
-          name: project_name.clone(),
-          services: Vec::new(),
-          working_dir: None,
-          config_files: Vec::new(),
-        });
+      let entry = projects.entry(project_name.clone()).or_insert_with(|| ComposeProject {
+        name: project_name.clone(),
+        services: Vec::new(),
+        working_dir: None,
+        config_files: Vec::new(),
+      });
       entry.services.push(service);
       if entry.working_dir.is_none() && working_dir.is_some() {
         entry.working_dir = working_dir;
@@ -181,7 +185,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert_eq!(project.container_count(), 2);
   }
@@ -211,7 +214,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert_eq!(project.running_count(), 2);
   }
@@ -236,7 +238,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert!(all_running.is_all_running());
 
@@ -258,7 +259,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert!(!partial.is_all_running());
 
@@ -291,7 +291,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert!(all_stopped.is_all_stopped());
 
@@ -313,7 +312,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert!(!partial.is_all_stopped());
 
@@ -346,7 +344,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert_eq!(all_running.status_display(), "2/2 running");
 
@@ -368,7 +365,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert_eq!(all_stopped.status_display(), "0/2 stopped");
 
@@ -396,7 +392,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
     assert_eq!(partial.status_display(), "1/3 running");
 
@@ -633,7 +628,6 @@ mod tests {
         },
       ],
       ..Default::default()
-
     };
 
     // Only Running counts as running
@@ -699,10 +693,7 @@ mod tests {
     let labels = HashMap::from([
       (COMPOSE_PROJECT_LABEL.to_string(), "p".to_string()),
       (COMPOSE_SERVICE_LABEL.to_string(), "a".to_string()),
-      (
-        COMPOSE_CONFIG_FILES_LABEL.to_string(),
-        ",  ,/srv/c.yml,".to_string(),
-      ),
+      (COMPOSE_CONFIG_FILES_LABEL.to_string(), ",  ,/srv/c.yml,".to_string()),
     ]);
     let containers = vec![make_container("p-a-1", "img", ContainerState::Running, labels)];
     let projects = extract_compose_projects(&containers);

@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use gpui::{
   App, Bounds, ClipboardItem, Context, FocusHandle, Focusable, Hsla, InteractiveElement, KeyDownEvent, MouseButton,
-  MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollWheelEvent, Styled,
-  Window, div, hsla, prelude::*, px,
+  MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollWheelEvent, Styled, Window,
+  div, hsla, prelude::*, px,
 };
 use gpui_component::{
   Icon, IconName,
@@ -482,10 +482,7 @@ impl TerminalView {
         gpui::Timer::after(std::time::Duration::from_millis(33)).await;
         let still_alive = this
           .update(cx, |this, cx| {
-            let active = this
-              .selection
-              .as_ref()
-              .is_some_and(|s| s.dragging);
+            let active = this.selection.as_ref().is_some_and(|s| s.dragging);
             if !active {
               this.drag_scroll_running = false;
               return false;

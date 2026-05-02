@@ -4,8 +4,8 @@ use gpui_component::theme::ActiveTheme;
 use crate::docker::ImageInfo;
 use crate::services;
 use crate::state::{DockerState, ImageInspectData, Selection, StateChanged, docker_state};
-use crate::ui::dialogs::{open_push_image_dialog, open_tag_image_dialog};
 use crate::ui::dialogs;
+use crate::ui::dialogs::{open_push_image_dialog, open_tag_image_dialog};
 
 use super::detail::ImageDetail;
 use super::list::{ImageList, ImageListEvent};
@@ -182,32 +182,22 @@ impl Render for ImagesView {
       .on_push(cx.listener(|this, _id: &str, window, cx| {
         if let Some(img) = this.selected_image(cx) {
           let display = img.display_name();
-          let (image, tag) = display
-            .rsplit_once(':')
-            .map_or_else(
-              || (display.clone(), "latest".to_string()),
-              |(i, t)| (i.to_string(), t.to_string()),
-            );
+          let (image, tag) = display.rsplit_once(':').map_or_else(
+            || (display.clone(), "latest".to_string()),
+            |(i, t)| (i.to_string(), t.to_string()),
+          );
           open_push_image_dialog(image, tag, window, cx);
         }
       }))
       .on_save(cx.listener(|this, _id: &str, window, cx| {
         if let Some(img) = this.selected_image(cx) {
-          let image_ref = img
-            .repo_tags
-            .first()
-            .cloned()
-            .unwrap_or_else(|| img.id.clone());
+          let image_ref = img.repo_tags.first().cloned().unwrap_or_else(|| img.id.clone());
           dialogs::prompt_save_image_tarball(image_ref, window, cx);
         }
       }))
       .on_scan(cx.listener(|this, id: &str, _window, cx| {
         if let Some(img) = this.selected_image(cx) {
-          let image_ref = img
-            .repo_tags
-            .first()
-            .cloned()
-            .unwrap_or_else(|| img.id.clone());
+          let image_ref = img.repo_tags.first().cloned().unwrap_or_else(|| img.id.clone());
           services::scan_image(id.to_string(), image_ref, cx);
           // Jump to the Vulnerabilities tab so the user sees the
           // running spinner / error / table without an extra click.

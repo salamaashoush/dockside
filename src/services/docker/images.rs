@@ -200,12 +200,12 @@ pub fn scan_all_images(cx: &mut App) {
   cx.spawn(async move |cx| {
     for (idx, img) in images.iter().enumerate() {
       let image_id = img.id.clone();
-      let image_ref = img
+      let image_ref = img.repo_tags.first().cloned().unwrap_or_else(|| img.id.clone());
+      let display = img
         .repo_tags
         .first()
         .cloned()
-        .unwrap_or_else(|| img.id.clone());
-      let display = img.repo_tags.first().cloned().unwrap_or_else(|| img.short_id().to_string());
+        .unwrap_or_else(|| img.short_id().to_string());
 
       // Mark this image as in-flight so the detail panel shows the
       // running spinner if the user has it open.
@@ -284,10 +284,7 @@ pub fn scan_image(image_id: String, image_ref: String, cx: &mut App) {
       let state = docker_state(cx);
       match result {
         Ok(summary) => state.update(cx, |_, cx| {
-          cx.emit(StateChanged::ImageScanCompleted {
-            image_id,
-            summary,
-          });
+          cx.emit(StateChanged::ImageScanCompleted { image_id, summary });
         }),
         Err(e) => state.update(cx, |_, cx| {
           cx.emit(StateChanged::ImageScanFailed {
@@ -421,11 +418,7 @@ pub fn save_image(image_ref: String, dest: std::path::PathBuf, cx: &mut App) {
         complete_task(cx, task_id);
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskCompleted {
-            message: format!(
-              "Saved {} ({})",
-              dest_for_msg.display(),
-              bytesize::ByteSize(bytes)
-            ),
+            message: format!("Saved {} ({})", dest_for_msg.display(), bytesize::ByteSize(bytes)),
           });
         });
       }
@@ -525,9 +518,7 @@ pub fn pull_image(image: String, platform: Option<String>, cx: &mut App) {
       {
         totals.insert(ev.id.clone(), (cur, tot));
       }
-      let (sum_cur, sum_tot): (i64, i64) = totals
-        .values()
-        .fold((0i64, 0i64), |(a, b), (c, t)| (a + c, b + t));
+      let (sum_cur, sum_tot): (i64, i64) = totals.values().fold((0i64, 0i64), |(a, b), (c, t)| (a + c, b + t));
       #[allow(clippy::cast_precision_loss)]
       let frac = if sum_tot > 0 {
         (sum_cur as f32) / (sum_tot as f32)

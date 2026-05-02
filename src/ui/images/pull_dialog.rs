@@ -90,14 +90,17 @@ impl PullImageDialog {
 
     if self.platform_select.is_none() {
       // Pre-select the user's default pull platform from settings.
-      let preferred = crate::state::settings_state(cx).read(cx).settings.default_pull_platform.clone();
+      let preferred = crate::state::settings_state(cx)
+        .read(cx)
+        .settings
+        .default_pull_platform
+        .clone();
       let all = PullPlatform::all();
       let initial = all
         .iter()
         .position(|p| p.as_docker_arg() == Some(preferred.as_str()))
         .unwrap_or(0);
-      self.platform_select =
-        Some(cx.new(|cx| SelectState::new(all, Some(IndexPath::new(initial)), window, cx)));
+      self.platform_select = Some(cx.new(|cx| SelectState::new(all, Some(IndexPath::new(initial)), window, cx)));
     }
   }
 

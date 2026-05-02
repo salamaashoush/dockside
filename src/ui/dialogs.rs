@@ -91,10 +91,7 @@ pub fn open_registry_browser_dialog(window: &mut Window, cx: &mut App) {
 /// task runs in the background and reports completion via the global
 /// dispatcher / task pipeline.
 pub fn prompt_save_image_tarball(image_ref: String, _window: &mut Window, cx: &mut App) {
-  let suggested = format!(
-    "{}.tar",
-    image_ref.replace([':', '/'], "-")
-  );
+  let suggested = format!("{}.tar", image_ref.replace([':', '/'], "-"));
   let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
   let rx = cx.prompt_for_new_path(&cwd, Some(&suggested));
   cx.spawn(async move |cx| {
@@ -248,11 +245,9 @@ pub fn open_compose_watch_dialog(
         v_flex()
           .gap(px(12.))
           .p(px(8.))
-          .child(
-            div()
-              .text_sm()
-              .child("Run `docker compose watch` against the project — Ctrl-C / closing the output dialog stops the stream."),
-          )
+          .child(div().text_sm().child(
+            "Run `docker compose watch` against the project — Ctrl-C / closing the output dialog stops the stream.",
+          ))
           .child(Input::new(&profile_input).w_full()),
       )
       .footer(move |_dialog_state, _, _window, _cx| {
