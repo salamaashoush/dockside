@@ -8,7 +8,7 @@ use gpui_component::{
   theme::ActiveTheme,
   v_flex,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::assets::AppIcon;
 use crate::docker::{ComposeProject, ComposeService, extract_compose_projects};
@@ -20,6 +20,12 @@ pub struct ComposeView {
   docker_state: Entity<DockerState>,
   /// Set of expanded project names
   expanded_projects: HashSet<String>,
+  /// Set of projects with YAML viewer open
+  yaml_visible: HashSet<String>,
+  /// Loaded YAML content per project keyed by project name. `None`
+  /// means we tried to load and failed (file missing / read error)
+  /// — the UI shows the error string instead of waiting forever.
+  yaml_cache: HashMap<String, Result<String, String>>,
 }
 
 impl ComposeView {
@@ -37,6 +43,8 @@ impl ComposeView {
     Self {
       docker_state,
       expanded_projects: HashSet::new(),
+      yaml_visible: HashSet::new(),
+      yaml_cache: HashMap::new(),
     }
   }
 
@@ -45,6 +53,41 @@ impl ComposeView {
       self.expanded_projects.remove(project_name);
     } else {
       self.expanded_projects.insert(project_name.to_string());
+    }
+    cx.notify();
+  }
+
+  /// Toggle the YAML viewer for `project_name` and trigger a
+  /// background read of `path` on first open. Subsequent toggles
+  /// reuse `yaml_cache`.
+  fn toggle_yaml(&mut self, project_name: &str, path: Option<String>, cx: &mut Context<'_, Self>) {
+    if self.yaml_visible.contains(project_name) {
+      self.yaml_visible.remove(project_name);
+      cx.notify();
+      return;
+    }
+    self.yaml_visible.insert(project_name.to_string());
+    if !self.yaml_cache.contains_key(project_name)
+      && let Some(path) = path
+    {
+      let project_owned = project_name.to_string();
+      cx.spawn(async move |this, cx| {
+        let result = cx
+          .background_executor()
+          .spawn(async move {
+            std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))
+          })
+          .await;
+        let _ = cx.update(|cx| {
+          if let Some(this) = this.upgrade() {
+            this.update(cx, |this, cx| {
+              this.yaml_cache.insert(project_owned, result);
+              cx.notify();
+            });
+          }
+        });
+      })
+      .detach();
     }
     cx.notify();
   }
@@ -75,7 +118,7 @@ impl ComposeView {
     )
   }
 
-  fn render_project(project: &ComposeProject, is_expanded: bool, cx: &mut Context<'_, Self>) -> impl IntoElement {
+  fn render_project(&self, project: &ComposeProject, is_expanded: bool, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let colors = cx.theme().colors;
     let project_name = project.name.clone();
     let project_name_for_toggle = project_name.clone();
@@ -91,6 +134,10 @@ impl ComposeView {
     let config_files_restart = project.config_files.clone();
     let working_dir_watch = project.working_dir.clone();
     let config_files_watch = project.config_files.clone();
+    let project_name_for_yaml = project_name.clone();
+    let yaml_path = project.config_files.first().cloned();
+    let yaml_visible = self.yaml_visible.contains(&project_name);
+    let yaml_content = self.yaml_cache.get(&project_name).cloned();
 
     let status_color = if project.is_all_running() {
       colors.success
@@ -212,6 +259,20 @@ impl ComposeView {
                                             cx,
                                         );
                                     })),
+                            )
+                            .child(
+                                Button::new(SharedString::from(format!("yaml-{}", project_name_for_yaml.clone())))
+                                    .label("YAML")
+                                    .xsmall()
+                                    .when(yaml_visible, Button::primary)
+                                    .when(!yaml_visible, ButtonVariants::ghost)
+                                    .on_click(cx.listener({
+                                        let path = yaml_path.clone();
+                                        let name = project_name_for_yaml.clone();
+                                        move |this, _ev, _window, cx| {
+                                            this.toggle_yaml(&name, path.clone(), cx);
+                                        }
+                                    })),
                             ),
                     ),
             )
@@ -230,6 +291,63 @@ impl ComposeView {
                 },
                 ParentElement::children,
             )
+            .when(is_expanded && yaml_visible, move |el| {
+                el.child(Self::render_yaml_block(yaml_path.as_deref(), yaml_content, cx))
+            })
+  }
+
+  fn render_yaml_block(
+    yaml_path: Option<&str>,
+    yaml_content: Option<Result<String, String>>,
+    cx: &mut Context<'_, Self>,
+  ) -> impl IntoElement {
+    let colors = cx.theme().colors;
+    let header_text = yaml_path.map_or_else(|| "compose YAML".to_string(), str::to_string);
+    let body: gpui::AnyElement = match yaml_content {
+      Some(Ok(text)) => div()
+        .w_full()
+        .max_h(px(360.))
+        .overflow_y_scrollbar()
+        .p(px(12.))
+        .font_family("monospace")
+        .text_xs()
+        .text_color(colors.foreground)
+        .child(text)
+        .into_any_element(),
+      Some(Err(err)) => div()
+        .p(px(12.))
+        .text_xs()
+        .text_color(colors.danger)
+        .child(err)
+        .into_any_element(),
+      None => div()
+        .p(px(12.))
+        .text_xs()
+        .text_color(colors.muted_foreground)
+        .child("Loading...")
+        .into_any_element(),
+    };
+    v_flex()
+      .w_full()
+      .pl(px(56.))
+      .pr(px(16.))
+      .py(px(8.))
+      .gap(px(4.))
+      .child(
+        div()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child(header_text),
+      )
+      .child(
+        div()
+          .w_full()
+          .bg(colors.background)
+          .rounded(px(6.))
+          .border_1()
+          .border_color(colors.border)
+          .child(body),
+      )
   }
 
   fn render_service(service: &ComposeService, cx: &mut Context<'_, Self>) -> impl IntoElement {
@@ -346,7 +464,7 @@ impl Render for ComposeView {
                         .w_full()
                         .children(projects.iter().map(|project| {
                             let is_expanded = self.expanded_projects.contains(&project.name);
-                            Self::render_project(project, is_expanded, cx).into_any_element()
+                            self.render_project(project, is_expanded, cx).into_any_element()
                         }))
                         .into_any_element()
                 };
