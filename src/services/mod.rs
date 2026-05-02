@@ -118,9 +118,12 @@ pub fn uninstall_dns_resolver(suffix: &str) -> anyhow::Result<()> {
 }
 
 /// Install the local CA certificate into the OS trust store. The CA cert
-/// PEM is read from `<config>/dockside/ca/root.crt` which the proxy
-/// runtime ensures exists (created on first HTTPS spin-up).
+/// PEM is read from `<config>/dockside/ca/root.crt`. Generated on first
+/// call so the user can install before ever enabling DNS.
 pub fn install_local_ca() -> anyhow::Result<()> {
+  // Make sure the CA exists on disk first; load_or_create() generates it on
+  // first call and is a no-op afterwards.
+  let _ca = tls::LocalCa::load_or_create()?;
   let path = local_ca_pem_path()?;
   let path_str = path
     .to_str()
@@ -130,6 +133,28 @@ pub fn install_local_ca() -> anyhow::Result<()> {
 
 pub fn uninstall_local_ca() -> anyhow::Result<()> {
   helper::run_privileged(&["uninstall-ca"]).map(|_| ())
+}
+
+/// Build a `<name>.<suffix>:<http_port>` URL for the given container id, or
+/// `None` if DNS is disabled / the container is not yet routed. Returns the
+/// full `http://...` URL (HTTPS would need the user to install the root CA;
+/// we surface plain HTTP for now since it works without trust-store setup).
+pub fn container_url(cx: &App, container_id: &str) -> Option<String> {
+  use crate::state::settings_state;
+  let settings = settings_state(cx).read(cx).settings.clone();
+  if !settings.dns_enabled {
+    return None;
+  }
+  let map = dns::manager(cx).route_map()?;
+  let host = map.read().primary_for_container(container_id)?;
+  let suffix = settings.dns_suffix.trim_matches('.');
+  let port = settings.proxy_http_port;
+  let url = if port == 80 {
+    format!("http://{host}.{suffix}/")
+  } else {
+    format!("http://{host}.{suffix}:{port}/")
+  };
+  Some(url)
 }
 
 fn local_ca_pem_path() -> anyhow::Result<std::path::PathBuf> {

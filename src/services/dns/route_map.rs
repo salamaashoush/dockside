@@ -89,6 +89,17 @@ impl RouteMap {
     ids.len()
   }
 
+  /// Primary hostname for a given container id, or `None` if the container
+  /// is not currently routed. Surfaced on container row + detail view as a
+  /// clickable URL.
+  pub fn primary_for_container(&self, container_id: &str) -> Option<String> {
+    self
+      .by_name
+      .values()
+      .find(|r| r.container_id == container_id)
+      .map(|r| r.primary.clone())
+  }
+
   /// Snapshot for the Settings UI: `(hostname, backend description)` pairs,
   /// one per registered hostname (primary + aliases). Sorted by hostname.
   pub fn route_summaries(&self) -> Vec<(String, String)> {

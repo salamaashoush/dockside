@@ -1,4 +1,4 @@
-use gpui::{App, Entity, Styled, Window, div, prelude::*, px};
+use gpui::{App, Entity, SharedString, Styled, Window, div, prelude::*, px};
 use gpui_component::{
   Icon, IconName, Selectable, Sizable,
   button::{Button, ButtonVariants},
@@ -333,6 +333,8 @@ impl ContainerDetail {
 
     let extras = self.container_state.as_ref().and_then(|s| s.container_extras.clone());
 
+    let domain_url = crate::services::container_url(cx, &container.id);
+
     let mut col = v_flex()
       .w_full()
       .p(px(16.))
@@ -340,6 +342,29 @@ impl ContainerDetail {
       .child(info_row("Name", container.name.clone()))
       .child(info_row("ID", container.short_id().to_string()))
       .child(info_row("Image", container.image.clone()))
+      .when_some(domain_url, |el, url| {
+        let display = url.clone();
+        el.child(
+          h_flex()
+            .w_full()
+            .py(px(12.))
+            .justify_between()
+            .items_center()
+            .border_b_1()
+            .border_color(colors.border)
+            .child(div().text_sm().text_color(colors.muted_foreground).child("Domain"))
+            .child(
+              Button::new("container-domain-open")
+                .label(SharedString::from(display))
+                .icon(IconName::ExternalLink)
+                .ghost()
+                .xsmall()
+                .on_click(move |_, _, cx| {
+                  cx.open_url(&url);
+                }),
+            ),
+        )
+      })
       .child(
         h_flex()
           .w_full()

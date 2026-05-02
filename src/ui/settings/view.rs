@@ -181,6 +181,9 @@ pub struct SettingsView {
   colima_memory_input: Option<Entity<InputState>>,
   colima_disk_input: Option<Entity<InputState>>,
   dns_suffix_input: Option<Entity<InputState>>,
+  dns_port_input: Option<Entity<InputState>>,
+  proxy_http_port_input: Option<Entity<InputState>>,
+  proxy_https_port_input: Option<Entity<InputState>>,
   initialized: bool,
   last_theme_index: Option<usize>,
   cache_size: String,
@@ -214,6 +217,9 @@ impl SettingsView {
       colima_memory_input: None,
       colima_disk_input: None,
       dns_suffix_input: None,
+      dns_port_input: None,
+      proxy_http_port_input: None,
+      proxy_https_port_input: None,
       initialized: false,
       last_theme_index: None,
       cache_size,
@@ -357,6 +363,11 @@ impl SettingsView {
         .placeholder("dockside.test")
         .default_value(&settings.dns_suffix)
     }));
+    self.dns_port_input = Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.dns_port.to_string())));
+    self.proxy_http_port_input =
+      Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.proxy_http_port.to_string())));
+    self.proxy_https_port_input =
+      Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.proxy_https_port.to_string())));
 
     // Auto-save every text input on change. No "Apply" button anywhere.
     let inputs = [
@@ -376,6 +387,9 @@ impl SettingsView {
       self.colima_memory_input.clone(),
       self.colima_disk_input.clone(),
       self.dns_suffix_input.clone(),
+      self.dns_port_input.clone(),
+      self.proxy_http_port_input.clone(),
+      self.proxy_https_port_input.clone(),
     ];
     for input in inputs.into_iter().flatten() {
       cx.subscribe(&input, |this, _state, ev: &InputEvent, cx| {
@@ -481,6 +495,21 @@ impl SettingsView {
     } else {
       dns_suffix
     };
+    let dns_port = self
+      .dns_port_input
+      .as_ref()
+      .and_then(|i| i.read(cx).text().to_string().parse::<u16>().ok())
+      .unwrap_or(15353);
+    let plain_proxy_port = self
+      .proxy_http_port_input
+      .as_ref()
+      .and_then(|i| i.read(cx).text().to_string().parse::<u16>().ok())
+      .unwrap_or(8080);
+    let secure_proxy_port = self
+      .proxy_https_port_input
+      .as_ref()
+      .and_then(|i| i.read(cx).text().to_string().parse::<u16>().ok())
+      .unwrap_or(8443);
 
     self.settings_state.update(cx, |state, cx| {
       state.settings.docker_socket = docker_socket;
@@ -499,6 +528,9 @@ impl SettingsView {
       state.settings.colima_default_memory_gb = colima_memory;
       state.settings.colima_default_disk_gb = colima_disk;
       state.settings.dns_suffix = dns_suffix;
+      state.settings.dns_port = dns_port;
+      state.settings.proxy_http_port = plain_proxy_port;
+      state.settings.proxy_https_port = secure_proxy_port;
       let _ = state.settings.save();
       cx.emit(SettingsChanged::SettingsUpdated);
     });
@@ -1003,6 +1035,28 @@ impl SettingsView {
       cx,
     );
 
+    let dns_port_box = self.dns_port_input.clone().unwrap();
+    let plain_port_box = self.proxy_http_port_input.clone().unwrap();
+    let secure_port_box = self.proxy_https_port_input.clone().unwrap();
+    let dns_port_row = Self::render_row(
+      "DNS port",
+      "UDP+TCP port for the local resolver. 15353 is the convention; 53 needs root.",
+      Input::new(&dns_port_box).small().w_full(),
+      cx,
+    );
+    let plain_port_row = Self::render_row(
+      "HTTP proxy port",
+      "Loopback port for plain HTTP. 80 needs root; 8080 is the unprivileged default.",
+      Input::new(&plain_port_box).small().w_full(),
+      cx,
+    );
+    let secure_port_row = Self::render_row(
+      "HTTPS proxy port",
+      "Loopback port for HTTPS. 443 needs root; 8443 is the unprivileged default.",
+      Input::new(&secure_port_box).small().w_full(),
+      cx,
+    );
+
     let ca_row = Self::render_row(
       "HTTPS root certificate",
       "Trust dockside-issued certs so https://*.dockside.test shows a green lock.",
@@ -1113,6 +1167,9 @@ impl SettingsView {
       .child(Self::render_section("Resolver", cx))
       .child(toggle_row)
       .child(suffix_row)
+      .child(dns_port_row)
+      .child(plain_port_row)
+      .child(secure_port_row)
       .child(Self::render_section("Status", cx))
       .child(status_card)
       .child(Self::render_section("HTTPS", cx))
