@@ -18,6 +18,18 @@ use super::host_dialog::HostDialog;
 use super::list::{MachineList, MachineListEvent};
 use super::machine_dialog::MachineDialog;
 
+/// Run a local command and return its stdout as a UTF-8 string.
+fn run_local(prog: &str, args: &[&str]) -> std::io::Result<String> {
+  let out = std::process::Command::new(prog).args(args).output()?;
+  if !out.status.success() {
+    return Err(std::io::Error::other(format!(
+      "{prog} exited with {:?}",
+      out.status.code()
+    )));
+  }
+  Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 /// Self-contained Machines view - handles list, detail, terminal, and all state
 pub struct MachinesView {
   docker_state: Entity<DockerState>,
@@ -228,9 +240,13 @@ impl MachinesView {
         .soft_wrap(false)
     }));
 
-    // Load data for Colima machines only (Host doesn't need SSH-based loading)
+    // Load data: Colima goes through SSH, Host runs the same `free -h`
+    // / `df -h /` / `ps` commands locally so the Stats and Processes
+    // tabs work for the native daemon too.
     if let Some(colima_vm) = machine.as_colima() {
       self.load_machine_data(&colima_vm.name, cx);
+    } else if machine.is_host() {
+      self.load_host_data(cx);
     }
 
     // If on Files tab, load the file list for the new machine
@@ -270,6 +286,45 @@ impl MachinesView {
     }
 
     cx.notify();
+  }
+
+  /// Load stats / logs / OS info for the local host runtime. Mirrors
+  /// `load_machine_data` but skips SSH and runs commands directly.
+  fn load_host_data(&mut self, cx: &mut Context<'_, Self>) {
+    self.machine_tab_state.stats_loading = true;
+    self.machine_tab_state.logs_loading = true;
+    self.machine_tab_state.files_loading = false;
+
+    cx.spawn(async move |this, cx| {
+      let (memory_info, disk_usage, processes, os_info, logs) = cx
+        .background_executor()
+        .spawn(async move {
+          let memory_info = run_local("free", &["-h"]).unwrap_or_default();
+          let disk_usage = run_local("df", &["-h", "/"]).unwrap_or_default();
+          let processes = run_local("ps", &["aux", "--sort=-%mem"])
+            .map(|s| s.lines().take(20).collect::<Vec<_>>().join("\n"))
+            .unwrap_or_default();
+          // os_info type is colima-specific (VmOsInfo); leave None for host.
+          let os_info: Option<crate::colima::VmOsInfo> = None;
+          // Best-effort: pull recent docker daemon journal entries.
+          let logs = run_local("journalctl", &["-u", "docker.service", "-n", "200", "--no-pager"])
+            .unwrap_or_else(|_| "Host log stream not available (journalctl missing or unprivileged).".to_string());
+          (memory_info, disk_usage, processes, os_info, logs)
+        })
+        .await;
+
+      let _ = this.update(cx, |this, cx| {
+        this.machine_tab_state.memory_info = memory_info;
+        this.machine_tab_state.disk_usage = disk_usage;
+        this.machine_tab_state.processes = processes;
+        this.machine_tab_state.os_info = os_info;
+        this.machine_tab_state.logs = logs;
+        this.machine_tab_state.stats_loading = false;
+        this.machine_tab_state.logs_loading = false;
+        cx.notify();
+      });
+    })
+    .detach();
   }
 
   fn load_machine_data(&mut self, name: &str, cx: &mut Context<'_, Self>) {
