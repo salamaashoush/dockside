@@ -410,10 +410,12 @@ fn default_dns_port() -> u16 {
   15353
 }
 fn default_proxy_http_port() -> u16 {
-  80
+  // Unprivileged port. Binding 80 needs root on Linux/macOS; users can
+  // change to 80 in Settings + grant CAP_NET_BIND_SERVICE if desired.
+  8080
 }
 fn default_proxy_https_port() -> u16 {
-  443
+  8443
 }
 
 impl Default for AppSettings {
@@ -642,8 +644,8 @@ mod tests {
       dns_autostart: true,
       dns_suffix: "dockside.test".to_string(),
       dns_port: 15353,
-      proxy_http_port: 80,
-      proxy_https_port: 443,
+      proxy_http_port: 8080,
+      proxy_https_port: 8443,
     };
 
     assert_eq!(settings.theme, ThemeName::GruvboxDark);
