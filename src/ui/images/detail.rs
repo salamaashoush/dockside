@@ -875,9 +875,9 @@ fn render_command_row(id: usize, command: &str, cx: &App) -> gpui::Div {
 /// link the user can click.
 fn render_install_hint(hint: crate::docker::InstallHint, cx: &App) -> gpui::Div {
   let colors = &cx.theme().colors;
-  let mut col = v_flex()
+  let mut card = v_flex()
     .w_full()
-    .m(px(16.))
+    .max_w(px(640.))
     .p(px(16.))
     .gap(px(12.))
     .rounded(px(8.))
@@ -903,18 +903,18 @@ fn render_install_hint(hint: crate::docker::InstallHint, cx: &App) -> gpui::Div 
     );
 
   if !hint.commands.is_empty() {
-    col = col.child(
+    card = card.child(
       div()
         .text_xs()
         .text_color(colors.muted_foreground)
         .child("Run one of these:"),
     );
     for (i, c) in hint.commands.iter().enumerate() {
-      col = col.child(render_command_row(i, c, cx));
+      card = card.child(render_command_row(i, c, cx));
     }
   }
   let docs = hint.docs_url.to_string();
-  col = col.child(
+  card = card.child(
     h_flex()
       .gap(px(8.))
       .items_center()
@@ -941,7 +941,11 @@ fn render_install_hint(hint: crate::docker::InstallHint, cx: &App) -> gpui::Div 
           }),
       ),
   );
-  col
+  v_flex()
+    .w_full()
+    .p(px(24.))
+    .items_center()
+    .child(card)
 }
 
 /// Generic dressed-up error panel for non-install failures (e.g. trivy
@@ -949,9 +953,9 @@ fn render_install_hint(hint: crate::docker::InstallHint, cx: &App) -> gpui::Div 
 fn render_error_panel(headline: &str, err: &str, colors: &gpui_component::theme::ThemeColor) -> gpui::Div {
   let err_owned = err.to_string();
   let err_clone = err_owned.clone();
-  v_flex()
+  let card = v_flex()
     .w_full()
-    .m(px(16.))
+    .max_w(px(640.))
     .p(px(16.))
     .gap(px(8.))
     .rounded(px(8.))
@@ -991,7 +995,8 @@ fn render_error_panel(headline: &str, err: &str, colors: &gpui_component::theme:
         .on_click(move |_ev, _window, cx| {
           cx.write_to_clipboard(gpui::ClipboardItem::new_string(err_clone.clone()));
         }),
-    )
+    );
+  v_flex().w_full().p(px(24.)).items_center().child(card)
 }
 
 fn severity_badge(label: &'static str, count: usize, color: gpui::Hsla, cx: &App) -> gpui::Div {
