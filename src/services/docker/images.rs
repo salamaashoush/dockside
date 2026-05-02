@@ -159,12 +159,16 @@ pub fn inspect_image(image_id: String, cx: &mut App) {
       })
       .collect();
 
+    // Image history (per-layer breakdown).
+    let history = docker.image_history(&image_id).await.unwrap_or_default();
+
     Ok::<_, anyhow::Error>((
       config_cmd,
       config_workdir,
       config_env,
       config_entrypoint,
       config_exposed_ports,
+      history,
       image_id,
     ))
   });
@@ -172,8 +176,15 @@ pub fn inspect_image(image_id: String, cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| {
-      if let Ok(Ok((config_cmd, config_workdir, config_env, config_entrypoint, config_exposed_ports, _image_id))) =
-        result
+      if let Ok(Ok((
+        config_cmd,
+        config_workdir,
+        config_env,
+        config_entrypoint,
+        config_exposed_ports,
+        history,
+        _image_id,
+      ))) = result
       {
         // Get containers using this image
         let docker_state_entity = docker_state(cx);
@@ -194,6 +205,7 @@ pub fn inspect_image(image_id: String, cx: &mut App) {
               config_entrypoint,
               config_exposed_ports,
               used_by,
+              history,
             },
           });
         });

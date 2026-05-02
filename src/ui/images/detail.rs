@@ -419,6 +419,96 @@ impl ImageDetail {
       )
   }
 
+  fn render_layers_tab(&self, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+    let history = self
+      .inspect_data
+      .as_ref()
+      .map(|d| d.history.clone())
+      .unwrap_or_default();
+
+    if history.is_empty() {
+      return v_flex().w_full().p(px(16.)).child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("No layer history available."),
+      );
+    }
+
+    let header = h_flex()
+      .w_full()
+      .px(px(12.))
+      .py(px(8.))
+      .gap(px(8.))
+      .border_b_1()
+      .border_color(colors.border)
+      .bg(colors.muted)
+      .child(
+        div()
+          .w(px(70.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("SIZE"),
+      )
+      .child(
+        div()
+          .w(px(140.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("CREATED"),
+      )
+      .child(
+        div()
+          .flex_1()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("COMMAND"),
+      );
+
+    let rows = history.into_iter().enumerate().map(|(i, entry)| {
+      let created = entry
+        .created
+        .map(|c| c.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default();
+      let zebra = if i % 2 == 0 {
+        colors.background
+      } else {
+        colors.muted.opacity(0.4)
+      };
+      h_flex()
+        .w_full()
+        .px(px(12.))
+        .py(px(6.))
+        .gap(px(8.))
+        .bg(zebra)
+        .child(
+          div()
+            .w(px(70.))
+            .text_xs()
+            .text_color(colors.foreground)
+            .child(entry.display_size()),
+        )
+        .child(
+          div()
+            .w(px(140.))
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(created),
+        )
+        .child(
+          div()
+            .flex_1()
+            .text_xs()
+            .font_family("monospace")
+            .text_color(colors.foreground)
+            .child(entry.short_command()),
+        )
+    });
+
+    v_flex().w_full().child(header).children(rows)
+  }
+
   pub fn render(self, _window: &mut Window, cx: &App) -> gpui::AnyElement {
     let colors = &cx.theme().colors;
 
@@ -432,7 +522,7 @@ impl ImageDetail {
     let on_delete = self.on_delete.clone();
     let on_tab_change = self.on_tab_change.clone();
 
-    let tabs = ["Info"];
+    let tabs = ["Info", "Layers"];
 
     // Toolbar with tabs and actions
     let toolbar = h_flex()
@@ -473,7 +563,10 @@ impl ImageDetail {
       }));
 
     // Content based on active tab
-    let content = self.render_info_tab(image, cx);
+    let content = match self.active_tab {
+      1 => self.render_layers_tab(cx),
+      _ => self.render_info_tab(image, cx),
+    };
 
     div()
       .size_full()

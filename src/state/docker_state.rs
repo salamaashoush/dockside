@@ -176,6 +176,7 @@ pub struct ImageInspectData {
   pub config_entrypoint: Option<Vec<String>>,
   pub config_exposed_ports: Vec<String>,
   pub used_by: Vec<String>,
+  pub history: Vec<crate::docker::ImageHistoryEntry>,
 }
 
 /// Event emitted when docker state changes

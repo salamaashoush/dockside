@@ -29,10 +29,15 @@ type SymlinkClickCallback = Rc<dyn Fn(&str, &mut Window, &mut App) + 'static>;
 type OpenInEditorCallback = Rc<dyn Fn(&(String, bool), &mut Window, &mut App) + 'static>;
 
 /// State for container detail tabs
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ContainerTabState {
   pub logs: String,
   pub logs_loading: bool,
+  /// Live-tail (follow) mode toggle. When true the view drives a streaming
+  /// task that appends chunks; when false a one-shot snapshot is fetched.
+  pub logs_follow: bool,
+  /// Include RFC3339 timestamps in log lines.
+  pub logs_timestamps: bool,
   pub inspect: String,
   pub inspect_loading: bool,
   pub current_path: String,
@@ -48,6 +53,27 @@ pub struct ContainerTabState {
   pub file_content_loading: bool,
   /// Error when loading file content failed
   pub file_content_error: Option<String>,
+}
+
+impl Default for ContainerTabState {
+  fn default() -> Self {
+    Self {
+      logs: String::new(),
+      logs_loading: false,
+      logs_follow: true,
+      logs_timestamps: false,
+      inspect: String::new(),
+      inspect_loading: false,
+      current_path: String::new(),
+      files: Vec::new(),
+      files_loading: false,
+      files_error: None,
+      selected_file: None,
+      file_content: String::new(),
+      file_content_loading: false,
+      file_content_error: None,
+    }
+  }
 }
 
 impl ContainerTabState {
@@ -74,6 +100,9 @@ pub struct ContainerDetail {
   on_delete: Option<ContainerActionCallback>,
   on_tab_change: Option<TabChangeCallback>,
   on_refresh_logs: Option<RefreshCallback>,
+  on_toggle_logs_follow: Option<RefreshCallback>,
+  on_toggle_logs_timestamps: Option<RefreshCallback>,
+  on_clear_logs: Option<RefreshCallback>,
   on_navigate_path: Option<FileNavigateCallback>,
   on_file_select: Option<FileSelectCallback>,
   on_close_file_viewer: Option<CloseViewerCallback>,
@@ -98,6 +127,9 @@ impl ContainerDetail {
       on_delete: None,
       on_tab_change: None,
       on_refresh_logs: None,
+      on_toggle_logs_follow: None,
+      on_toggle_logs_timestamps: None,
+      on_clear_logs: None,
       on_navigate_path: None,
       on_file_select: None,
       on_close_file_viewer: None,
@@ -183,6 +215,30 @@ impl ContainerDetail {
     F: Fn(&ContainerDetailTab, &mut Window, &mut App) + 'static,
   {
     self.on_tab_change = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_toggle_logs_follow<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&(), &mut Window, &mut App) + 'static,
+  {
+    self.on_toggle_logs_follow = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_toggle_logs_timestamps<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&(), &mut Window, &mut App) + 'static,
+  {
+    self.on_toggle_logs_timestamps = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_clear_logs<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&(), &mut Window, &mut App) + 'static,
+  {
+    self.on_clear_logs = Some(Rc::new(callback));
     self
   }
 
@@ -325,35 +381,107 @@ impl ContainerDetail {
     let colors = &cx.theme().colors;
     let state = self.container_state.as_ref();
     let is_loading = state.is_some_and(|s| s.logs_loading);
+    let follow_on = state.is_some_and(|s| s.logs_follow);
+    let ts_on = state.is_some_and(|s| s.logs_timestamps);
 
-    if is_loading {
-      return v_flex().size_full().p(px(16.)).child(
-        div()
-          .text_sm()
-          .text_color(colors.muted_foreground)
-          .child("Loading logs..."),
+    let toggle_follow = self.on_toggle_logs_follow.clone();
+    let toggle_ts = self.on_toggle_logs_timestamps.clone();
+    let refresh = self.on_refresh_logs.clone();
+    let clear = self.on_clear_logs.clone();
+
+    let toolbar = h_flex()
+      .gap(px(8.))
+      .px(px(8.))
+      .py(px(6.))
+      .border_b_1()
+      .border_color(colors.border)
+      .child(
+        Button::new("logs-follow")
+          .label(if follow_on { "Following" } else { "Paused" })
+          .icon(if follow_on {
+            Icon::new(AppIcon::Pause)
+          } else {
+            Icon::new(AppIcon::Play)
+          })
+          .small()
+          .when_some(toggle_follow, |b, cb| {
+            b.on_click(move |_ev, window, cx| {
+              cb(&(), window, cx);
+            })
+          }),
+      )
+      .child(
+        Button::new("logs-timestamps")
+          .label(if ts_on { "Timestamps: on" } else { "Timestamps: off" })
+          .small()
+          .ghost()
+          .when_some(toggle_ts, |b, cb| {
+            b.on_click(move |_ev, window, cx| {
+              cb(&(), window, cx);
+            })
+          }),
+      )
+      .child(
+        Button::new("logs-refresh")
+          .icon(Icon::new(AppIcon::Refresh))
+          .small()
+          .ghost()
+          .when_some(refresh, |b, cb| {
+            b.on_click(move |_ev, window, cx| {
+              cb(&(), window, cx);
+            })
+          }),
+      )
+      .child(
+        Button::new("logs-clear")
+          .icon(Icon::new(AppIcon::Trash))
+          .small()
+          .ghost()
+          .when_some(clear, |b, cb| {
+            b.on_click(move |_ev, window, cx| {
+              cb(&(), window, cx);
+            })
+          }),
       );
-    }
 
-    if let Some(ref editor) = self.logs_editor {
-      return div()
+    let body: gpui::AnyElement = if is_loading && state.is_none_or(|s| s.logs.is_empty()) {
+      v_flex()
         .size_full()
-        .child(Input::new(editor).size_full().appearance(false).disabled(true));
-    }
-
-    // Fallback to plain text
-    let logs_content = state.map_or_else(|| "No logs available".to_string(), |s| s.logs.clone());
-    div().size_full().child(
+        .p(px(16.))
+        .child(
+          div()
+            .text_sm()
+            .text_color(colors.muted_foreground)
+            .child("Loading logs..."),
+        )
+        .into_any_element()
+    } else if let Some(ref editor) = self.logs_editor {
       div()
         .size_full()
-        .overflow_y_scrollbar()
-        .bg(colors.sidebar)
-        .p(px(12.))
-        .font_family("monospace")
-        .text_xs()
-        .text_color(colors.foreground)
-        .child(logs_content),
-    )
+        .child(Input::new(editor).size_full().appearance(false).disabled(true))
+        .into_any_element()
+    } else {
+      let logs_content = state.map_or_else(|| "No logs available".to_string(), |s| s.logs.clone());
+      div()
+        .size_full()
+        .child(
+          div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .bg(colors.sidebar)
+            .p(px(12.))
+            .font_family("monospace")
+            .text_xs()
+            .text_color(colors.foreground)
+            .child(logs_content),
+        )
+        .into_any_element()
+    };
+
+    v_flex()
+      .size_full()
+      .child(toolbar)
+      .child(div().flex_1().min_h_0().w_full().child(body))
   }
 
   fn render_processes_tab(&self, is_running: bool, cx: &App) -> gpui::AnyElement {

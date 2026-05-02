@@ -20,6 +20,38 @@ pub struct ImageInfo {
   pub os: Option<String>,
 }
 
+/// One entry in `docker image history` output. `id == "<missing>"` when
+/// Docker has dropped the original layer metadata for intermediate layers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageHistoryEntry {
+  pub id: String,
+  pub created: Option<DateTime<Utc>>,
+  pub created_by: String,
+  pub size: i64,
+  pub comment: String,
+  pub tags: Vec<String>,
+}
+
+impl ImageHistoryEntry {
+  pub fn display_size(&self) -> String {
+    bytesize::ByteSize(u64::try_from(self.size).unwrap_or(0)).to_string()
+  }
+
+  /// Strip the "/bin/sh -c #(nop) " prefix Docker adds to non-RUN history
+  /// entries so the table reads as actual Dockerfile-ish commands.
+  pub fn short_command(&self) -> String {
+    let nop = "/bin/sh -c #(nop) ";
+    let shc = "/bin/sh -c ";
+    if let Some(rest) = self.created_by.strip_prefix(nop) {
+      rest.trim().to_string()
+    } else if let Some(rest) = self.created_by.strip_prefix(shc) {
+      format!("RUN {}", rest.trim())
+    } else {
+      self.created_by.trim().to_string()
+    }
+  }
+}
+
 impl ImageInfo {
   pub fn short_id(&self) -> &str {
     let id = self.id.strip_prefix("sha256:").unwrap_or(&self.id);
@@ -100,6 +132,25 @@ impl DockerClient {
       architecture: inspect.architecture,
       os: inspect.os,
     })
+  }
+
+  /// Fetch the image history (per-layer breakdown) for an image.
+  pub async fn image_history(&self, id: &str) -> Result<Vec<ImageHistoryEntry>> {
+    let docker = self.client()?;
+    let history = docker.image_history(id).await?;
+    Ok(
+      history
+        .into_iter()
+        .map(|h| ImageHistoryEntry {
+          id: h.id,
+          created: DateTime::from_timestamp(h.created, 0),
+          created_by: h.created_by,
+          size: h.size,
+          comment: h.comment,
+          tags: h.tags,
+        })
+        .collect(),
+    )
   }
 
   /// Pull an image from a registry

@@ -1,4 +1,4 @@
-use gpui::{App, Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, Render, Styled, Task, Timer, Window, div, prelude::*, px};
 use gpui_component::{
   WindowExt,
   button::{Button, ButtonVariants},
@@ -33,6 +33,9 @@ pub struct ContainersView {
   last_synced_logs: String,
   last_synced_inspect: String,
   last_synced_file_content: String,
+  /// Active live-tail task. Dropped when switching containers / toggling
+  /// follow-off so the bollard stream sender hits send-error and exits.
+  logs_task: Option<Task<()>>,
 }
 
 impl ContainersView {
@@ -160,6 +163,7 @@ impl ContainersView {
       last_synced_logs: String::new(),
       last_synced_inspect: String::new(),
       last_synced_file_content: String::new(),
+      logs_task: None,
     }
   }
 
@@ -688,54 +692,19 @@ impl ContainersView {
   }
 
   fn load_container_data(&mut self, container_id: &str, _window: &mut Window, cx: &mut Context<'_, Self>) {
-    self.container_tab_state.logs_loading = true;
-    self.container_tab_state.inspect_loading = true;
-
     let id = container_id.to_string();
     let id_for_inspect = id.clone();
 
-    // Get max log lines from settings
-    let max_log_lines = settings_state(cx).read(cx).settings.max_log_lines;
-
-    // Get tokio handle and docker client before spawning
+    // Inspect snapshot.
+    self.container_tab_state.inspect_loading = true;
     let tokio_handle = services::Tokio::runtime_handle();
     let client = services::docker_client();
-    let client_for_inspect = client.clone();
-    let tokio_handle_for_inspect = tokio_handle.clone();
-
-    // Load logs in background
-    cx.spawn(async move |this, cx| {
-      let logs = cx
-        .background_executor()
-        .spawn(async move {
-          tokio_handle.block_on(async {
-            let guard = client.read().await;
-            match guard.as_ref() {
-              Some(c) => c
-                .container_logs(&id, Some(max_log_lines))
-                .await
-                .unwrap_or_else(|e| format!("Failed to get logs: {e}")),
-              None => "Docker client not connected".to_string(),
-            }
-          })
-        })
-        .await;
-
-      let _ = this.update(cx, |this, cx| {
-        this.container_tab_state.logs = logs;
-        this.container_tab_state.logs_loading = false;
-        cx.notify();
-      });
-    })
-    .detach();
-
-    // Load inspect data in background
     cx.spawn(async move |this, cx| {
       let inspect = cx
         .background_executor()
         .spawn(async move {
-          tokio_handle_for_inspect.block_on(async {
-            let guard = client_for_inspect.read().await;
+          tokio_handle.block_on(async {
+            let guard = client.read().await;
             match guard.as_ref() {
               Some(c) => c
                 .inspect_container(&id_for_inspect)
@@ -754,12 +723,125 @@ impl ContainersView {
       });
     })
     .detach();
+
+    // Logs: streaming or snapshot per current toggle.
+    self.restart_logs(&id, cx);
   }
 
-  fn on_refresh_logs(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-    if let Some(ref container) = self.selected_container(cx) {
-      self.load_container_data(&container.id, window, cx);
+  /// Drop the previous logs task (if any) and start a fresh one matching
+  /// the current `logs_follow` / `logs_timestamps` toggles.
+  fn restart_logs(&mut self, container_id: &str, cx: &mut Context<'_, Self>) {
+    self.logs_task = None;
+    self.container_tab_state.logs.clear();
+    self.last_synced_logs.clear();
+    self.container_tab_state.logs_loading = true;
+
+    let id = container_id.to_string();
+    let max_log_lines = settings_state(cx).read(cx).settings.max_log_lines;
+    let timestamps = self.container_tab_state.logs_timestamps;
+    let follow = self.container_tab_state.logs_follow;
+    let tokio_handle = services::Tokio::runtime_handle();
+    let client = services::docker_client();
+
+    if follow {
+      // Live tail: stream chunks via mpsc and append on the UI thread.
+      let task = cx.spawn(async move |this, cx| {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+        let id_for_stream = id.clone();
+        let stream_handle = tokio_handle.spawn(async move {
+          let guard = client.read().await;
+          match guard.as_ref() {
+            Some(c) => {
+              if let Err(e) = c
+                .stream_container_logs(&id_for_stream, Some(max_log_lines), timestamps, tx.clone())
+                .await
+              {
+                let _ = tx.send(format!("\n[log stream ended: {e}]\n")).await;
+              }
+            }
+            None => {
+              let _ = tx.send("Docker client not connected\n".to_string()).await;
+            }
+          }
+        });
+
+        while let Some(chunk) = rx.recv().await {
+          let still_alive = this
+            .update(cx, |this, cx| {
+              this.container_tab_state.logs.push_str(&chunk);
+              if this.container_tab_state.logs_loading {
+                this.container_tab_state.logs_loading = false;
+              }
+              cx.notify();
+            })
+            .is_ok();
+          if !still_alive {
+            break;
+          }
+        }
+        // Stop the bollard stream when the receiver loop ends (caller dropped
+        // task, container changed, etc).
+        stream_handle.abort();
+      });
+      self.logs_task = Some(task);
+    } else {
+      // One-shot snapshot.
+      cx.spawn(async move |this, cx| {
+        let logs = cx
+          .background_executor()
+          .spawn(async move {
+            tokio_handle.block_on(async {
+              let guard = client.read().await;
+              match guard.as_ref() {
+                Some(c) => c
+                  .container_logs(&id, Some(max_log_lines), timestamps)
+                  .await
+                  .unwrap_or_else(|e| format!("Failed to get logs: {e}")),
+                None => "Docker client not connected".to_string(),
+              }
+            })
+          })
+          .await;
+
+        let _ = this.update(cx, |this, cx| {
+          this.container_tab_state.logs = logs;
+          this.container_tab_state.logs_loading = false;
+          cx.notify();
+        });
+      })
+      .detach();
     }
+  }
+
+  fn on_refresh_logs(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) {
+    if let Some(ref container) = self.selected_container(cx) {
+      let id = container.id.clone();
+      self.restart_logs(&id, cx);
+    }
+  }
+
+  fn on_toggle_logs_follow(&mut self, cx: &mut Context<'_, Self>) {
+    self.container_tab_state.logs_follow = !self.container_tab_state.logs_follow;
+    if let Some(ref container) = self.selected_container(cx) {
+      let id = container.id.clone();
+      self.restart_logs(&id, cx);
+    }
+    cx.notify();
+  }
+
+  fn on_toggle_logs_timestamps(&mut self, cx: &mut Context<'_, Self>) {
+    self.container_tab_state.logs_timestamps = !self.container_tab_state.logs_timestamps;
+    if let Some(ref container) = self.selected_container(cx) {
+      let id = container.id.clone();
+      self.restart_logs(&id, cx);
+    }
+    cx.notify();
+  }
+
+  fn on_clear_logs(&mut self, cx: &mut Context<'_, Self>) {
+    self.container_tab_state.logs.clear();
+    // Render-time sync replaces the editor with the empty string next frame.
+    cx.notify();
   }
 }
 
@@ -768,7 +850,9 @@ impl Render for ContainersView {
     // Sync editor content with loaded data (only when source data changes, not editor content)
     if let Some(ref editor) = self.logs_editor {
       let logs = &self.container_tab_state.logs;
-      if !logs.is_empty() && !self.container_tab_state.logs_loading && self.last_synced_logs != *logs {
+      // Sync whenever the source string changes — including when it
+      // becomes empty (clear button) or grows mid-stream (follow mode).
+      if self.last_synced_logs != *logs {
         let logs_clone = logs.clone();
         editor.update(cx, |state, cx| {
           state.replace(&logs_clone, window, cx);
@@ -829,6 +913,15 @@ impl Render for ContainersView {
       }))
       .on_refresh_logs(cx.listener(|this, (): &(), window, cx| {
         this.on_refresh_logs(window, cx);
+      }))
+      .on_toggle_logs_follow(cx.listener(|this, (): &(), _window, cx| {
+        this.on_toggle_logs_follow(cx);
+      }))
+      .on_toggle_logs_timestamps(cx.listener(|this, (): &(), _window, cx| {
+        this.on_toggle_logs_timestamps(cx);
+      }))
+      .on_clear_logs(cx.listener(|this, (): &(), _window, cx| {
+        this.on_clear_logs(cx);
       }))
       .on_navigate_path(cx.listener(|this, path: &str, _window, cx| {
         this.on_navigate_path(path, cx);

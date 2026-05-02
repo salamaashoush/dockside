@@ -459,13 +459,14 @@ impl DockerClient {
     Ok(response.id)
   }
 
-  /// Get container logs
-  pub async fn container_logs(&self, id: &str, tail: Option<usize>) -> Result<String> {
+  /// Fetch container logs as a snapshot (no follow).
+  pub async fn container_logs(&self, id: &str, tail: Option<usize>, timestamps: bool) -> Result<String> {
     let docker = self.client()?;
 
     let options = LogsOptions {
       stdout: true,
       stderr: true,
+      timestamps,
       tail: tail.map_or_else(|| "100".to_string(), |t| t.to_string()),
       ..Default::default()
     };
@@ -485,6 +486,46 @@ impl DockerClient {
     }
 
     Ok(logs)
+  }
+
+  /// Stream container logs into a channel until the receiver is dropped or
+  /// the container exits. The returned future resolves when streaming
+  /// stops; cancel by dropping the receiver (the next send fails and we
+  /// return early). `tail` seeds the initial backfill before live tailing.
+  pub async fn stream_container_logs(
+    &self,
+    id: &str,
+    tail: Option<usize>,
+    timestamps: bool,
+    tx: tokio::sync::mpsc::Sender<String>,
+  ) -> Result<()> {
+    let docker = self.client()?;
+
+    let options = LogsOptions {
+      stdout: true,
+      stderr: true,
+      timestamps,
+      follow: true,
+      tail: tail.map_or_else(|| "100".to_string(), |t| t.to_string()),
+      ..Default::default()
+    };
+
+    let mut stream = docker.logs(id, Some(options));
+    while let Some(result) = stream.next().await {
+      match result {
+        Ok(output) => {
+          let s = output.to_string();
+          if tx.send(s).await.is_err() {
+            // Receiver dropped — caller no longer cares.
+            return Ok(());
+          }
+        }
+        Err(e) => {
+          return Err(anyhow::anyhow!("Log stream failed: {e}"));
+        }
+      }
+    }
+    Ok(())
   }
 
   /// Inspect a container and return JSON
