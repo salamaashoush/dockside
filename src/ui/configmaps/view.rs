@@ -9,7 +9,6 @@ use gpui_component::{
   h_flex,
   label::Label,
   menu::{DropdownMenu, PopupMenuItem},
-  scroll::ScrollableElement,
   theme::ActiveTheme,
   v_flex,
 };
@@ -276,64 +275,72 @@ impl Render for ConfigMapsView {
               .child("No configmaps in selected namespace."),
           )
         } else {
-          let mut list = v_flex().w_full().min_w(px(700.));
-          list = list.child(
-            h_flex()
-              .w_full()
-              .px(px(12.))
-              .py(px(6.))
-              .gap(px(8.))
-              .bg(colors.muted)
-              .child(div().w(px(28.)))
-              .child(
-                div()
-                  .flex_1()
-                  .min_w(px(200.))
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child("NAME"),
-              )
-              .child(
-                div()
-                  .w(px(140.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child("NAMESPACE"),
-              )
-              .child(
-                div()
-                  .w(px(60.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child("KEYS"),
-              )
-              .child(
-                div()
-                  .w(px(60.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child("AGE"),
-              )
-              .child(div().w(px(28.))),
-          );
+          let header = h_flex()
+            .w_full()
+            .min_w(px(700.))
+            .px(px(12.))
+            .py(px(6.))
+            .gap(px(8.))
+            .bg(colors.muted)
+            .flex_shrink_0()
+            .child(div().w(px(28.)))
+            .child(
+              div()
+                .flex_1()
+                .min_w(px(200.))
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child("NAME"),
+            )
+            .child(
+              div()
+                .w(px(140.))
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child("NAMESPACE"),
+            )
+            .child(
+              div()
+                .w(px(60.))
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child("KEYS"),
+            )
+            .child(
+              div()
+                .w(px(60.))
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child("AGE"),
+            )
+            .child(div().w(px(28.)));
+          let mut rows = v_flex().w_full().min_w(px(700.));
           for cm in &cms {
-            list = list.child(self.render_row(cm, cx));
+            rows = rows.child(self.render_row(cm, cx));
           }
-          div().w_full().child(list)
+          div().size_full().child(
+            div().id("configmaps-h-scroll").size_full().overflow_x_scroll().child(
+              v_flex().w_full().min_w(px(700.)).size_full().child(header).child(
+                div()
+                  .id("configmaps-v-scroll")
+                  .flex_1()
+                  .min_h_0()
+                  .w_full()
+                  .overflow_y_scroll()
+                  .child(rows),
+              ),
+            ),
+          )
         }
       }
     };
 
-    v_flex().size_full().child(toolbar).child(
-      div()
-        .id("configmaps-scroll")
-        .flex_1()
-        .min_h_0()
-        .overflow_scrollbar()
-        .child(body),
-    )
+    v_flex()
+      .size_full()
+      .child(toolbar)
+      .child(div().flex_1().min_h_0().child(body))
   }
 }

@@ -123,93 +123,95 @@ impl ClusterView {
             .justify_center()
             .child(div().text_sm().text_color(colors.muted_foreground).child("No nodes."));
         }
-        let mut list = v_flex().w_full().min_w(px(960.)).child(
-          h_flex()
-            .w_full()
-            .px(px(12.))
-            .py(px(6.))
-            .gap(px(8.))
-            .bg(colors.muted)
-            .child(
-              div()
-                .flex_1()
-                .min_w(px(200.))
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("NAME"),
-            )
-            .child(
-              div()
-                .w(px(80.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("STATUS"),
-            )
-            .child(
-              div()
-                .w(px(120.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("ROLES"),
-            )
-            .child(
-              div()
-                .w(px(100.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("VERSION"),
-            )
-            .child(
-              div()
-                .w(px(80.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("CPU"),
-            )
-            .child(
-              div()
-                .w(px(100.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("MEMORY"),
-            )
-            .child(
-              div()
-                .w(px(120.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("INTERNAL IP"),
-            )
-            .child(
-              div()
-                .w(px(80.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("OS"),
-            )
-            .child(
-              div()
-                .w(px(60.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("AGE"),
-            ),
-        );
+        let header = h_flex()
+          .w_full()
+          .min_w(px(960.))
+          .px(px(12.))
+          .py(px(6.))
+          .gap(px(8.))
+          .bg(colors.muted)
+          .flex_shrink_0()
+          .child(
+            div()
+              .flex_1()
+              .min_w(px(200.))
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("NAME"),
+          )
+          .child(
+            div()
+              .w(px(80.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("STATUS"),
+          )
+          .child(
+            div()
+              .w(px(120.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("ROLES"),
+          )
+          .child(
+            div()
+              .w(px(100.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("VERSION"),
+          )
+          .child(
+            div()
+              .w(px(80.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("CPU"),
+          )
+          .child(
+            div()
+              .w(px(100.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("MEMORY"),
+          )
+          .child(
+            div()
+              .w(px(120.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("INTERNAL IP"),
+          )
+          .child(
+            div()
+              .w(px(80.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("OS"),
+          )
+          .child(
+            div()
+              .w(px(60.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("AGE"),
+          );
+
+        let mut rows = v_flex().w_full().min_w(px(960.));
         for n in &items {
           let status_color = if n.status == "Ready" {
             colors.success
           } else {
             colors.danger
           };
-          list = list.child(
+          rows = rows.child(
             h_flex()
               .w_full()
               .px(px(12.))
@@ -299,9 +301,19 @@ impl ClusterView {
               ),
           );
         }
-        div()
-          .size_full()
-          .child(div().id("nodes-scroll").size_full().overflow_scrollbar().child(list))
+        div().size_full().child(
+          div().id("nodes-h-scroll").size_full().overflow_x_scroll().child(
+            v_flex().w_full().min_w(px(960.)).size_full().child(header).child(
+              div()
+                .id("nodes-v-scroll")
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .overflow_y_scroll()
+                .child(rows),
+            ),
+          ),
+        )
       }
     }
   }
@@ -324,77 +336,79 @@ impl ClusterView {
             .justify_center()
             .child(div().text_sm().text_color(colors.muted_foreground).child("No events."));
         }
-        let mut list = v_flex().w_full().min_w(px(920.)).child(
-          h_flex()
-            .w_full()
-            .px(px(12.))
-            .py(px(6.))
-            .gap(px(8.))
-            .bg(colors.muted)
-            .child(
-              div()
-                .w(px(60.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("TYPE"),
-            )
-            .child(
-              div()
-                .w(px(140.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("REASON"),
-            )
-            .child(
-              div()
-                .w(px(100.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("NAMESPACE"),
-            )
-            .child(
-              div()
-                .w(px(220.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("OBJECT"),
-            )
-            .child(
-              div()
-                .flex_1()
-                .min_w(px(220.))
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("MESSAGE"),
-            )
-            .child(
-              div()
-                .w(px(40.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("#"),
-            )
-            .child(
-              div()
-                .w(px(60.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("AGE"),
-            ),
-        );
+        let header = h_flex()
+          .w_full()
+          .min_w(px(920.))
+          .px(px(12.))
+          .py(px(6.))
+          .gap(px(8.))
+          .bg(colors.muted)
+          .flex_shrink_0()
+          .child(
+            div()
+              .w(px(60.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("TYPE"),
+          )
+          .child(
+            div()
+              .w(px(140.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("REASON"),
+          )
+          .child(
+            div()
+              .w(px(100.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("NAMESPACE"),
+          )
+          .child(
+            div()
+              .w(px(220.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("OBJECT"),
+          )
+          .child(
+            div()
+              .flex_1()
+              .min_w(px(220.))
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("MESSAGE"),
+          )
+          .child(
+            div()
+              .w(px(40.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("#"),
+          )
+          .child(
+            div()
+              .w(px(60.))
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("AGE"),
+          );
+
+        let mut rows = v_flex().w_full().min_w(px(920.));
         for e in &items {
           let type_color = if e.event_type == "Warning" {
             colors.warning
           } else {
             colors.muted_foreground
           };
-          list = list.child(
+          rows = rows.child(
             h_flex()
               .w_full()
               .px(px(12.))
@@ -466,9 +480,19 @@ impl ClusterView {
               ),
           );
         }
-        div()
-          .size_full()
-          .child(div().id("events-scroll").size_full().overflow_scrollbar().child(list))
+        div().size_full().child(
+          div().id("events-h-scroll").size_full().overflow_x_scroll().child(
+            v_flex().w_full().min_w(px(920.)).size_full().child(header).child(
+              div()
+                .id("events-v-scroll")
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .overflow_y_scroll()
+                .child(rows),
+            ),
+          ),
+        )
       }
     }
   }
