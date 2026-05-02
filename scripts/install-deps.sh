@@ -87,24 +87,24 @@ install_linux_libs() {
   local pkgs_apt=(
     build-essential pkg-config cmake curl ca-certificates
     libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev
-    libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
+    libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev
     libssl-dev libvulkan-dev libasound2-dev
   )
   local pkgs_dnf=(
     @development-tools pkgconf-pkg-config cmake curl ca-certificates
     gtk3-devel webkit2gtk4.1-devel libxdo-devel libappindicator-gtk3-devel
-    libxcb-devel libxkbcommon-devel
+    libxcb-devel libxkbcommon-devel libxkbcommon-x11-devel
     openssl-devel vulkan-loader-devel alsa-lib-devel
   )
   local pkgs_pacman=(
     base-devel pkgconf cmake curl ca-certificates
     gtk3 webkit2gtk-4.1 xdotool libappindicator-gtk3
-    libxcb libxkbcommon openssl vulkan-icd-loader alsa-lib
+    libxcb libxkbcommon libxkbcommon-x11 openssl vulkan-icd-loader alsa-lib
   )
   local pkgs_zypper=(
     pattern:devel_basis pkg-config cmake curl ca-certificates
     gtk3-devel webkit2gtk3-devel xdotool-devel libappindicator3-devel
-    libxcb-devel libxkbcommon-devel
+    libxcb-devel libxkbcommon-devel libxkbcommon-x11-devel
     libopenssl-devel vulkan-devel alsa-devel
   )
 
@@ -122,7 +122,7 @@ install_linux_libs() {
     info "Installing Linux deps via zypper..."
     sudo zypper install -y "${pkgs_zypper[@]}"
   else
-    fatal "Unsupported Linux distro — install GTK3, WebKit2GTK 4.1, libxdo, libappindicator, libxcb, libxkbcommon, openssl, vulkan, alsa headers manually."
+    fatal "Unsupported Linux distro — install GTK3, WebKit2GTK 4.1, libxdo, libappindicator, libxcb, libxkbcommon, libxkbcommon-x11, openssl, vulkan, alsa headers manually."
   fi
   ok "Linux build deps installed"
 }
