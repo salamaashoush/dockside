@@ -89,6 +89,37 @@ impl ImagesView {
             cx.notify();
           }
         }
+        StateChanged::ImageScanStarted { image_id } => {
+          if let Some(selected) = this.selected_image(cx)
+            && selected.id == *image_id
+            && let Some(d) = this.inspect_data.as_mut()
+          {
+            d.scan_loading = true;
+            d.scan_error = None;
+            cx.notify();
+          }
+        }
+        StateChanged::ImageScanCompleted { image_id, summary } => {
+          if let Some(selected) = this.selected_image(cx)
+            && selected.id == *image_id
+            && let Some(d) = this.inspect_data.as_mut()
+          {
+            d.scan = Some(summary.clone());
+            d.scan_loading = false;
+            d.scan_error = None;
+            cx.notify();
+          }
+        }
+        StateChanged::ImageScanFailed { image_id, error } => {
+          if let Some(selected) = this.selected_image(cx)
+            && selected.id == *image_id
+            && let Some(d) = this.inspect_data.as_mut()
+          {
+            d.scan_loading = false;
+            d.scan_error = Some(error.clone());
+            cx.notify();
+          }
+        }
         _ => {}
       }
     })
@@ -167,6 +198,16 @@ impl Render for ImagesView {
             .map(|(i, t)| (i.to_string(), t.to_string()))
             .unwrap_or_else(|| (display, "latest".to_string()));
           open_push_image_dialog(image, tag, window, cx);
+        }
+      }))
+      .on_scan(cx.listener(|this, id: &str, _window, cx| {
+        if let Some(img) = this.selected_image(cx) {
+          let image_ref = img
+            .repo_tags
+            .first()
+            .cloned()
+            .unwrap_or_else(|| img.id.clone());
+          services::scan_image(id.to_string(), image_ref, cx);
         }
       }));
 

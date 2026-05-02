@@ -180,6 +180,46 @@ pub fn build_image(
   .detach();
 }
 
+/// Scan an image with Trivy in the background and emit progress events.
+pub fn scan_image(image_id: String, image_ref: String, cx: &mut App) {
+  let state = docker_state(cx);
+  state.update(cx, |_, cx| {
+    cx.emit(StateChanged::ImageScanStarted {
+      image_id: image_id.clone(),
+    });
+  });
+
+  cx.spawn(async move |cx| {
+    let result = cx
+      .background_executor()
+      .spawn(async move {
+        // Trivy is a blocking subprocess; run on the executor's
+        // background pool so we don't block any async runtime.
+        crate::docker::scan_image(&image_ref)
+      })
+      .await;
+
+    let _ = cx.update(|cx| {
+      let state = docker_state(cx);
+      match result {
+        Ok(summary) => state.update(cx, |_, cx| {
+          cx.emit(StateChanged::ImageScanCompleted {
+            image_id,
+            summary,
+          });
+        }),
+        Err(e) => state.update(cx, |_, cx| {
+          cx.emit(StateChanged::ImageScanFailed {
+            image_id,
+            error: e.to_string(),
+          });
+        }),
+      }
+    });
+  })
+  .detach();
+}
+
 pub fn tag_image(source: String, repo: String, tag: String, cx: &mut App) {
   let task_id = start_task(cx, format!("Tagging {source} as {repo}:{tag}..."));
   let disp = dispatcher(cx);
@@ -443,6 +483,9 @@ pub fn inspect_image(image_id: String, cx: &mut App) {
               config_exposed_ports,
               used_by,
               history,
+              scan: None,
+              scan_loading: false,
+              scan_error: None,
             },
           });
         });

@@ -180,6 +180,12 @@ pub struct ImageInspectData {
   pub config_exposed_ports: Vec<String>,
   pub used_by: Vec<String>,
   pub history: Vec<crate::docker::ImageHistoryEntry>,
+  /// Latest Trivy scan result. `None` until the user triggers a scan.
+  pub scan: Option<crate::docker::ScanSummary>,
+  /// Set while a scan is running so the UI can show a spinner.
+  pub scan_loading: bool,
+  /// Last scan error, if any.
+  pub scan_error: Option<String>,
 }
 
 /// Event emitted when docker state changes
@@ -206,6 +212,17 @@ pub enum StateChanged {
   ImageInspectLoaded {
     image_id: String,
     data: ImageInspectData,
+  },
+  ImageScanStarted {
+    image_id: String,
+  },
+  ImageScanCompleted {
+    image_id: String,
+    summary: crate::docker::ScanSummary,
+  },
+  ImageScanFailed {
+    image_id: String,
+    error: String,
   },
   PodLogsLoaded {
     pod_name: String,

@@ -25,6 +25,7 @@ pub struct ImageDetail {
   on_delete: Option<ImageActionCallback>,
   on_tag: Option<ImageNameCallback>,
   on_push: Option<ImageNameCallback>,
+  on_scan: Option<ImageNameCallback>,
   on_tab_change: Option<TabChangeCallback>,
 }
 
@@ -37,6 +38,7 @@ impl ImageDetail {
       on_delete: None,
       on_tag: None,
       on_push: None,
+      on_scan: None,
       on_tab_change: None,
     }
   }
@@ -69,6 +71,14 @@ impl ImageDetail {
     F: Fn(&str, &mut Window, &mut App) + 'static,
   {
     self.on_push = Some(Rc::new(callback));
+    self
+  }
+
+  pub fn on_scan<F>(mut self, callback: F) -> Self
+  where
+    F: Fn(&str, &mut Window, &mut App) + 'static,
+  {
+    self.on_scan = Some(Rc::new(callback));
     self
   }
 
@@ -530,6 +540,183 @@ impl ImageDetail {
     v_flex().w_full().child(header).children(rows)
   }
 
+  fn render_vulns_tab(&self, cx: &App) -> gpui::Div {
+    let colors = &cx.theme().colors;
+    let data = self.inspect_data.as_ref();
+
+    if data.is_none_or(|d| d.scan.is_none() && !d.scan_loading && d.scan_error.is_none()) {
+      return v_flex().w_full().p(px(16.)).gap(px(8.)).child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("No scan run yet. Click Scan in the toolbar to run Trivy."),
+      );
+    }
+
+    let d = data.unwrap();
+    if d.scan_loading {
+      return v_flex().w_full().p(px(16.)).child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("Running Trivy..."),
+      );
+    }
+    if let Some(err) = d.scan_error.as_ref() {
+      return v_flex()
+        .w_full()
+        .p(px(16.))
+        .gap(px(8.))
+        .child(div().text_sm().text_color(colors.danger).child("Scan failed."))
+        .child(
+          div()
+            .text_xs()
+            .font_family("monospace")
+            .text_color(colors.muted_foreground)
+            .child(err.clone()),
+        );
+    }
+
+    let summary = d.scan.as_ref().unwrap();
+    let counts = h_flex()
+      .gap(px(12.))
+      .px(px(16.))
+      .py(px(12.))
+      .border_b_1()
+      .border_color(colors.border)
+      .child(severity_badge("CRITICAL", summary.critical, colors.danger, cx))
+      .child(severity_badge("HIGH", summary.high, colors.warning, cx))
+      .child(severity_badge(
+        "MEDIUM",
+        summary.medium,
+        colors.muted_foreground,
+        cx,
+      ))
+      .child(severity_badge("LOW", summary.low, colors.muted_foreground, cx))
+      .child(severity_badge(
+        "UNKNOWN",
+        summary.unknown,
+        colors.muted_foreground,
+        cx,
+      ));
+
+    let header = h_flex()
+      .w_full()
+      .px(px(12.))
+      .py(px(8.))
+      .gap(px(8.))
+      .border_b_1()
+      .border_color(colors.border)
+      .bg(colors.muted)
+      .child(div().w(px(110.)).text_xs().text_color(colors.muted_foreground).child("CVE"))
+      .child(
+        div()
+          .w(px(80.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("SEVERITY"),
+      )
+      .child(
+        div()
+          .w(px(160.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("PACKAGE"),
+      )
+      .child(
+        div()
+          .w(px(140.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("INSTALLED"),
+      )
+      .child(
+        div()
+          .w(px(140.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("FIXED"),
+      )
+      .child(
+        div()
+          .flex_1()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("TITLE"),
+      );
+
+    let rows = summary.vulns.iter().enumerate().take(500).map(|(i, v)| {
+      let zebra = if i % 2 == 0 {
+        colors.background
+      } else {
+        colors.muted.opacity(0.4)
+      };
+      let sev_color = match v.severity.as_str() {
+        "CRITICAL" => colors.danger,
+        "HIGH" => colors.warning,
+        _ => colors.muted_foreground,
+      };
+      h_flex()
+        .w_full()
+        .px(px(12.))
+        .py(px(6.))
+        .gap(px(8.))
+        .bg(zebra)
+        .child(
+          div()
+            .w(px(110.))
+            .text_xs()
+            .font_family("monospace")
+            .text_color(colors.foreground)
+            .child(v.id.clone()),
+        )
+        .child(
+          div()
+            .w(px(80.))
+            .text_xs()
+            .text_color(sev_color)
+            .child(v.severity.clone()),
+        )
+        .child(
+          div()
+            .w(px(160.))
+            .text_xs()
+            .font_family("monospace")
+            .text_color(colors.foreground)
+            .child(v.package.clone()),
+        )
+        .child(
+          div()
+            .w(px(140.))
+            .text_xs()
+            .font_family("monospace")
+            .text_color(colors.muted_foreground)
+            .child(v.installed_version.clone()),
+        )
+        .child(
+          div()
+            .w(px(140.))
+            .text_xs()
+            .font_family("monospace")
+            .text_color(if v.fixed_version.is_some() {
+              colors.success
+            } else {
+              colors.muted_foreground
+            })
+            .child(v.fixed_version.clone().unwrap_or_else(|| "—".to_string())),
+        )
+        .child(
+          div()
+            .flex_1()
+            .text_xs()
+            .text_color(colors.foreground)
+            .child(v.title.clone()),
+        )
+    });
+
+    v_flex().w_full().child(counts).child(header).children(rows)
+  }
+
   pub fn render(self, _window: &mut Window, cx: &App) -> gpui::AnyElement {
     let colors = &cx.theme().colors;
 
@@ -543,7 +730,7 @@ impl ImageDetail {
     let on_delete = self.on_delete.clone();
     let on_tab_change = self.on_tab_change.clone();
 
-    let tabs = ["Info", "Layers"];
+    let tabs = ["Info", "Layers", "Vulnerabilities"];
 
     // Toolbar with tabs and actions
     let toolbar = h_flex()
@@ -572,6 +759,19 @@ impl ImageDetail {
       .child(
         h_flex()
           .gap(px(8.))
+          .child({
+            let on_scan = self.on_scan.clone();
+            let id = image_id_for_delete.clone();
+            Button::new("image-scan")
+              .label("Scan")
+              .ghost()
+              .small()
+              .on_click(move |_ev, window, cx| {
+                if let Some(ref cb) = on_scan {
+                  cb(&id, window, cx);
+                }
+              })
+          })
           .child({
             let on_tag = self.on_tag.clone();
             let id = image_id_for_delete.clone();
@@ -616,6 +816,7 @@ impl ImageDetail {
     // Content based on active tab
     let content = match self.active_tab {
       1 => self.render_layers_tab(cx),
+      2 => self.render_vulns_tab(cx),
       _ => self.render_info_tab(image, cx),
     };
 
@@ -635,4 +836,27 @@ impl ImageDetail {
       )
       .into_any_element()
   }
+}
+
+fn severity_badge(label: &'static str, count: usize, color: gpui::Hsla, cx: &App) -> gpui::Div {
+  let colors = &cx.theme().colors;
+  v_flex()
+    .px(px(10.))
+    .py(px(6.))
+    .gap(px(2.))
+    .rounded(px(6.))
+    .bg(if count > 0 { color.opacity(0.15) } else { colors.muted })
+    .child(
+      div()
+        .text_xs()
+        .text_color(if count > 0 { color } else { colors.muted_foreground })
+        .child(label),
+    )
+    .child(
+      div()
+        .text_lg()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(colors.foreground)
+        .child(count.to_string()),
+    )
 }
