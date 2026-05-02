@@ -467,6 +467,31 @@ impl KubeClient {
     Ok(secrets.items.iter().map(SecretInfo::from_secret).collect())
   }
 
+  /// Create an Opaque Secret with `string_data` entries.
+  pub async fn create_secret(&self, name: &str, namespace: &str, entries: &[(String, String)]) -> Result<()> {
+    use kube::api::PostParams;
+    let mut string_data = std::collections::BTreeMap::new();
+    for (k, v) in entries {
+      string_data.insert(k.clone(), v.clone());
+    }
+    let secret = Secret {
+      metadata: kube::api::ObjectMeta {
+        name: Some(name.to_string()),
+        namespace: Some(namespace.to_string()),
+        ..Default::default()
+      },
+      type_: Some("Opaque".to_string()),
+      string_data: Some(string_data),
+      ..Default::default()
+    };
+    let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .create(&PostParams::default(), &secret)
+      .await
+      .with_context(|| format!("Failed to create secret {name} in namespace {namespace}"))?;
+    Ok(())
+  }
+
   pub async fn delete_secret(&self, name: &str, namespace: &str) -> Result<()> {
     let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
     api
@@ -535,6 +560,29 @@ impl KubeClient {
         .context("Failed to list configmaps in all namespaces")?
     };
     Ok(cms.items.iter().map(ConfigMapInfo::from_configmap).collect())
+  }
+
+  pub async fn create_configmap(&self, name: &str, namespace: &str, entries: &[(String, String)]) -> Result<()> {
+    use kube::api::PostParams;
+    let mut data = std::collections::BTreeMap::new();
+    for (k, v) in entries {
+      data.insert(k.clone(), v.clone());
+    }
+    let cm = ConfigMap {
+      metadata: kube::api::ObjectMeta {
+        name: Some(name.to_string()),
+        namespace: Some(namespace.to_string()),
+        ..Default::default()
+      },
+      data: Some(data),
+      ..Default::default()
+    };
+    let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .create(&PostParams::default(), &cm)
+      .await
+      .with_context(|| format!("Failed to create configmap {name} in namespace {namespace}"))?;
+    Ok(())
   }
 
   pub async fn delete_configmap(&self, name: &str, namespace: &str) -> Result<()> {
@@ -960,6 +1008,53 @@ impl KubeClient {
     let api: Api<Node> = Api::all(self.client.clone());
     let nodes = api.list(&ListParams::default()).await.context("Failed to list nodes")?;
     Ok(nodes.items.iter().map(NodeInfo::from_node).collect())
+  }
+
+  /// Set or clear `spec.unschedulable` on a node.
+  pub async fn set_node_unschedulable(&self, name: &str, unschedulable: bool) -> Result<()> {
+    let api: Api<Node> = Api::all(self.client.clone());
+    let patch = json!({ "spec": { "unschedulable": unschedulable } });
+    api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to patch node {name}"))?;
+    Ok(())
+  }
+
+  /// Drain a node: cordon it then delete all evictable pods. Skips
+  /// DaemonSet-owned pods and pods in `kube-system` to mirror `kubectl
+  /// drain` defaults. Returns the count of pods deleted.
+  pub async fn drain_node(&self, name: &str) -> Result<usize> {
+    self.set_node_unschedulable(name, true).await?;
+
+    let pods_api: Api<Pod> = Api::all(self.client.clone());
+    let lp = ListParams::default().fields(&format!("spec.nodeName={name}"));
+    let pods = pods_api
+      .list(&lp)
+      .await
+      .with_context(|| format!("Failed to list pods on node {name}"))?;
+
+    let mut deleted = 0usize;
+    for pod in pods.items {
+      let pod_name = pod.metadata.name.clone().unwrap_or_default();
+      let pod_ns = pod.metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+      if pod_ns == "kube-system" {
+        continue;
+      }
+      let owned_by_daemonset = pod
+        .metadata
+        .owner_references
+        .as_ref()
+        .is_some_and(|owners| owners.iter().any(|o| o.kind == "DaemonSet"));
+      if owned_by_daemonset {
+        continue;
+      }
+      let scoped: Api<Pod> = Api::namespaced(self.client.clone(), &pod_ns);
+      if scoped.delete(&pod_name, &DeleteParams::default()).await.is_ok() {
+        deleted += 1;
+      }
+    }
+    Ok(deleted)
   }
 
   pub async fn list_events(&self, namespace: Option<&str>) -> Result<Vec<EventInfo>> {

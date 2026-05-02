@@ -454,6 +454,8 @@ pub struct NodeInfo {
   pub cpu_allocatable: String,
   /// Allocatable memory (bytes/IEC string).
   pub mem_allocatable: String,
+  /// `true` when the node is cordoned (`spec.unschedulable`).
+  pub unschedulable: bool,
 }
 
 impl NodeInfo {
@@ -511,6 +513,8 @@ impl NodeInfo {
 
     let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
 
+    let unschedulable = n.spec.as_ref().and_then(|s| s.unschedulable).unwrap_or(false);
+
     Self {
       name,
       status: status_str,
@@ -522,6 +526,7 @@ impl NodeInfo {
       age,
       cpu_allocatable,
       mem_allocatable,
+      unschedulable,
     }
   }
 }

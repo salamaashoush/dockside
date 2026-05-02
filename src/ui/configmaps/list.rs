@@ -15,7 +15,7 @@ use crate::assets::AppIcon;
 use crate::kubernetes::ConfigMapInfo;
 use crate::services;
 use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
-use crate::ui::components::{render_k8s_error, render_loading};
+use crate::ui::components::{KvFormState, render_k8s_error, render_kv_create_form, render_loading};
 
 pub enum ConfigMapListEvent {
   Selected(ConfigMapInfo),
@@ -199,6 +199,7 @@ pub struct ConfigMapList {
   search_input: Option<Entity<InputState>>,
   search_visible: bool,
   search_query: String,
+  create_form: Option<KvFormState>,
 }
 
 impl ConfigMapList {
@@ -243,7 +244,32 @@ impl ConfigMapList {
       search_input: None,
       search_visible: false,
       search_query: String::new(),
+      create_form: None,
     }
+  }
+
+  fn open_create_form(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    let ns = self.docker_state.read(cx).selected_namespace.clone();
+    self.create_form = Some(KvFormState::new(&ns, true, window, cx));
+    cx.notify();
+  }
+
+  fn close_create_form(&mut self, cx: &mut Context<'_, Self>) {
+    self.create_form = None;
+    cx.notify();
+  }
+
+  fn submit_create_form(&mut self, cx: &mut Context<'_, Self>) {
+    let Some(ref form) = self.create_form else { return };
+    let name = form.name_value(cx);
+    if name.is_empty() {
+      return;
+    }
+    let namespace = form.namespace_value(cx);
+    let entries = form.collect(cx);
+    services::create_configmap(name, namespace, entries, cx);
+    self.create_form = None;
+    cx.notify();
   }
 
   fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -371,6 +397,13 @@ impl Render for ConfigMapList {
               .on_click(cx.listener(|this, _ev, window, cx| this.toggle_search(window, cx))),
           )
           .child(
+            Button::new("cm-new")
+              .icon(IconName::Plus)
+              .ghost()
+              .compact()
+              .on_click(cx.listener(|this, _ev, window, cx| this.open_create_form(window, cx))),
+          )
+          .child(
             Button::new("cm-toolbar-actions")
               .icon(IconName::Ellipsis)
               .ghost()
@@ -384,6 +417,28 @@ impl Render for ConfigMapList {
               }),
           ),
       );
+
+    let create_panel = self.create_form.as_ref().map(|form| {
+      render_kv_create_form(
+        form,
+        "New ConfigMap",
+        |this: &mut Self, w, cx| {
+          if let Some(ref mut form) = this.create_form {
+            form.add_row(w, cx);
+            cx.notify();
+          }
+        },
+        |this: &mut Self, idx, cx| {
+          if let Some(ref mut form) = this.create_form {
+            form.remove_row(idx);
+            cx.notify();
+          }
+        },
+        |this: &mut Self, _w, cx| this.submit_create_form(cx),
+        |this: &mut Self, _w, cx| this.close_create_form(cx),
+        cx,
+      )
+    });
 
     let search_bar = if search_visible {
       Some(
@@ -442,6 +497,7 @@ impl Render for ConfigMapList {
       .overflow_hidden()
       .child(toolbar)
       .children(search_bar)
+      .children(create_panel)
       .child(
         div()
           .id("configmaps-list-scroll")

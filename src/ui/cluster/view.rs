@@ -202,7 +202,8 @@ impl ClusterView {
               .text_xs()
               .text_color(colors.muted_foreground)
               .child("AGE"),
-          );
+          )
+          .child(div().w(px(28.)));
 
         let mut rows = v_flex().w_full().min_w(px(960.));
         for n in &items {
@@ -211,95 +212,131 @@ impl ClusterView {
           } else {
             colors.danger
           };
-          rows = rows.child(
-            h_flex()
-              .w_full()
-              .px(px(12.))
-              .py(px(8.))
-              .gap(px(8.))
-              .items_center()
-              .border_b_1()
-              .border_color(colors.border)
-              .child(
-                div()
-                  .flex_1()
-                  .min_w(px(200.))
-                  .text_sm()
-                  .text_color(colors.foreground)
-                  .text_ellipsis()
-                  .overflow_hidden()
-                  .whitespace_nowrap()
-                  .child(n.name.clone()),
-              )
-              .child(
-                div()
-                  .w(px(80.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(status_color)
-                  .child(n.status.clone()),
-              )
-              .child(
-                div()
-                  .w(px(120.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child(if n.roles.is_empty() {
-                    "—".to_string()
-                  } else {
-                    n.roles.join(",")
-                  }),
-              )
-              .child(
-                div()
-                  .w(px(100.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child(n.version.clone()),
-              )
-              .child(
-                div()
-                  .w(px(80.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.foreground)
-                  .child(n.cpu_allocatable.clone()),
-              )
-              .child(
-                div()
-                  .w(px(100.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.foreground)
-                  .child(n.mem_allocatable.clone()),
-              )
-              .child(
-                div()
-                  .w(px(120.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child(n.internal_ip.clone().unwrap_or_else(|| "—".to_string())),
-              )
-              .child(
-                div()
-                  .w(px(80.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child(format!("{}/{}", n.os, n.arch)),
-              )
-              .child(
-                div()
-                  .w(px(60.))
-                  .flex_shrink_0()
-                  .text_xs()
-                  .text_color(colors.muted_foreground)
-                  .child(n.age.clone()),
-              ),
-          );
+          let node_name = n.name.clone();
+          let unschedulable = n.unschedulable;
+          let display_status = if unschedulable {
+            format!("{} (cordoned)", n.status)
+          } else {
+            n.status.clone()
+          };
+          rows =
+            rows.child(
+              h_flex()
+                .w_full()
+                .px(px(12.))
+                .py(px(8.))
+                .gap(px(8.))
+                .items_center()
+                .border_b_1()
+                .border_color(colors.border)
+                .child(
+                  div()
+                    .flex_1()
+                    .min_w(px(200.))
+                    .text_sm()
+                    .text_color(colors.foreground)
+                    .text_ellipsis()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(n.name.clone()),
+                )
+                .child(
+                  div()
+                    .w(px(80.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(status_color)
+                    .child(display_status),
+                )
+                .child(
+                  div()
+                    .w(px(120.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(colors.muted_foreground)
+                    .child(if n.roles.is_empty() {
+                      "—".to_string()
+                    } else {
+                      n.roles.join(",")
+                    }),
+                )
+                .child(
+                  div()
+                    .w(px(100.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(colors.muted_foreground)
+                    .child(n.version.clone()),
+                )
+                .child(
+                  div()
+                    .w(px(80.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(colors.foreground)
+                    .child(n.cpu_allocatable.clone()),
+                )
+                .child(
+                  div()
+                    .w(px(100.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(colors.foreground)
+                    .child(n.mem_allocatable.clone()),
+                )
+                .child(
+                  div()
+                    .w(px(120.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(colors.muted_foreground)
+                    .child(n.internal_ip.clone().unwrap_or_else(|| "—".to_string())),
+                )
+                .child(
+                  div()
+                    .w(px(80.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(colors.muted_foreground)
+                    .child(format!("{}/{}", n.os, n.arch)),
+                )
+                .child(
+                  div()
+                    .w(px(60.))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(colors.muted_foreground)
+                    .child(n.age.clone()),
+                )
+                .child(
+                  Button::new(SharedString::from(format!("node-menu-{node_name}")))
+                    .icon(IconName::Ellipsis)
+                    .ghost()
+                    .xsmall()
+                    .dropdown_menu({
+                      let n_name = node_name.clone();
+                      move |menu, _, _| {
+                        let n_for_cordon = n_name.clone();
+                        let n_for_drain = n_name.clone();
+                        let cordon_label = if unschedulable { "Uncordon" } else { "Cordon" };
+                        menu
+                          .item(PopupMenuItem::new(cordon_label).on_click(move |_, _, cx| {
+                            if unschedulable {
+                              services::uncordon_node(n_for_cordon.clone(), cx);
+                            } else {
+                              services::cordon_node(n_for_cordon.clone(), cx);
+                            }
+                          }))
+                          .separator()
+                          .item(PopupMenuItem::new("Drain").icon(Icon::new(AppIcon::Trash)).on_click(
+                            move |_, _, cx| {
+                              services::drain_node(n_for_drain.clone(), cx);
+                            },
+                          ))
+                      }
+                    }),
+                ),
+            );
         }
         div().size_full().child(
           div().id("nodes-h-scroll").size_full().overflow_x_scroll().child(

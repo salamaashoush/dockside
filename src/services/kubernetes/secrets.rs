@@ -107,6 +107,39 @@ pub fn apply_secret_yaml(name: String, namespace: String, yaml: String, cx: &mut
   .detach();
 }
 
+pub fn create_secret(name: String, namespace: String, entries: Vec<(String, String)>, cx: &mut App) {
+  let task_id = start_task(cx, format!("Creating secret '{name}'..."));
+  let disp = dispatcher(cx);
+  let label = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.create_secret(&name, &namespace, &entries).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Secret '{label}' created"),
+          });
+        });
+        refresh_secrets(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to create secret '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn delete_secret(name: String, namespace: String, cx: &mut App) {
   let task_id = start_task(cx, format!("Deleting secret '{name}'..."));
   let disp = dispatcher(cx);

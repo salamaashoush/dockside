@@ -97,6 +97,83 @@ pub fn create_namespace(name: String, cx: &mut App) {
   .detach();
 }
 
+pub fn cordon_node(name: String, cx: &mut App) {
+  set_node_unschedulable(name, true, cx);
+}
+
+pub fn uncordon_node(name: String, cx: &mut App) {
+  set_node_unschedulable(name, false, cx);
+}
+
+fn set_node_unschedulable(name: String, unschedulable: bool, cx: &mut App) {
+  let label = name.clone();
+  let action = if unschedulable { "Cordoning" } else { "Uncordoning" };
+  let task_id = start_task(cx, format!("{action} node '{name}'..."));
+  let disp = dispatcher(cx);
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.set_node_unschedulable(&name, unschedulable).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        let verb = if unschedulable { "cordoned" } else { "uncordoned" };
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Node '{label}' {verb}"),
+          });
+        });
+        refresh_nodes(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to update node '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+pub fn drain_node(name: String, cx: &mut App) {
+  let label = name.clone();
+  let task_id = start_task(cx, format!("Draining node '{name}'..."));
+  let disp = dispatcher(cx);
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.drain_node(&name).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(count) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Node '{label}' drained ({count} pods evicted)"),
+          });
+        });
+        refresh_nodes(cx);
+        super::pods::refresh_pods(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to drain node '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
 pub fn delete_namespace(name: String, cx: &mut App) {
   let task_id = start_task(cx, format!("Deleting namespace '{name}'..."));
   let disp = dispatcher(cx);
