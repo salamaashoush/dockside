@@ -60,8 +60,10 @@ pub fn open_pull_image_dialog(window: &mut Window, cx: &mut App) {
 }
 
 /// Opens the Build Image dialog with a Build button configured.
-/// Streams build output into a fresh `LogStream` rendered in a new
-/// dialog body using the same `TerminalView` we use for container logs.
+/// On Build, the form dialog closes and a streaming output dialog
+/// opens with a libghostty-backed terminal viewer that follows the
+/// build log live (selection / copy / colors all work the same as
+/// container logs).
 pub fn open_build_image_dialog(window: &mut Window, cx: &mut App) {
   let dialog_entity = cx.new(BuildImageDialog::new);
 
@@ -85,15 +87,11 @@ pub fn open_build_image_dialog(window: &mut Window, cx: &mut App) {
                 if opts.context_dir.is_empty() || opts.tag.is_empty() {
                   return;
                 }
-                // Output goes into a new `LogStream`. We don't show it
-                // in this dialog (the dialog closes); instead the
-                // streaming task pipes bytes into the stream and the
-                // user can wire it into a viewer separately. For now,
-                // surface progress via the existing task bar.
                 let log_stream = match crate::terminal::LogStream::new(120, 40) {
                   Ok(s) => std::sync::Arc::new(s),
                   Err(_) => return,
                 };
+                let tag = opts.tag.clone();
                 services::build_image(
                   opts.context_dir,
                   opts.dockerfile,
@@ -103,11 +101,46 @@ pub fn open_build_image_dialog(window: &mut Window, cx: &mut App) {
                   opts.platform.as_docker_arg().map(String::from),
                   opts.no_cache,
                   opts.pull,
-                  log_stream,
+                  log_stream.clone(),
                   cx,
                 );
                 window.close_dialog(cx);
+                open_build_output_dialog(tag, log_stream, window, cx);
               }
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
+/// Show streaming build output in a dialog. Holds a `TerminalView`
+/// driven by the supplied `LogStream`.
+pub fn open_build_output_dialog(
+  tag: String,
+  log_stream: std::sync::Arc<crate::terminal::LogStream>,
+  window: &mut Window,
+  cx: &mut App,
+) {
+  let view = cx.new(|cx| crate::terminal::TerminalView::for_log_stream(log_stream, cx));
+  window.open_dialog(cx, move |dialog, _window, _cx| {
+    dialog
+      .title(format!("Building {tag}"))
+      .min_w(px(900.))
+      .min_h(px(520.))
+      .child(
+        v_flex()
+          .w_full()
+          .h(px(480.))
+          .child(div().size_full().child(view.clone())),
+      )
+      .footer(move |_dialog_state, _, _window, _cx| {
+        vec![
+          Button::new("close")
+            .label("Close")
+            .ghost()
+            .on_click(|_ev, window, cx| {
+              window.close_dialog(cx);
             })
             .into_any_element(),
         ]

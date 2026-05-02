@@ -152,27 +152,52 @@ fn run_actor(
     max_scroll,
   );
 
-  while let Ok(cmd) = cmd_rx.recv() {
-    match cmd {
-      Cmd::Bytes(bytes) => terminal.vt_write(&bytes),
-      Cmd::Resize { cols, rows } => {
-        if cols == current_cols && rows == current_rows {
-          continue;
+  // Batch all immediately-available commands before taking a snapshot.
+  // Streaming bollard / kube logs deliver hundreds of chunks at once
+  // during the initial backfill — snapshotting per-chunk would push
+  // each intermediate cursor position into the UI and the user sees
+  // the buffer scroll through every line. Drain the queue first, then
+  // produce a single snapshot showing the final state.
+  let mut shutdown = false;
+  while !shutdown {
+    let first = match cmd_rx.recv() {
+      Ok(c) => c,
+      Err(_) => break,
+    };
+    let mut batch: Vec<Cmd> = vec![first];
+    while let Ok(more) = cmd_rx.try_recv() {
+      batch.push(more);
+    }
+
+    for cmd in batch {
+      match cmd {
+        Cmd::Bytes(bytes) => terminal.vt_write(&bytes),
+        Cmd::Resize { cols, rows } => {
+          if cols == current_cols && rows == current_rows {
+            continue;
+          }
+          if let Err(e) = terminal.resize(cols, rows, CELL_PIXEL_W, CELL_PIXEL_H) {
+            tracing::warn!(target: "dockside.logstream", err = ?e, "resize failed");
+            continue;
+          }
+          current_cols = cols;
+          current_rows = rows;
         }
-        if let Err(e) = terminal.resize(cols, rows, CELL_PIXEL_W, CELL_PIXEL_H) {
-          tracing::warn!(target: "dockside.logstream", err = ?e, "resize failed");
-          continue;
+        Cmd::ScrollDelta(delta) => {
+          terminal.scroll_viewport(ScrollViewport::Delta(delta));
         }
-        current_cols = cols;
-        current_rows = rows;
+        Cmd::ScrollToBottom => {
+          terminal.scroll_viewport(ScrollViewport::Bottom);
+        }
+        Cmd::Shutdown => {
+          shutdown = true;
+          break;
+        }
       }
-      Cmd::ScrollDelta(delta) => {
-        terminal.scroll_viewport(ScrollViewport::Delta(delta));
-      }
-      Cmd::ScrollToBottom => {
-        terminal.scroll_viewport(ScrollViewport::Bottom);
-      }
-      Cmd::Shutdown => break,
+    }
+
+    if shutdown {
+      break;
     }
 
     if let Err(err) = snapshot_into(

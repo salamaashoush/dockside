@@ -131,6 +131,17 @@ pub struct ContainerCreateConfig {
   pub memory_swap_bytes: Option<i64>,
   /// Max number of pids inside the container.
   pub pids_limit: Option<i64>,
+  /// Healthcheck command. First element is interpreted (CMD-SHELL by
+  /// default) when wrapping in a shell; bollard expects the raw argv.
+  pub healthcheck_cmd: Option<Vec<String>>,
+  /// Interval between healthcheck attempts (nanoseconds, 0 = default).
+  pub healthcheck_interval_ns: Option<i64>,
+  /// Per-attempt timeout (nanoseconds, 0 = default).
+  pub healthcheck_timeout_ns: Option<i64>,
+  /// Initial start period before failures count (nanoseconds, 0 = default).
+  pub healthcheck_start_period_ns: Option<i64>,
+  /// Number of retries before marking unhealthy.
+  pub healthcheck_retries: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -531,6 +542,27 @@ impl DockerClient {
       Some(cfg.labels.iter().cloned().collect())
     };
 
+    // Healthcheck.
+    let healthcheck = cfg.healthcheck_cmd.as_ref().map(|argv| {
+      // Wrap in CMD-SHELL only when the user gave a single string;
+      // otherwise pass argv through as-is.
+      let test = if argv.len() == 1 {
+        vec!["CMD-SHELL".to_string(), argv[0].clone()]
+      } else {
+        let mut v = vec!["CMD".to_string()];
+        v.extend(argv.iter().cloned());
+        v
+      };
+      bollard::models::HealthConfig {
+        test: Some(test),
+        interval: cfg.healthcheck_interval_ns,
+        timeout: cfg.healthcheck_timeout_ns,
+        retries: cfg.healthcheck_retries,
+        start_period: cfg.healthcheck_start_period_ns,
+        ..Default::default()
+      }
+    });
+
     // Build container config
     let config = ContainerCreateBody {
       image: Some(cfg.image.clone()),
@@ -542,6 +574,7 @@ impl DockerClient {
       host_config: Some(host_config),
       hostname: cfg.hostname,
       labels,
+      healthcheck,
       ..Default::default()
     };
 

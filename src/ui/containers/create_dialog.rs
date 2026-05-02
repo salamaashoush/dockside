@@ -204,6 +204,12 @@ pub struct CreateContainerOptions {
   pub memory_bytes: Option<i64>,
   pub memory_swap_bytes: Option<i64>,
   pub pids_limit: Option<i64>,
+  /// Healthcheck argv (single element = shell command via CMD-SHELL).
+  pub healthcheck_cmd: Option<Vec<String>>,
+  pub healthcheck_interval_ns: Option<i64>,
+  pub healthcheck_timeout_ns: Option<i64>,
+  pub healthcheck_start_period_ns: Option<i64>,
+  pub healthcheck_retries: Option<i64>,
 }
 
 /// Dialog for creating a new container
@@ -257,6 +263,11 @@ pub struct CreateContainerDialog {
   labels: Vec<(String, String)>,
   label_key_input: Option<Entity<InputState>>,
   label_value_input: Option<Entity<InputState>>,
+  healthcheck_cmd_input: Option<Entity<InputState>>,
+  healthcheck_interval_input: Option<Entity<InputState>>,
+  healthcheck_timeout_input: Option<Entity<InputState>>,
+  healthcheck_start_period_input: Option<Entity<InputState>>,
+  healthcheck_retries_input: Option<Entity<InputState>>,
 }
 
 impl CreateContainerDialog {
@@ -297,6 +308,11 @@ impl CreateContainerDialog {
       labels: Vec::new(),
       label_key_input: None,
       label_value_input: None,
+      healthcheck_cmd_input: None,
+      healthcheck_interval_input: None,
+      healthcheck_timeout_input: None,
+      healthcheck_start_period_input: None,
+      healthcheck_retries_input: None,
     }
   }
 
@@ -380,6 +396,21 @@ impl CreateContainerDialog {
     }
     if self.label_value_input.is_none() {
       self.label_value_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("Value")));
+    }
+    if self.healthcheck_cmd_input.is_none() {
+      self.healthcheck_cmd_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("e.g. curl -f http://localhost/")));
+    }
+    if self.healthcheck_interval_input.is_none() {
+      self.healthcheck_interval_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("seconds")));
+    }
+    if self.healthcheck_timeout_input.is_none() {
+      self.healthcheck_timeout_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("seconds")));
+    }
+    if self.healthcheck_start_period_input.is_none() {
+      self.healthcheck_start_period_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("seconds")));
+    }
+    if self.healthcheck_retries_input.is_none() {
+      self.healthcheck_retries_input = Some(cx.new(|cx| InputState::new(window, cx).placeholder("count")));
     }
   }
 
@@ -511,6 +542,49 @@ impl CreateContainerDialog {
       memory_bytes,
       memory_swap_bytes,
       pids_limit,
+      healthcheck_cmd: {
+        let txt = self
+          .healthcheck_cmd_input
+          .as_ref()
+          .map(|s| s.read(cx).text().to_string())
+          .unwrap_or_default();
+        if txt.trim().is_empty() {
+          None
+        } else {
+          Some(vec![txt])
+        }
+      },
+      healthcheck_interval_ns: {
+        self
+          .healthcheck_interval_input
+          .as_ref()
+          .and_then(|s| s.read(cx).text().to_string().parse::<f64>().ok())
+          .filter(|n| *n > 0.0)
+          .map(|n| (n * 1_000_000_000.0) as i64)
+      },
+      healthcheck_timeout_ns: {
+        self
+          .healthcheck_timeout_input
+          .as_ref()
+          .and_then(|s| s.read(cx).text().to_string().parse::<f64>().ok())
+          .filter(|n| *n > 0.0)
+          .map(|n| (n * 1_000_000_000.0) as i64)
+      },
+      healthcheck_start_period_ns: {
+        self
+          .healthcheck_start_period_input
+          .as_ref()
+          .and_then(|s| s.read(cx).text().to_string().parse::<f64>().ok())
+          .filter(|n| *n > 0.0)
+          .map(|n| (n * 1_000_000_000.0) as i64)
+      },
+      healthcheck_retries: {
+        self
+          .healthcheck_retries_input
+          .as_ref()
+          .and_then(|s| s.read(cx).text().to_string().parse::<i64>().ok())
+          .filter(|n| *n > 0)
+      },
     }
   }
 
@@ -1031,6 +1105,11 @@ impl CreateContainerDialog {
     let pids = self.pids_limit_input.clone().unwrap();
     let label_key = self.label_key_input.clone().unwrap();
     let label_value = self.label_value_input.clone().unwrap();
+    let hc_cmd = self.healthcheck_cmd_input.clone().unwrap();
+    let hc_interval = self.healthcheck_interval_input.clone().unwrap();
+    let hc_timeout = self.healthcheck_timeout_input.clone().unwrap();
+    let hc_start = self.healthcheck_start_period_input.clone().unwrap();
+    let hc_retries = self.healthcheck_retries_input.clone().unwrap();
 
     let _ = cx;
 
@@ -1148,6 +1227,37 @@ impl CreateContainerDialog {
             })),
         ),
     );
+
+    col = col
+      .child(
+        div()
+          .px(px(16.))
+          .py(px(8.))
+          .mt(px(4.))
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("Healthcheck (CMD-SHELL)"),
+      )
+      .child(row(
+        "Command",
+        div().flex_1().child(Input::new(&hc_cmd).small()).into_any_element(),
+      ))
+      .child(row(
+        "Interval",
+        div().w(px(140.)).child(Input::new(&hc_interval).small()).into_any_element(),
+      ))
+      .child(row(
+        "Timeout",
+        div().w(px(140.)).child(Input::new(&hc_timeout).small()).into_any_element(),
+      ))
+      .child(row(
+        "Start period",
+        div().w(px(140.)).child(Input::new(&hc_start).small()).into_any_element(),
+      ))
+      .child(row(
+        "Retries",
+        div().w(px(140.)).child(Input::new(&hc_retries).small()).into_any_element(),
+      ));
 
     col
   }

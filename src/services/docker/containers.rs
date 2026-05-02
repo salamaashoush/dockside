@@ -587,6 +587,11 @@ pub fn create_container(options: crate::ui::containers::CreateContainerOptions, 
       memory_bytes: options.memory_bytes,
       memory_swap_bytes: options.memory_swap_bytes,
       pids_limit: options.pids_limit,
+      healthcheck_cmd: options.healthcheck_cmd,
+      healthcheck_interval_ns: options.healthcheck_interval_ns,
+      healthcheck_timeout_ns: options.healthcheck_timeout_ns,
+      healthcheck_start_period_ns: options.healthcheck_start_period_ns,
+      healthcheck_retries: options.healthcheck_retries,
     };
 
     let container_id = docker.create_container(config).await?;
