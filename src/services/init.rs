@@ -99,12 +99,15 @@ pub fn load_initial_data(cx: &mut App) {
       let guard = client_handle.read().await;
       let docker = guard.as_ref().unwrap();
 
-      // Try to get host info for native Docker on Linux
-      // On macOS, Docker runs inside Colima VMs, not natively
-      let host_machine: Option<Machine> = if cfg!(target_os = "linux") {
-        docker.get_system_info().await.ok().map(Machine::Host)
-      } else {
+      // Get host info for the current Docker daemon on every platform
+      // where the daemon is reachable directly (Linux native, Windows
+      // via WSL2 docker, custom remote sockets). On macOS the Docker
+      // daemon lives inside a Colima VM so this is None and the VM
+      // shows up under the Colima section instead.
+      let host_machine: Option<Machine> = if cfg!(target_os = "macos") {
         None
+      } else {
+        docker.get_system_info().await.ok().map(Machine::Host)
       };
 
       let containers = docker.list_containers(true).await.unwrap_or_default();

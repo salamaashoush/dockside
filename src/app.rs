@@ -514,8 +514,11 @@ impl DocksideApp {
     // Colima is required on macOS (where it's the container runtime); on Linux/
     // Windows it's an opt-in feature controlled by Settings.
     let settings = crate::state::settings_state(cx).read(cx).settings.clone();
-    let show_colima = settings.colima_enabled || cfg!(target_os = "macos");
     let show_kubernetes = settings.kubernetes_enabled;
+    // The Machines view always lists at least the Host runtime; Colima
+    // VMs show up as additional rows when Colima is enabled. Don't gate
+    // the menu item behind `colima_enabled`.
+    let _ = settings.colima_enabled;
 
     Sidebar::left()
             .collapsible(false)
@@ -596,20 +599,18 @@ impl DocksideApp {
                     ),
                 )
             })
-            .when(show_colima, |sidebar| {
-                sidebar.child(
-                    SidebarGroup::new("Colima").child(
-                        SidebarMenu::new().child(
-                            SidebarMenuItem::new("Machines")
-                                .icon(AppIcon::Machine)
-                                .active(current_view == CurrentView::Machines)
-                                .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                    crate::services::set_view(CurrentView::Machines, cx);
-                                })),
-                        ),
+            .child(
+                SidebarGroup::new("Runtimes").child(
+                    SidebarMenu::new().child(
+                        SidebarMenuItem::new("Machines")
+                            .icon(AppIcon::Machine)
+                            .active(current_view == CurrentView::Machines)
+                            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                crate::services::set_view(CurrentView::Machines, cx);
+                            })),
                     ),
-                )
-            })
+                ),
+            )
             .child(
                 SidebarGroup::new("General").child(
                     SidebarMenu::new()
