@@ -1,4 +1,4 @@
-use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Hsla, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Hsla, PathPromptOptions, Render, Styled, Timer, Window, div, prelude::*, px};
 use gpui_component::{
   IndexPath, Sizable, h_flex,
   button::{Button, ButtonVariants},
@@ -361,7 +361,44 @@ impl Render for BuildImageDialog {
       .when_some(lint_banner, ParentElement::child)
       .child(row(
         "Context dir",
-        div().w(px(360.)).child(Input::new(&context_input).small()).into_any_element(),
+        h_flex()
+          .gap(px(6.))
+          .w(px(360.))
+          .child(div().flex_1().child(Input::new(&context_input).small()))
+          .child(
+            Button::new("ctx-browse")
+              .label("Browse")
+              .ghost()
+              .small()
+              .on_click({
+                let ctx_input = context_input.clone();
+                move |_ev, window, cx| {
+                  let opts = PathPromptOptions {
+                    files: false,
+                    directories: true,
+                    multiple: false,
+                    prompt: Some("Select build context".into()),
+                  };
+                  let rx = cx.prompt_for_paths(opts);
+                  let ctx_input = ctx_input.clone();
+                  let window_handle = window.window_handle();
+                  cx.spawn(async move |cx| {
+                    if let Ok(Ok(Some(paths))) = rx.await
+                      && let Some(p) = paths.into_iter().next()
+                    {
+                      let path_str = p.display().to_string();
+                      let _ = cx.update_window(window_handle, |_root, window, cx| {
+                        ctx_input.update(cx, |state, cx| {
+                          state.set_value(path_str.clone(), window, cx);
+                        });
+                      });
+                    }
+                  })
+                  .detach();
+                }
+              }),
+          )
+          .into_any_element(),
         colors.border,
         colors.foreground,
       ))
