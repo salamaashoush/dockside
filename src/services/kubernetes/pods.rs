@@ -121,6 +121,8 @@ pub fn set_namespace(namespace: String, cx: &mut App) {
   super::daemonsets::refresh_daemonsets(cx);
   super::jobs::refresh_jobs(cx);
   super::cronjobs::refresh_cronjobs(cx);
+  super::ingresses::refresh_ingresses(cx);
+  super::pvcs::refresh_pvcs(cx);
 }
 
 /// Delete a pod

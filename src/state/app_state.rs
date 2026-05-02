@@ -10,7 +10,9 @@ pub enum CurrentView {
   Networks,
   Workloads,
   Pods,
+  Networking,
   Services,
+  Ingresses,
   Deployments,
   StatefulSets,
   DaemonSets,
@@ -19,6 +21,7 @@ pub enum CurrentView {
   Config,
   Secrets,
   ConfigMaps,
+  Pvcs,
   Machines,
   /// AI Models — only constructed on macOS aarch64 (sidebar + palette
   /// gated), but variant is always defined so match arms compile on
@@ -104,7 +107,9 @@ mod tests {
       CurrentView::Workloads,
       CurrentView::Config,
       CurrentView::Pods,
+      CurrentView::Networking,
       CurrentView::Services,
+      CurrentView::Ingresses,
       CurrentView::Deployments,
       CurrentView::StatefulSets,
       CurrentView::DaemonSets,
@@ -112,12 +117,13 @@ mod tests {
       CurrentView::CronJobs,
       CurrentView::Secrets,
       CurrentView::ConfigMaps,
+      CurrentView::Pvcs,
       CurrentView::Machines,
       CurrentView::Models,
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 20);
+    assert_eq!(views.len(), 23);
   }
 
   #[test]

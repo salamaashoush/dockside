@@ -3,7 +3,8 @@ use gpui::{App, AppContext, Entity, EventEmitter, Global};
 use crate::colima::{ColimaVm, Machine, MachineId};
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
 use crate::kubernetes::{
-  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, JobInfo, PodInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, IngressInfo, JobInfo, PodInfo, PvcInfo, SecretInfo,
+  ServiceInfo, StatefulSetInfo,
 };
 
 use super::app_state::CurrentView;
@@ -330,6 +331,8 @@ pub enum StateChanged {
   DaemonSetsUpdated,
   JobsUpdated,
   CronJobsUpdated,
+  IngressesUpdated,
+  PvcsUpdated,
 
   // ConfigMaps
   ConfigMapsUpdated,
@@ -380,6 +383,8 @@ pub struct DockerState {
   pub daemonsets: Vec<DaemonSetInfo>,
   pub jobs: Vec<JobInfo>,
   pub cronjobs: Vec<CronJobInfo>,
+  pub ingresses: Vec<IngressInfo>,
+  pub pvcs: Vec<PvcInfo>,
   pub namespaces: Vec<String>,
   pub selected_namespace: String,
   pub k8s_available: bool,
@@ -411,6 +416,8 @@ pub struct DockerState {
   pub daemonsets_state: LoadState,
   pub jobs_state: LoadState,
   pub cronjobs_state: LoadState,
+  pub ingresses_state: LoadState,
+  pub pvcs_state: LoadState,
   pub machines_state: LoadState,
 }
 
@@ -432,6 +439,8 @@ impl DockerState {
       daemonsets: Vec::new(),
       jobs: Vec::new(),
       cronjobs: Vec::new(),
+      ingresses: Vec::new(),
+      pvcs: Vec::new(),
       namespaces: vec!["default".to_string()],
       selected_namespace: "all".to_string(),
       k8s_available: false,
@@ -454,6 +463,8 @@ impl DockerState {
       daemonsets_state: LoadState::NotLoaded,
       jobs_state: LoadState::NotLoaded,
       cronjobs_state: LoadState::NotLoaded,
+      ingresses_state: LoadState::NotLoaded,
+      pvcs_state: LoadState::NotLoaded,
       deployments_state: LoadState::NotLoaded,
       machines_state: LoadState::NotLoaded,
     }

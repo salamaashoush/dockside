@@ -424,6 +424,115 @@ impl DaemonSetInfo {
 }
 
 // ============================================================================
+// Ingress + PVC Types
+// ============================================================================
+
+#[derive(Debug, Clone)]
+pub struct IngressInfo {
+  pub name: String,
+  pub namespace: String,
+  pub class_name: Option<String>,
+  pub hosts: Vec<String>,
+  pub addresses: Vec<String>,
+  pub age: String,
+  #[allow(dead_code)]
+  pub labels: HashMap<String, String>,
+}
+
+impl IngressInfo {
+  pub fn from_ingress(ing: &k8s_openapi::api::networking::v1::Ingress) -> Self {
+    let metadata = &ing.metadata;
+    let spec = ing.spec.as_ref();
+    let status = ing.status.as_ref();
+
+    let name = metadata.name.clone().unwrap_or_default();
+    let namespace = metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+    let labels: HashMap<String, String> = metadata.labels.clone().unwrap_or_default().into_iter().collect();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+
+    let class_name = spec.and_then(|s| s.ingress_class_name.clone());
+    let hosts: Vec<String> = spec
+      .and_then(|s| s.rules.as_ref())
+      .map(|rules| rules.iter().filter_map(|r| r.host.clone()).collect())
+      .unwrap_or_default();
+    let addresses: Vec<String> = status
+      .and_then(|s| s.load_balancer.as_ref())
+      .and_then(|lb| lb.ingress.as_ref())
+      .map(|ings| {
+        ings
+          .iter()
+          .filter_map(|i| i.hostname.clone().or_else(|| i.ip.clone()))
+          .collect()
+      })
+      .unwrap_or_default();
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+
+    Self {
+      name,
+      namespace,
+      class_name,
+      hosts,
+      addresses,
+      age,
+      labels,
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct PvcInfo {
+  pub name: String,
+  pub namespace: String,
+  pub status: String,
+  #[allow(dead_code)]
+  pub volume_name: Option<String>,
+  pub capacity: String,
+  pub access_modes: Vec<String>,
+  pub storage_class: Option<String>,
+  pub age: String,
+  #[allow(dead_code)]
+  pub labels: HashMap<String, String>,
+}
+
+impl PvcInfo {
+  pub fn from_pvc(pvc: &k8s_openapi::api::core::v1::PersistentVolumeClaim) -> Self {
+    let metadata = &pvc.metadata;
+    let spec = pvc.spec.as_ref();
+    let status = pvc.status.as_ref();
+
+    let name = metadata.name.clone().unwrap_or_default();
+    let namespace = metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+    let labels: HashMap<String, String> = metadata.labels.clone().unwrap_or_default().into_iter().collect();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+
+    let phase = status
+      .and_then(|s| s.phase.clone())
+      .unwrap_or_else(|| "Unknown".to_string());
+    let volume_name = spec.and_then(|s| s.volume_name.clone());
+    let capacity = status
+      .and_then(|s| s.capacity.as_ref())
+      .and_then(|cap| cap.get("storage"))
+      .map(|q| q.0.clone())
+      .unwrap_or_default();
+    let access_modes = spec.and_then(|s| s.access_modes.clone()).unwrap_or_default();
+    let storage_class = spec.and_then(|s| s.storage_class_name.clone());
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+
+    Self {
+      name,
+      namespace,
+      status: phase,
+      volume_name,
+      capacity,
+      access_modes,
+      storage_class,
+      age,
+      labels,
+    }
+  }
+}
+
+// ============================================================================
 // Job + CronJob Types
 // ============================================================================
 

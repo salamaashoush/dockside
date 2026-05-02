@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
-use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, Secret};
+use k8s_openapi::api::core::v1::{ConfigMap, Namespace, PersistentVolumeClaim, Pod, Secret};
+use k8s_openapi::api::networking::v1::Ingress;
 use kube::{
   Api, Client, Config,
   api::{DeleteParams, ListParams, LogParams, Patch, PatchParams, PostParams},
@@ -16,8 +17,8 @@ use k8s_openapi::api::core::v1::Service;
 
 use super::diagnostics::first_existing_known_kubeconfig;
 use super::types::{
-  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, JobInfo, NamespaceInfo, PodInfo, SecretInfo, ServiceInfo,
-  StatefulSetInfo,
+  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, IngressInfo, JobInfo, NamespaceInfo, PodInfo, PvcInfo,
+  SecretInfo, ServiceInfo, StatefulSetInfo,
 };
 
 /// Kubernetes client wrapper
@@ -717,6 +718,44 @@ impl KubeClient {
       .await
       .with_context(|| format!("Failed to create job from cronjob {name}"))?;
     Ok(job_name)
+  }
+
+  // ========================================================================
+  // Ingress + PVC Methods
+  // ========================================================================
+
+  pub async fn list_ingresses(&self, namespace: Option<&str>) -> Result<Vec<IngressInfo>> {
+    let items = if let Some(ns) = namespace {
+      let api: Api<Ingress> = Api::namespaced(self.client.clone(), ns);
+      api.list(&ListParams::default()).await?
+    } else {
+      let api: Api<Ingress> = Api::all(self.client.clone());
+      api.list(&ListParams::default()).await?
+    };
+    Ok(items.items.iter().map(IngressInfo::from_ingress).collect())
+  }
+
+  pub async fn delete_ingress(&self, name: &str, namespace: &str) -> Result<()> {
+    let api: Api<Ingress> = Api::namespaced(self.client.clone(), namespace);
+    api.delete(name, &DeleteParams::default()).await?;
+    Ok(())
+  }
+
+  pub async fn list_pvcs(&self, namespace: Option<&str>) -> Result<Vec<PvcInfo>> {
+    let items = if let Some(ns) = namespace {
+      let api: Api<PersistentVolumeClaim> = Api::namespaced(self.client.clone(), ns);
+      api.list(&ListParams::default()).await?
+    } else {
+      let api: Api<PersistentVolumeClaim> = Api::all(self.client.clone());
+      api.list(&ListParams::default()).await?
+    };
+    Ok(items.items.iter().map(PvcInfo::from_pvc).collect())
+  }
+
+  pub async fn delete_pvc(&self, name: &str, namespace: &str) -> Result<()> {
+    let api: Api<PersistentVolumeClaim> = Api::namespaced(self.client.clone(), namespace);
+    api.delete(name, &DeleteParams::default()).await?;
+    Ok(())
   }
 
   pub async fn read_configmap_entries(&self, name: &str, namespace: &str) -> Result<Vec<(String, String)>> {

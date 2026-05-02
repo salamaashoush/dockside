@@ -35,11 +35,14 @@ use crate::ui::deployments::DeploymentsView;
 use crate::ui::dialogs;
 use crate::ui::global_search::{GlobalSearch, GlobalSearchEvent};
 use crate::ui::images::ImagesView;
+use crate::ui::ingresses::IngressesView;
 use crate::ui::jobs::JobsView;
 use crate::ui::machines::MachinesView;
 use crate::ui::models::ModelsView;
+use crate::ui::networking::NetworkingView;
 use crate::ui::networks::NetworksView;
 use crate::ui::pods::PodsView;
+use crate::ui::pvcs::PvcsView;
 use crate::ui::secrets::SecretsView;
 use crate::ui::services::ServicesView;
 use crate::ui::settings::SettingsView;
@@ -73,6 +76,9 @@ pub struct DocksideApp {
   cronjobs_view: Entity<CronJobsView>,
   workloads_view: Entity<WorkloadsView>,
   config_resources_view: Entity<ConfigResourcesView>,
+  ingresses_view: Entity<IngressesView>,
+  pvcs_view: Entity<PvcsView>,
+  networking_view: Entity<NetworkingView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
   pending_notifications: Vec<(NotificationType, String)>,
   // Pending setup check result - triggers dialog when set
@@ -169,6 +175,13 @@ impl DocksideApp {
       let s = secrets_view.clone();
       move |_| ConfigResourcesView::new(cm, s)
     });
+    let ingresses_view = cx.new(|cx| IngressesView::new(window, cx));
+    let pvcs_view = cx.new(|cx| PvcsView::new(window, cx));
+    let networking_view = cx.new({
+      let svcs = services_view.clone();
+      let ing = ingresses_view.clone();
+      move |_| NetworkingView::new(svcs, ing)
+    });
 
     // Run setup checks async — only surface the dialog if a *required* piece is
     // missing. Docker is the only universal must-have. Colima is only required
@@ -237,6 +250,9 @@ impl DocksideApp {
       cronjobs_view,
       workloads_view,
       config_resources_view,
+      ingresses_view,
+      pvcs_view,
+      networking_view,
       pending_notifications: Vec::new(),
       pending_setup_check: None,
       focus_handle,
@@ -632,6 +648,10 @@ impl DocksideApp {
                         | CurrentView::Jobs
                         | CurrentView::CronJobs
                 );
+                let networking_active = matches!(
+                    current_view,
+                    CurrentView::Networking | CurrentView::Services | CurrentView::Ingresses
+                );
                 let config_active = matches!(
                     current_view,
                     CurrentView::Config | CurrentView::ConfigMaps | CurrentView::Secrets
@@ -648,11 +668,11 @@ impl DocksideApp {
                                     })),
                             )
                             .child(
-                                SidebarMenuItem::new("Services")
+                                SidebarMenuItem::new("Networking")
                                     .icon(AppIcon::Service)
-                                    .active(current_view == CurrentView::Services)
+                                    .active(networking_active)
                                     .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        crate::services::set_view(CurrentView::Services, cx);
+                                        crate::services::set_view(CurrentView::Networking, cx);
                                     })),
                             )
                             .child(
@@ -661,6 +681,14 @@ impl DocksideApp {
                                     .active(config_active)
                                     .on_click(cx.listener(|_this, _ev, _window, cx| {
                                         crate::services::set_view(CurrentView::Config, cx);
+                                    })),
+                            )
+                            .child(
+                                SidebarMenuItem::new("Storage (PVCs)")
+                                    .icon(IconName::Folder)
+                                    .active(current_view == CurrentView::Pvcs)
+                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                        crate::services::set_view(CurrentView::Pvcs, cx);
                                     })),
                             ),
                     ),
@@ -743,6 +771,9 @@ impl DocksideApp {
       CurrentView::CronJobs => div().size_full().child(self.cronjobs_view.clone()),
       CurrentView::Workloads => div().size_full().child(self.workloads_view.clone()),
       CurrentView::Config => div().size_full().child(self.config_resources_view.clone()),
+      CurrentView::Networking => div().size_full().child(self.networking_view.clone()),
+      CurrentView::Ingresses => div().size_full().child(self.ingresses_view.clone()),
+      CurrentView::Pvcs => div().size_full().child(self.pvcs_view.clone()),
     }
   }
 
