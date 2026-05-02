@@ -4,6 +4,7 @@ use gpui_component::{
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
+  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -1053,64 +1054,67 @@ impl ContainerDetail {
       .child(
         h_flex()
           .gap(px(8.))
-          .when(!is_running, |el| {
+          .child({
             let on_start = on_start.clone();
-            let id = container_id.clone();
-            el.child(
-              Button::new("start")
-                .icon(Icon::new(AppIcon::Play))
-                .label("Start")
-                .ghost()
-                .compact()
-                .on_click(move |_ev, window, cx| {
-                  if let Some(ref cb) = on_start {
-                    cb(&id, window, cx);
-                  }
-                }),
-            )
-          })
-          .when(is_running, |el| {
             let on_stop = on_stop.clone();
-            let id = container_id_for_stop.clone();
-            el.child(
-              Button::new("stop")
-                .icon(Icon::new(AppIcon::Stop))
-                .label("Stop")
-                .ghost()
-                .compact()
-                .on_click(move |_ev, window, cx| {
-                  if let Some(ref cb) = on_stop {
-                    cb(&id, window, cx);
-                  }
-                }),
-            )
-          })
-          .child({
             let on_restart = on_restart.clone();
-            let id = container_id_for_restart.clone();
-            Button::new("restart")
-              .icon(Icon::new(AppIcon::Restart))
-              .label("Restart")
-              .ghost()
-              .compact()
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_restart {
-                  cb(&id, window, cx);
-                }
-              })
-          })
-          .child({
             let on_delete = on_delete.clone();
-            let id = container_id_for_delete.clone();
-            Button::new("delete")
-              .icon(Icon::new(AppIcon::Trash))
-              .label("Delete")
+            let id_start = container_id.clone();
+            let id_stop = container_id_for_stop.clone();
+            let id_restart = container_id_for_restart.clone();
+            let id_delete = container_id_for_delete.clone();
+            Button::new("container-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_delete {
-                  cb(&id, window, cx);
+              .dropdown_menu(move |menu, _window, _cx| {
+                let mut menu = menu;
+                if !is_running
+                  && let Some(cb) = on_start.clone()
+                {
+                  let id = id_start.clone();
+                  menu = menu.item(
+                    PopupMenuItem::new("Start")
+                      .icon(Icon::new(AppIcon::Play))
+                      .on_click(move |_, window, cx| {
+                        cb(&id, window, cx);
+                      }),
+                  );
                 }
+                if is_running
+                  && let Some(cb) = on_stop.clone()
+                {
+                  let id = id_stop.clone();
+                  menu = menu.item(
+                    PopupMenuItem::new("Stop")
+                      .icon(Icon::new(AppIcon::Stop))
+                      .on_click(move |_, window, cx| {
+                        cb(&id, window, cx);
+                      }),
+                  );
+                }
+                if let Some(cb) = on_restart.clone() {
+                  let id = id_restart.clone();
+                  menu = menu.item(
+                    PopupMenuItem::new("Restart")
+                      .icon(Icon::new(AppIcon::Restart))
+                      .on_click(move |_, window, cx| {
+                        cb(&id, window, cx);
+                      }),
+                  );
+                }
+                menu = menu.separator();
+                if let Some(cb) = on_delete.clone() {
+                  let id = id_delete.clone();
+                  menu = menu.item(
+                    PopupMenuItem::new("Delete")
+                      .icon(Icon::new(AppIcon::Trash))
+                      .on_click(move |_, window, cx| {
+                        cb(&id, window, cx);
+                      }),
+                  );
+                }
+                menu
               })
           }),
       );

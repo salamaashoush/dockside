@@ -1,8 +1,9 @@
 use gpui::{App, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, Selectable,
+  Icon, IconName, Selectable,
   button::{Button, ButtonVariants},
   h_flex,
+  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -498,15 +499,23 @@ impl NetworkDetail {
         let id = network_id.clone();
         el.child(
           h_flex().gap(px(8.)).child(
-            Button::new("delete")
-              .icon(Icon::new(AppIcon::Trash))
-              .label("Delete")
+            Button::new("network-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_delete {
-                  cb(&id, window, cx);
+              .dropdown_menu(move |menu, _window, _cx| {
+                let mut menu = menu;
+                if let Some(cb) = on_delete.clone() {
+                  let id = id.clone();
+                  menu = menu.item(
+                    PopupMenuItem::new("Delete")
+                      .icon(Icon::new(AppIcon::Trash))
+                      .on_click(move |_, window, cx| {
+                        cb(&id, window, cx);
+                      }),
+                  );
                 }
+                menu
               }),
           ),
         )

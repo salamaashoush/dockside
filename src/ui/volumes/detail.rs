@@ -1,9 +1,10 @@
 use gpui::{App, Entity, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, Selectable,
+  Icon, IconName, Selectable,
   button::{Button, ButtonVariants},
   h_flex,
   input::InputState,
+  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -478,15 +479,23 @@ impl VolumeDetail {
       .child(h_flex().gap(px(8.)).child({
         let on_delete = on_delete.clone();
         let name = volume_name_for_delete.clone();
-        Button::new("delete")
-          .icon(Icon::new(AppIcon::Trash))
-          .label("Delete")
+        Button::new("volume-actions")
+          .icon(IconName::Ellipsis)
           .ghost()
           .compact()
-          .on_click(move |_ev, window, cx| {
-            if let Some(ref cb) = on_delete {
-              cb(&name, window, cx);
+          .dropdown_menu(move |menu, _window, _cx| {
+            let mut menu = menu;
+            if let Some(cb) = on_delete.clone() {
+              let name = name.clone();
+              menu = menu.item(
+                PopupMenuItem::new("Delete")
+                  .icon(Icon::new(AppIcon::Trash))
+                  .on_click(move |_, window, cx| {
+                    cb(&name, window, cx);
+                  }),
+              );
             }
+            menu
           })
       }));
 

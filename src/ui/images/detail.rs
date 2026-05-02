@@ -1,8 +1,9 @@
 use gpui::{App, Styled, Window, div, prelude::*, px};
 use gpui_component::{
-  Icon, Selectable,
+  Icon, IconName, Selectable,
   button::{Button, ButtonVariants},
   h_flex,
+  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
   theme::ActiveTheme,
@@ -764,78 +765,77 @@ impl ImageDetail {
           })),
       )
       .child(
-        h_flex()
-          .gap(px(8.))
-          .child({
-            let on_scan = self.on_scan.clone();
-            let id = image_id_for_delete.clone();
-            Button::new("image-scan")
-              .icon(Icon::new(gpui_component::IconName::Eye))
-              .label("Scan")
-              .ghost()
-              .compact()
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_scan {
-                  cb(&id, window, cx);
-                }
-              })
-          })
-          .child({
-            let on_save = self.on_save.clone();
-            let id = image_id_for_delete.clone();
-            Button::new("image-save")
-              .icon(Icon::new(gpui_component::IconName::Inbox))
-              .label("Save")
-              .ghost()
-              .compact()
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_save {
-                  cb(&id, window, cx);
-                }
-              })
-          })
-          .child({
-            let on_tag = self.on_tag.clone();
-            let id = image_id_for_delete.clone();
-            Button::new("image-tag")
-              .icon(Icon::new(AppIcon::Edit))
-              .label("Tag")
-              .ghost()
-              .compact()
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_tag {
-                  cb(&id, window, cx);
-                }
-              })
-          })
-          .child({
-            let on_push = self.on_push.clone();
-            let id = image_id_for_delete.clone();
-            Button::new("image-push")
-              .icon(Icon::new(gpui_component::IconName::ArrowUp))
-              .label("Push")
-              .ghost()
-              .compact()
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_push {
-                  cb(&id, window, cx);
-                }
-              })
-          })
-          .child({
-            let on_delete = on_delete.clone();
-            let id = image_id_for_delete.clone();
-            Button::new("delete")
-              .icon(Icon::new(AppIcon::Trash))
-              .label("Delete")
-              .ghost()
-              .compact()
-              .on_click(move |_ev, window, cx| {
-                if let Some(ref cb) = on_delete {
-                  cb(&id, window, cx);
-                }
-              })
-          }),
+        h_flex().gap(px(8.)).child({
+          let on_scan = self.on_scan.clone();
+          let on_save = self.on_save.clone();
+          let on_tag = self.on_tag.clone();
+          let on_push = self.on_push.clone();
+          let on_delete_menu = on_delete.clone();
+          let id_scan = image_id_for_delete.clone();
+          let id_save = image_id_for_delete.clone();
+          let id_tag = image_id_for_delete.clone();
+          let id_push = image_id_for_delete.clone();
+          let id_delete = image_id_for_delete.clone();
+          Button::new("image-actions")
+            .icon(IconName::Ellipsis)
+            .ghost()
+            .compact()
+            .dropdown_menu(move |menu, _window, _cx| {
+              let mut menu = menu;
+              if let Some(cb) = on_scan.clone() {
+                let id = id_scan.clone();
+                menu = menu.item(
+                  PopupMenuItem::new("Scan")
+                    .icon(Icon::new(IconName::Eye))
+                    .on_click(move |_, window, cx| {
+                      cb(&id, window, cx);
+                    }),
+                );
+              }
+              if let Some(cb) = on_save.clone() {
+                let id = id_save.clone();
+                menu = menu.item(
+                  PopupMenuItem::new("Save")
+                    .icon(Icon::new(IconName::Inbox))
+                    .on_click(move |_, window, cx| {
+                      cb(&id, window, cx);
+                    }),
+                );
+              }
+              if let Some(cb) = on_tag.clone() {
+                let id = id_tag.clone();
+                menu = menu.item(
+                  PopupMenuItem::new("Tag")
+                    .icon(Icon::new(AppIcon::Edit))
+                    .on_click(move |_, window, cx| {
+                      cb(&id, window, cx);
+                    }),
+                );
+              }
+              if let Some(cb) = on_push.clone() {
+                let id = id_push.clone();
+                menu = menu.item(
+                  PopupMenuItem::new("Push")
+                    .icon(Icon::new(IconName::ArrowUp))
+                    .on_click(move |_, window, cx| {
+                      cb(&id, window, cx);
+                    }),
+                );
+              }
+              menu = menu.separator();
+              if let Some(cb) = on_delete_menu.clone() {
+                let id = id_delete.clone();
+                menu = menu.item(
+                  PopupMenuItem::new("Delete")
+                    .icon(Icon::new(AppIcon::Trash))
+                    .on_click(move |_, window, cx| {
+                      cb(&id, window, cx);
+                    }),
+                );
+              }
+              menu
+            })
+        }),
       );
 
     // Content based on active tab
