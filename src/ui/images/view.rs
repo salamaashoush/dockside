@@ -126,7 +126,16 @@ impl ImagesView {
   }
 
   fn on_select_image(&mut self, image: &ImageInfo, cx: &mut Context<'_, Self>) {
-    // Update global selection (single source of truth)
+    // No-op when re-clicking the already-selected row, otherwise the
+    // detail panel briefly clears `inspect_data` and refetches, which
+    // shows up as a flicker.
+    let already_selected = matches!(
+      self.docker_state.read(cx).selection,
+      Selection::Image(ref i) if i.id == image.id
+    );
+    if already_selected {
+      return;
+    }
     self.docker_state.update(cx, |state, _cx| {
       state.set_selection(Selection::Image(image.clone()));
     });

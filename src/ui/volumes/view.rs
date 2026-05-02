@@ -116,7 +116,13 @@ impl VolumesView {
   }
 
   fn on_select_volume(&mut self, volume: &VolumeInfo, cx: &mut Context<'_, Self>) {
-    // Update global selection (single source of truth)
+    let already_selected = matches!(
+      self.docker_state.read(cx).selection,
+      Selection::Volume(ref n) if *n == volume.name
+    );
+    if already_selected {
+      return;
+    }
     self.docker_state.update(cx, |state, _cx| {
       state.set_selection(Selection::Volume(volume.name.clone()));
     });

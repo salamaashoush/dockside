@@ -48,6 +48,13 @@ impl DeploymentsView {
       window,
       |this, _list, event: &DeploymentListEvent, _window, cx| match event {
         DeploymentListEvent::Selected(deployment) => {
+          let already_selected = matches!(
+            this.docker_state.read(cx).selection,
+            Selection::Deployment { ref name, ref namespace } if *name == deployment.name && *namespace == deployment.namespace
+          );
+          if already_selected {
+            return;
+          }
           this.detail.update(cx, |detail, cx| {
             detail.set_deployment(deployment.clone(), cx);
           });

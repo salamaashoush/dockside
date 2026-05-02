@@ -170,135 +170,132 @@ impl ListDelegate for ImageListDelegate {
       }
     });
 
+    let row = ix.row;
+    let section = ix.section;
+    let id_for_menu = image_id.clone();
+    let display = image.display_name();
+    let image_ref = image.repo_tags.first().cloned().unwrap_or_else(|| image.id.clone());
+
+    let menu_button = Button::new(SharedString::from(format!("img-menu-{section}-{row}")))
+      .icon(IconName::Ellipsis)
+      .ghost()
+      .xsmall()
+      .dropdown_menu(move |menu, _window, _cx| {
+        let id_scan = id_for_menu.clone();
+        let ref_scan = image_ref.clone();
+        let ref_save = image_ref.clone();
+        let display_tag = display.clone();
+        let display_push = display.clone();
+        let id_delete = id_for_menu.clone();
+        menu
+          .item(
+            PopupMenuItem::new("Scan")
+              .icon(IconName::Eye)
+              .on_click(move |_, _, cx| {
+                services::scan_image(id_scan.clone(), ref_scan.clone(), cx);
+              }),
+          )
+          .item(
+            PopupMenuItem::new("Save")
+              .icon(IconName::Inbox)
+              .on_click(move |_, window, cx| {
+                prompt_save_image_tarball(ref_save.clone(), window, cx);
+              }),
+          )
+          .item(
+            PopupMenuItem::new("Tag")
+              .icon(Icon::new(AppIcon::Edit))
+              .on_click(move |_, window, cx| {
+                open_tag_image_dialog(display_tag.clone(), window, cx);
+              }),
+          )
+          .item(
+            PopupMenuItem::new("Push")
+              .icon(IconName::ArrowUp)
+              .on_click(move |_, window, cx| {
+                let (image, tag) = display_push.rsplit_once(':').map_or_else(
+                  || (display_push.clone(), "latest".to_string()),
+                  |(i, t)| (i.to_string(), t.to_string()),
+                );
+                open_push_image_dialog(image, tag, window, cx);
+              }),
+          )
+          .separator()
+          .item(
+            PopupMenuItem::new("Delete")
+              .icon(Icon::new(AppIcon::Trash))
+              .on_click(move |_, _, cx| {
+                services::delete_image(id_delete.clone(), cx);
+              }),
+          )
+      });
+
     let item_content = h_flex()
       .w_full()
       .items_center()
-      .gap(px(10.))
+      .justify_between()
+      .gap(px(8.))
       .child(
-        div()
-          .size(px(36.))
-          .flex_shrink_0()
-          .rounded(px(8.))
-          .bg(colors.primary)
-          .flex()
-          .items_center()
-          .justify_center()
-          .child(Icon::new(AppIcon::Image).text_color(colors.background)),
-      )
-      .child(
-        v_flex()
+        h_flex()
           .flex_1()
           .min_w_0()
-          .overflow_hidden()
-          .gap(px(2.))
+          .items_center()
+          .gap(px(10.))
           .child(
             div()
-              .w_full()
-              .overflow_hidden()
-              .text_ellipsis()
-              .child(Label::new(display_name)),
+              .size(px(36.))
+              .flex_shrink_0()
+              .rounded(px(8.))
+              .bg(colors.primary)
+              .flex()
+              .items_center()
+              .justify_center()
+              .child(Icon::new(AppIcon::Image).text_color(colors.background)),
           )
           .child(
-            h_flex()
-              .gap(px(8.))
-              .text_xs()
-              .text_color(colors.muted_foreground)
-              .child(size_text)
-              .child(age_text),
-          ),
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .overflow_hidden()
+              .gap(px(2.))
+              .child(
+                div()
+                  .w_full()
+                  .overflow_hidden()
+                  .text_ellipsis()
+                  .whitespace_nowrap()
+                  .child(Label::new(display_name)),
+              )
+              .child(
+                h_flex()
+                  .gap(px(8.))
+                  .text_xs()
+                  .text_color(colors.muted_foreground)
+                  .child(size_text)
+                  .child(age_text),
+              ),
+          )
+          .when_some(platform, |el, plat| {
+            el.child(
+              div()
+                .flex_shrink_0()
+                .px(px(6.))
+                .py(px(2.))
+                .rounded(px(4.))
+                .bg(colors.primary)
+                .text_xs()
+                .text_color(colors.background)
+                .child(plat),
+            )
+          }),
       )
-      .when_some(platform, |el, plat| {
-        el.child(
-          div()
-            .px(px(6.))
-            .py(px(2.))
-            .rounded(px(4.))
-            .bg(colors.primary)
-            .text_xs()
-            .text_color(colors.background)
-            .child(plat),
-        )
-      });
+      .child(div().flex_shrink_0().child(menu_button));
 
-    let id = image_id.clone();
-    let row = ix.row;
-    let section = ix.section;
-
-    let menu_id = id.clone();
     let item = ListItem::new(ix)
       .py(px(6.))
       .rounded(px(6.))
       .selected(is_selected)
-      .child(item_content)
-      .suffix(move |_, _| {
-        let id = menu_id.clone();
-        div()
-          .size(px(28.))
-          .flex_shrink_0()
-          .flex()
-          .items_center()
-          .justify_center()
-          .child(
-            Button::new(SharedString::from(format!("img-menu-{section}-{row}")))
-              .icon(IconName::Ellipsis)
-              .ghost()
-              .xsmall()
-              .dropdown_menu({
-                let id = id.clone();
-                let display = image.display_name();
-                let image_ref = image.repo_tags.first().cloned().unwrap_or_else(|| image.id.clone());
-                move |menu, _window, _cx| {
-                  let id_scan = id.clone();
-                  let ref_scan = image_ref.clone();
-                  let ref_save = image_ref.clone();
-                  let display_tag = display.clone();
-                  let display_push = display.clone();
-                  let id_delete = id.clone();
-                  menu
-                    .item(
-                      PopupMenuItem::new("Scan")
-                        .icon(IconName::Eye)
-                        .on_click(move |_, _, cx| {
-                          services::scan_image(id_scan.clone(), ref_scan.clone(), cx);
-                        }),
-                    )
-                    .item(
-                      PopupMenuItem::new("Save")
-                        .icon(IconName::Inbox)
-                        .on_click(move |_, window, cx| {
-                          prompt_save_image_tarball(ref_save.clone(), window, cx);
-                        }),
-                    )
-                    .item(
-                      PopupMenuItem::new("Tag")
-                        .icon(Icon::new(AppIcon::Edit))
-                        .on_click(move |_, window, cx| {
-                          open_tag_image_dialog(display_tag.clone(), window, cx);
-                        }),
-                    )
-                    .item(
-                      PopupMenuItem::new("Push")
-                        .icon(IconName::ArrowUp)
-                        .on_click(move |_, window, cx| {
-                          let (image, tag) = display_push.rsplit_once(':').map_or_else(
-                            || (display_push.clone(), "latest".to_string()),
-                            |(i, t)| (i.to_string(), t.to_string()),
-                          );
-                          open_push_image_dialog(image, tag, window, cx);
-                        }),
-                    )
-                    .separator()
-                    .item(
-                      PopupMenuItem::new("Delete")
-                        .icon(Icon::new(AppIcon::Trash))
-                        .on_click(move |_, _, cx| {
-                          services::delete_image(id_delete.clone(), cx);
-                        }),
-                    )
-                }
-              }),
-          )
-      });
+      .child(item_content);
 
     Some(item)
   }

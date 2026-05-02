@@ -40,6 +40,13 @@ impl CronJobsView {
       window,
       |this, _list, event: &CronJobListEvent, _window, cx| match event {
         CronJobListEvent::Selected(item) => {
+          let already_selected = matches!(
+            this.docker_state.read(cx).selection,
+            Selection::CronJob { ref name, ref namespace } if *name == item.name && *namespace == item.namespace
+          );
+          if already_selected {
+            return;
+          }
           this.detail.update(cx, |detail, cx| {
             detail.set_item(item.clone(), cx);
           });

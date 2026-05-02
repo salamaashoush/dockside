@@ -141,81 +141,85 @@ impl ListDelegate for NetworkListDelegate {
     let driver = network.driver.clone();
     let container_count = network.container_count();
 
+    let row = ix.row;
+    let section = ix.section;
+    let id = network_id.clone();
+
+    let menu_button = (!is_system).then(|| {
+      Button::new(SharedString::from(format!("net-menu-{section}-{row}")))
+        .icon(IconName::Ellipsis)
+        .ghost()
+        .xsmall()
+        .dropdown_menu({
+          let id = id.clone();
+          move |menu, _window, _cx| {
+            let id_for_delete = id.clone();
+            menu.item(
+              PopupMenuItem::new("Delete")
+                .icon(Icon::new(AppIcon::Trash))
+                .on_click(move |_, _, cx| {
+                  services::delete_network(id_for_delete.clone(), cx);
+                }),
+            )
+          }
+        })
+    });
+
     let item_content = h_flex()
       .w_full()
       .items_center()
-      .gap(px(10.))
+      .justify_between()
+      .gap(px(8.))
       .child(
-        div()
-          .size(px(36.))
-          .flex_shrink_0()
-          .rounded(px(8.))
-          .bg(colors.primary)
-          .flex()
-          .items_center()
-          .justify_center()
-          .child(Icon::new(AppIcon::Network).text_color(colors.background)),
-      )
-      .child(
-        v_flex()
+        h_flex()
           .flex_1()
           .min_w_0()
-          .overflow_hidden()
-          .gap(px(2.))
-          .child(div().w_full().overflow_hidden().text_ellipsis().child(Label::new(name)))
+          .items_center()
+          .gap(px(10.))
           .child(
-            h_flex()
-              .gap(px(8.))
-              .text_xs()
-              .text_color(colors.muted_foreground)
-              .child(driver)
-              .when(container_count > 0, |el| {
-                el.child(format!("{container_count} containers"))
-              }),
+            div()
+              .size(px(36.))
+              .flex_shrink_0()
+              .rounded(px(8.))
+              .bg(colors.primary)
+              .flex()
+              .items_center()
+              .justify_center()
+              .child(Icon::new(AppIcon::Network).text_color(colors.background)),
+          )
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .overflow_hidden()
+              .gap(px(2.))
+              .child(
+                div()
+                  .w_full()
+                  .overflow_hidden()
+                  .text_ellipsis()
+                  .whitespace_nowrap()
+                  .child(Label::new(name)),
+              )
+              .child(
+                h_flex()
+                  .gap(px(8.))
+                  .text_xs()
+                  .text_color(colors.muted_foreground)
+                  .child(driver)
+                  .when(container_count > 0, |el| {
+                    el.child(format!("{container_count} containers"))
+                  }),
+              ),
           ),
-      );
+      )
+      .when_some(menu_button, |el, btn| el.child(div().flex_shrink_0().child(btn)));
 
-    let id = network_id.clone();
-    let row = ix.row;
-    let section = ix.section;
-
-    let mut item = ListItem::new(ix)
+    let item = ListItem::new(ix)
       .py(px(6.))
       .rounded(px(6.))
       .selected(is_selected)
       .child(item_content);
-
-    // Only show delete button for non-system networks
-    if !is_system {
-      item = item.suffix(move |_, _| {
-        let id = id.clone();
-        div()
-          .size(px(28.))
-          .flex_shrink_0()
-          .flex()
-          .items_center()
-          .justify_center()
-          .child(
-            Button::new(SharedString::from(format!("net-menu-{section}-{row}")))
-              .icon(IconName::Ellipsis)
-              .ghost()
-              .xsmall()
-              .dropdown_menu({
-                let id = id.clone();
-                move |menu, _window, _cx| {
-                  let id_for_delete = id.clone();
-                  menu.item(
-                    PopupMenuItem::new("Delete")
-                      .icon(Icon::new(AppIcon::Trash))
-                      .on_click(move |_, _, cx| {
-                        services::delete_network(id_for_delete.clone(), cx);
-                      }),
-                  )
-                }
-              }),
-          )
-      });
-    }
 
     Some(item)
   }

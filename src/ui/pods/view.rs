@@ -180,7 +180,13 @@ impl PodsView {
   }
 
   fn on_select_pod(&mut self, pod: &PodInfo, window: &mut Window, cx: &mut Context<'_, Self>) {
-    // Update global selection (single source of truth)
+    let already_selected = matches!(
+      self.docker_state.read(cx).selection,
+      Selection::Pod { ref name, ref namespace } if *name == pod.name && *namespace == pod.namespace
+    );
+    if already_selected {
+      return;
+    }
     self.docker_state.update(cx, |state, _cx| {
       state.set_selection(Selection::Pod {
         name: pod.name.clone(),

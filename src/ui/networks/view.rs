@@ -81,7 +81,13 @@ impl NetworksView {
   }
 
   fn on_select_network(&mut self, network: &NetworkInfo, cx: &mut Context<'_, Self>) {
-    // Update global selection (single source of truth)
+    let already_selected = matches!(
+      self.docker_state.read(cx).selection,
+      Selection::Network(ref id) if *id == network.id
+    );
+    if already_selected {
+      return;
+    }
     self.docker_state.update(cx, |state, _cx| {
       state.set_selection(Selection::Network(network.id.clone()));
     });

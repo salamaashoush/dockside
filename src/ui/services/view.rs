@@ -43,6 +43,13 @@ impl ServicesView {
       window,
       |this, _list, event: &ServiceListEvent, _window, cx| match event {
         ServiceListEvent::Selected(service) => {
+          let already_selected = matches!(
+            this.docker_state.read(cx).selection,
+            Selection::Service { ref name, ref namespace } if *name == service.name && *namespace == service.namespace
+          );
+          if already_selected {
+            return;
+          }
           this.detail.update(cx, |detail, cx| {
             detail.set_service(service.as_ref().clone(), cx);
           });

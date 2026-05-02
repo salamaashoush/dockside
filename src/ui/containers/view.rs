@@ -344,7 +344,13 @@ impl ContainersView {
   }
 
   fn on_select_container(&mut self, container: &ContainerInfo, window: &mut Window, cx: &mut Context<'_, Self>) {
-    // Update global selection (single source of truth)
+    let already_selected = matches!(
+      self.docker_state.read(cx).selection,
+      Selection::Container(ref c) if c.id == container.id
+    );
+    if already_selected {
+      return;
+    }
     self.docker_state.update(cx, |state, _cx| {
       state.set_selection(Selection::Container(container.clone()));
     });

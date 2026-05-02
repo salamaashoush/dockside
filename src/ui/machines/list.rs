@@ -101,53 +101,6 @@ impl ListDelegate for MachineListDelegate {
       AppIcon::Machine
     };
 
-    let item_content = h_flex()
-            .w_full()
-            .items_center()
-            .gap(px(10.))
-            .child(
-                div()
-                    .size(px(36.))
-                    .flex_shrink_0()
-                    .rounded(px(8.))
-                    .bg(icon_bg)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(Icon::new(icon).text_color(colors.background)),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .w_full()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(Label::new(machine_name.clone())),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
-                            .child(subtitle),
-                    ),
-            )
-            // Status dot
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .size(px(8.))
-                    .rounded_full()
-                    .bg(status_color),
-            );
-
     // Three-dot menu button - different for Host vs Colima
     let name = machine_name.clone();
     let running = is_running;
@@ -155,219 +108,263 @@ impl ListDelegate for MachineListDelegate {
     let has_k8s = machine.as_colima().is_some_and(|vm| vm.kubernetes);
     let row = ix.row;
 
+    let menu_button = {
+      let n = name.clone();
+      Button::new(("menu", row))
+        .icon(IconName::Ellipsis)
+        .ghost()
+        .xsmall()
+        .dropdown_menu(move |menu, _window, _cx| {
+          let mut menu = menu;
+          let n = n.clone();
+
+          if is_host_machine {
+            // Host machine menu - limited actions
+            menu = menu
+              .item(
+                PopupMenuItem::new("Set as Active")
+                  .icon(IconName::CircleCheck)
+                  .on_click(move |_, _, cx| {
+                    services::switch_runtime(&MachineId::Host, cx);
+                  }),
+              )
+              .item(
+                PopupMenuItem::new("Configure")
+                  .icon(Icon::new(AppIcon::Edit))
+                  .on_click(move |_, _, cx| {
+                    docker_state(cx).update(cx, |_, cx| {
+                      cx.emit(StateChanged::ConfigureHostRequest);
+                    });
+                  }),
+              )
+              .separator()
+              .item(
+                PopupMenuItem::new("Restart Docker")
+                  .icon(Icon::new(AppIcon::Restart))
+                  .on_click(move |_, _, cx| {
+                    services::restart_docker_daemon(cx);
+                  }),
+              )
+              .item(
+                PopupMenuItem::new("System Prune")
+                  .icon(Icon::new(AppIcon::Trash))
+                  .on_click(move |_, _, cx| {
+                    services::docker_system_prune(false, cx);
+                  }),
+              );
+          } else if running {
+            // Colima VM running menu
+            menu = menu
+              .item(
+                PopupMenuItem::new("Set as Default")
+                  .icon(IconName::CircleCheck)
+                  .on_click({
+                    let n = n.clone();
+                    move |_, _, cx| {
+                      services::set_default_machine(n.clone(), has_k8s, cx);
+                    }
+                  }),
+              )
+              .separator()
+              .item(PopupMenuItem::new("Stop").icon(Icon::new(AppIcon::Stop)).on_click({
+                let n = n.clone();
+                move |_, _, cx| {
+                  services::stop_machine(n.clone(), cx);
+                }
+              }))
+              .item(
+                PopupMenuItem::new("Restart")
+                  .icon(Icon::new(AppIcon::Restart))
+                  .on_click({
+                    let n = n.clone();
+                    move |_, _, cx| {
+                      services::restart_machine(n.clone(), cx);
+                    }
+                  }),
+              )
+              .item(
+                PopupMenuItem::new("Update Runtime")
+                  .icon(Icon::new(AppIcon::Refresh))
+                  .on_click({
+                    let n = n.clone();
+                    move |_, _, cx| {
+                      services::update_machine_runtime(n.clone(), cx);
+                    }
+                  }),
+              )
+              .separator()
+              .item(
+                PopupMenuItem::new("Terminal")
+                  .icon(Icon::new(AppIcon::Terminal))
+                  .on_click({
+                    let n = n.clone();
+                    move |_, _, cx| {
+                      services::open_machine_terminal(MachineId::Colima(n.clone()), cx);
+                    }
+                  }),
+              )
+              .item(PopupMenuItem::new("Files").icon(Icon::new(AppIcon::Files)).on_click({
+                let n = n.clone();
+                move |_, _, cx| {
+                  services::open_machine_files(MachineId::Colima(n.clone()), cx);
+                }
+              }));
+
+            // Kubernetes actions
+            if has_k8s {
+              menu = menu
+                .separator()
+                .item(
+                  PopupMenuItem::new("K8s Start")
+                    .icon(Icon::new(AppIcon::Kubernetes))
+                    .on_click({
+                      let n = n.clone();
+                      move |_, _, cx| {
+                        services::kubernetes_start(n.clone(), cx);
+                      }
+                    }),
+                )
+                .item(
+                  PopupMenuItem::new("K8s Stop")
+                    .icon(Icon::new(AppIcon::Kubernetes))
+                    .on_click({
+                      let n = n.clone();
+                      move |_, _, cx| {
+                        services::kubernetes_stop(n.clone(), cx);
+                      }
+                    }),
+                )
+                .item(
+                  PopupMenuItem::new("K8s Reset")
+                    .icon(Icon::new(AppIcon::Kubernetes))
+                    .on_click({
+                      let n = n.clone();
+                      move |_, _, cx| {
+                        services::kubernetes_reset(n.clone(), cx);
+                      }
+                    }),
+                );
+            } else {
+              // Enable K8s for machines that don't have it
+              menu = menu.separator().item(
+                PopupMenuItem::new("Enable K8s")
+                  .icon(Icon::new(AppIcon::Kubernetes))
+                  .on_click({
+                    let n = n.clone();
+                    move |_, _, cx| {
+                      services::enable_kubernetes(n.clone(), cx);
+                    }
+                  }),
+              );
+            }
+
+            menu = menu
+              .separator()
+              .item(PopupMenuItem::new("Edit").icon(Icon::new(AppIcon::Edit)).on_click({
+                let n = n.clone();
+                move |_, _, cx| {
+                  docker_state(cx).update(cx, |_, cx| {
+                    cx.emit(StateChanged::EditMachineRequest {
+                      machine_id: MachineId::Colima(n.clone()),
+                    });
+                  });
+                }
+              }))
+              .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
+                let n = n.clone();
+                move |_, _, cx| {
+                  services::delete_machine(n.clone(), cx);
+                }
+              }));
+          } else {
+            // Colima VM stopped menu
+            menu = menu.item(PopupMenuItem::new("Start").icon(Icon::new(AppIcon::Play)).on_click({
+              let n = n.clone();
+              move |_, _, cx| {
+                services::start_machine(n.clone(), cx);
+              }
+            }));
+
+            menu = menu
+              .separator()
+              .item(PopupMenuItem::new("Edit").icon(Icon::new(AppIcon::Edit)).on_click({
+                let n = n.clone();
+                move |_, _, cx| {
+                  docker_state(cx).update(cx, |_, cx| {
+                    cx.emit(StateChanged::EditMachineRequest {
+                      machine_id: MachineId::Colima(n.clone()),
+                    });
+                  });
+                }
+              }))
+              .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
+                let n = n.clone();
+                move |_, _, cx| {
+                  services::delete_machine(n.clone(), cx);
+                }
+              }));
+          }
+
+          menu
+        })
+    };
+
+    let item_content = h_flex()
+      .w_full()
+      .items_center()
+      .justify_between()
+      .gap(px(8.))
+      .child(
+        h_flex()
+          .flex_1()
+          .min_w_0()
+          .items_center()
+          .gap(px(10.))
+          .child(
+            div()
+              .size(px(36.))
+              .flex_shrink_0()
+              .rounded(px(8.))
+              .bg(icon_bg)
+              .flex()
+              .items_center()
+              .justify_center()
+              .child(Icon::new(icon).text_color(colors.background)),
+          )
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .overflow_hidden()
+              .gap(px(2.))
+              .child(
+                div()
+                  .w_full()
+                  .overflow_hidden()
+                  .text_ellipsis()
+                  .whitespace_nowrap()
+                  .child(Label::new(machine_name.clone())),
+              )
+              .child(
+                div()
+                  .w_full()
+                  .overflow_hidden()
+                  .text_ellipsis()
+                  .whitespace_nowrap()
+                  .text_xs()
+                  .text_color(colors.muted_foreground)
+                  .child(subtitle),
+              ),
+          )
+          .child(div().flex_shrink_0().size(px(8.)).rounded_full().bg(status_color)),
+      )
+      .child(div().flex_shrink_0().child(menu_button));
+
     let item = ListItem::new(ix)
       .py(px(6.))
       .rounded(px(6.))
       .selected(is_selected)
-      .child(item_content)
-      .suffix(move |_, _| {
-        let n = name.clone();
-        div()
-          .size(px(28.))
-          .flex_shrink_0()
-          .flex()
-          .items_center()
-          .justify_center()
-          .child(
-            Button::new(("menu", row))
-              .icon(IconName::Ellipsis)
-              .ghost()
-              .xsmall()
-              .dropdown_menu(move |menu, _window, _cx| {
-                let mut menu = menu;
-                let n = n.clone();
-
-                if is_host_machine {
-                  // Host machine menu - limited actions
-                  menu = menu
-                    .item(
-                      PopupMenuItem::new("Set as Active")
-                        .icon(IconName::CircleCheck)
-                        .on_click(move |_, _, cx| {
-                          services::switch_runtime(&MachineId::Host, cx);
-                        }),
-                    )
-                    .item(
-                      PopupMenuItem::new("Configure")
-                        .icon(Icon::new(AppIcon::Edit))
-                        .on_click(move |_, _, cx| {
-                          docker_state(cx).update(cx, |_, cx| {
-                            cx.emit(StateChanged::ConfigureHostRequest);
-                          });
-                        }),
-                    )
-                    .separator()
-                    .item(
-                      PopupMenuItem::new("Restart Docker")
-                        .icon(Icon::new(AppIcon::Restart))
-                        .on_click(move |_, _, cx| {
-                          services::restart_docker_daemon(cx);
-                        }),
-                    )
-                    .item(
-                      PopupMenuItem::new("System Prune")
-                        .icon(Icon::new(AppIcon::Trash))
-                        .on_click(move |_, _, cx| {
-                          services::docker_system_prune(false, cx);
-                        }),
-                    );
-                } else if running {
-                  // Colima VM running menu
-                  menu = menu
-                    .item(
-                      PopupMenuItem::new("Set as Default")
-                        .icon(IconName::CircleCheck)
-                        .on_click({
-                          let n = n.clone();
-                          move |_, _, cx| {
-                            services::set_default_machine(n.clone(), has_k8s, cx);
-                          }
-                        }),
-                    )
-                    .separator()
-                    .item(PopupMenuItem::new("Stop").icon(Icon::new(AppIcon::Stop)).on_click({
-                      let n = n.clone();
-                      move |_, _, cx| {
-                        services::stop_machine(n.clone(), cx);
-                      }
-                    }))
-                    .item(
-                      PopupMenuItem::new("Restart")
-                        .icon(Icon::new(AppIcon::Restart))
-                        .on_click({
-                          let n = n.clone();
-                          move |_, _, cx| {
-                            services::restart_machine(n.clone(), cx);
-                          }
-                        }),
-                    )
-                    .item(
-                      PopupMenuItem::new("Update Runtime")
-                        .icon(Icon::new(AppIcon::Refresh))
-                        .on_click({
-                          let n = n.clone();
-                          move |_, _, cx| {
-                            services::update_machine_runtime(n.clone(), cx);
-                          }
-                        }),
-                    )
-                    .separator()
-                    .item(
-                      PopupMenuItem::new("Terminal")
-                        .icon(Icon::new(AppIcon::Terminal))
-                        .on_click({
-                          let n = n.clone();
-                          move |_, _, cx| {
-                            services::open_machine_terminal(MachineId::Colima(n.clone()), cx);
-                          }
-                        }),
-                    )
-                    .item(PopupMenuItem::new("Files").icon(Icon::new(AppIcon::Files)).on_click({
-                      let n = n.clone();
-                      move |_, _, cx| {
-                        services::open_machine_files(MachineId::Colima(n.clone()), cx);
-                      }
-                    }));
-
-                  // Kubernetes actions
-                  if has_k8s {
-                    menu = menu
-                      .separator()
-                      .item(
-                        PopupMenuItem::new("K8s Start")
-                          .icon(Icon::new(AppIcon::Kubernetes))
-                          .on_click({
-                            let n = n.clone();
-                            move |_, _, cx| {
-                              services::kubernetes_start(n.clone(), cx);
-                            }
-                          }),
-                      )
-                      .item(
-                        PopupMenuItem::new("K8s Stop")
-                          .icon(Icon::new(AppIcon::Kubernetes))
-                          .on_click({
-                            let n = n.clone();
-                            move |_, _, cx| {
-                              services::kubernetes_stop(n.clone(), cx);
-                            }
-                          }),
-                      )
-                      .item(
-                        PopupMenuItem::new("K8s Reset")
-                          .icon(Icon::new(AppIcon::Kubernetes))
-                          .on_click({
-                            let n = n.clone();
-                            move |_, _, cx| {
-                              services::kubernetes_reset(n.clone(), cx);
-                            }
-                          }),
-                      );
-                  } else {
-                    // Enable K8s for machines that don't have it
-                    menu = menu.separator().item(
-                      PopupMenuItem::new("Enable K8s")
-                        .icon(Icon::new(AppIcon::Kubernetes))
-                        .on_click({
-                          let n = n.clone();
-                          move |_, _, cx| {
-                            services::enable_kubernetes(n.clone(), cx);
-                          }
-                        }),
-                    );
-                  }
-
-                  menu = menu
-                    .separator()
-                    .item(PopupMenuItem::new("Edit").icon(Icon::new(AppIcon::Edit)).on_click({
-                      let n = n.clone();
-                      move |_, _, cx| {
-                        docker_state(cx).update(cx, |_, cx| {
-                          cx.emit(StateChanged::EditMachineRequest {
-                            machine_id: MachineId::Colima(n.clone()),
-                          });
-                        });
-                      }
-                    }))
-                    .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
-                      let n = n.clone();
-                      move |_, _, cx| {
-                        services::delete_machine(n.clone(), cx);
-                      }
-                    }));
-                } else {
-                  // Colima VM stopped menu
-                  menu = menu.item(PopupMenuItem::new("Start").icon(Icon::new(AppIcon::Play)).on_click({
-                    let n = n.clone();
-                    move |_, _, cx| {
-                      services::start_machine(n.clone(), cx);
-                    }
-                  }));
-
-                  menu = menu
-                    .separator()
-                    .item(PopupMenuItem::new("Edit").icon(Icon::new(AppIcon::Edit)).on_click({
-                      let n = n.clone();
-                      move |_, _, cx| {
-                        docker_state(cx).update(cx, |_, cx| {
-                          cx.emit(StateChanged::EditMachineRequest {
-                            machine_id: MachineId::Colima(n.clone()),
-                          });
-                        });
-                      }
-                    }))
-                    .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
-                      let n = n.clone();
-                      move |_, _, cx| {
-                        services::delete_machine(n.clone(), cx);
-                      }
-                    }));
-                }
-
-                menu
-              }),
-          )
-      });
+      .child(item_content);
 
     Some(item)
   }
