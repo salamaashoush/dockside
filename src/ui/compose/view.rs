@@ -83,6 +83,14 @@ impl ComposeView {
     let project_name_for_down = project_name.clone();
     let project_name_for_restart = project_name.clone();
     let project_name_for_watch = project_name.clone();
+    let working_dir_up = project.working_dir.clone();
+    let config_files_up = project.config_files.clone();
+    let working_dir_down = project.working_dir.clone();
+    let config_files_down = project.config_files.clone();
+    let working_dir_restart = project.working_dir.clone();
+    let config_files_restart = project.config_files.clone();
+    let working_dir_watch = project.working_dir.clone();
+    let config_files_watch = project.config_files.clone();
 
     let status_color = if project.is_all_running() {
       colors.success
@@ -154,7 +162,12 @@ impl ComposeView {
                                     .xsmall()
                                     .ghost()
                                     .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                                        services::compose_up(project_name_for_up.clone(), cx);
+                                        services::compose_up(
+                                            project_name_for_up.clone(),
+                                            working_dir_up.clone(),
+                                            config_files_up.clone(),
+                                            cx,
+                                        );
                                     })),
                             )
                             .child(
@@ -163,7 +176,12 @@ impl ComposeView {
                                     .xsmall()
                                     .ghost()
                                     .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                                        services::compose_down(project_name_for_down.clone(), cx);
+                                        services::compose_down(
+                                            project_name_for_down.clone(),
+                                            working_dir_down.clone(),
+                                            config_files_down.clone(),
+                                            cx,
+                                        );
                                     })),
                             )
                             .child(
@@ -172,7 +190,12 @@ impl ComposeView {
                                     .xsmall()
                                     .ghost()
                                     .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                                        services::compose_restart(project_name_for_restart.clone(), cx);
+                                        services::compose_restart(
+                                            project_name_for_restart.clone(),
+                                            working_dir_restart.clone(),
+                                            config_files_restart.clone(),
+                                            cx,
+                                        );
                                     })),
                             )
                             .child(
@@ -183,6 +206,8 @@ impl ComposeView {
                                     .on_click(cx.listener(move |_this, _ev, window, cx| {
                                         crate::ui::dialogs::open_compose_watch_dialog(
                                             project_name_for_watch.clone(),
+                                            working_dir_watch.clone(),
+                                            config_files_watch.clone(),
                                             window,
                                             cx,
                                         );

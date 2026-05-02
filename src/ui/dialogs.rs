@@ -225,13 +225,21 @@ pub fn open_lint_report_dialog(dockerfile: String, report: LintReport, window: &
 /// kicks off, streaming output into a fresh `LogStream` rendered via
 /// `open_build_output_dialog` (the same libghostty-backed terminal
 /// viewer used for build logs).
-pub fn open_compose_watch_dialog(project: String, window: &mut Window, cx: &mut App) {
+pub fn open_compose_watch_dialog(
+  project: String,
+  working_dir: Option<String>,
+  config_files: Vec<String>,
+  window: &mut Window,
+  cx: &mut App,
+) {
   use gpui_component::input::{Input, InputState};
   let profile_input = cx.new(|cx| InputState::new(window, cx).placeholder("Profile (optional)"));
 
   window.open_dialog(cx, move |dialog, _window, cx| {
     let _colors = cx.theme().colors;
     let project = project.clone();
+    let working_dir = working_dir.clone();
+    let config_files = config_files.clone();
     let profile_input_clone = profile_input.clone();
     dialog
       .title(format!("Watch '{project}'"))
@@ -249,6 +257,8 @@ pub fn open_compose_watch_dialog(project: String, window: &mut Window, cx: &mut 
       )
       .footer(move |_dialog_state, _, _window, _cx| {
         let project = project.clone();
+        let working_dir = working_dir.clone();
+        let config_files = config_files.clone();
         let profile = profile_input_clone.clone();
         vec![
           Button::new("start-watch")
@@ -265,7 +275,14 @@ pub fn open_compose_watch_dialog(project: String, window: &mut Window, cx: &mut 
                 Ok(s) => std::sync::Arc::new(s),
                 Err(_) => return,
               };
-              services::compose_watch(project.clone(), profile_opt, &log_stream, cx);
+              services::compose_watch(
+                project.clone(),
+                working_dir.clone(),
+                config_files.clone(),
+                profile_opt,
+                &log_stream,
+                cx,
+              );
               window.close_dialog(cx);
               open_compose_watch_output_dialog(project.clone(), log_stream, window, cx);
             })

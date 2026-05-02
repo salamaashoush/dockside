@@ -5,12 +5,20 @@ use super::{ContainerInfo, ContainerState};
 /// Docker Compose label keys
 pub const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
 pub const COMPOSE_SERVICE_LABEL: &str = "com.docker.compose.service";
+pub const COMPOSE_WORKING_DIR_LABEL: &str = "com.docker.compose.project.working_dir";
+pub const COMPOSE_CONFIG_FILES_LABEL: &str = "com.docker.compose.project.config_files";
 
 /// Represents a Docker Compose project with its services
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ComposeProject {
   pub name: String,
   pub services: Vec<ComposeService>,
+  /// Project root pulled from the `working_dir` label (`docker compose`
+  /// chdirs here before reading the config file).
+  pub working_dir: Option<String>,
+  /// One or more compose YAML paths from the `config_files` label
+  /// (comma-separated upstream).
+  pub config_files: Vec<String>,
 }
 
 impl ComposeProject {
@@ -85,14 +93,28 @@ pub fn extract_compose_projects(containers: &[ContainerInfo]) -> Vec<ComposeProj
 
       let service = ComposeService::from_container(container, &service_name);
 
-      projects
+      let working_dir = container.labels.get(COMPOSE_WORKING_DIR_LABEL).cloned();
+      let config_files: Vec<String> = container
+        .labels
+        .get(COMPOSE_CONFIG_FILES_LABEL)
+        .map(|raw| raw.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+
+      let entry = projects
         .entry(project_name.clone())
         .or_insert_with(|| ComposeProject {
           name: project_name.clone(),
           services: Vec::new(),
-        })
-        .services
-        .push(service);
+          working_dir: None,
+          config_files: Vec::new(),
+        });
+      entry.services.push(service);
+      if entry.working_dir.is_none() && working_dir.is_some() {
+        entry.working_dir = working_dir;
+      }
+      if entry.config_files.is_empty() && !config_files.is_empty() {
+        entry.config_files = config_files;
+      }
     }
   }
 
@@ -156,6 +178,8 @@ mod tests {
           state: ContainerState::Running,
         },
       ],
+      ..Default::default()
+
     };
     assert_eq!(project.container_count(), 2);
   }
@@ -184,6 +208,8 @@ mod tests {
           state: ContainerState::Running,
         },
       ],
+      ..Default::default()
+
     };
     assert_eq!(project.running_count(), 2);
   }
@@ -207,6 +233,8 @@ mod tests {
           state: ContainerState::Running,
         },
       ],
+      ..Default::default()
+
     };
     assert!(all_running.is_all_running());
 
@@ -227,6 +255,8 @@ mod tests {
           state: ContainerState::Exited,
         },
       ],
+      ..Default::default()
+
     };
     assert!(!partial.is_all_running());
 
@@ -234,6 +264,7 @@ mod tests {
     let empty = ComposeProject {
       name: "empty".to_string(),
       services: vec![],
+      ..Default::default()
     };
     assert!(!empty.is_all_running());
   }
@@ -257,6 +288,8 @@ mod tests {
           state: ContainerState::Exited,
         },
       ],
+      ..Default::default()
+
     };
     assert!(all_stopped.is_all_stopped());
 
@@ -277,6 +310,8 @@ mod tests {
           state: ContainerState::Exited,
         },
       ],
+      ..Default::default()
+
     };
     assert!(!partial.is_all_stopped());
 
@@ -284,6 +319,7 @@ mod tests {
     let empty = ComposeProject {
       name: "empty".to_string(),
       services: vec![],
+      ..Default::default()
     };
     assert!(empty.is_all_stopped());
   }
@@ -307,6 +343,8 @@ mod tests {
           state: ContainerState::Running,
         },
       ],
+      ..Default::default()
+
     };
     assert_eq!(all_running.status_display(), "2/2 running");
 
@@ -327,6 +365,8 @@ mod tests {
           state: ContainerState::Exited,
         },
       ],
+      ..Default::default()
+
     };
     assert_eq!(all_stopped.status_display(), "0/2 stopped");
 
@@ -353,6 +393,8 @@ mod tests {
           state: ContainerState::Exited,
         },
       ],
+      ..Default::default()
+
     };
     assert_eq!(partial.status_display(), "1/3 running");
 
@@ -360,6 +402,7 @@ mod tests {
     let empty = ComposeProject {
       name: "empty".to_string(),
       services: vec![],
+      ..Default::default()
     };
     assert_eq!(empty.status_display(), "0/0 stopped");
   }
@@ -587,6 +630,8 @@ mod tests {
           state: ContainerState::Exited,
         },
       ],
+      ..Default::default()
+
     };
 
     // Only Running counts as running

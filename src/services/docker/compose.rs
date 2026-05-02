@@ -2,7 +2,7 @@
 
 use gpui::App;
 use std::io::Read;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use crate::services::{complete_task, fail_task, start_task};
@@ -12,16 +12,39 @@ use crate::utils::docker_cmd;
 use super::super::core::{DispatcherEvent, dispatcher};
 use super::containers::refresh_containers;
 
-pub fn compose_up(project_name: String, cx: &mut App) {
+/// Build a `docker compose` invocation for `project_name`, prefixing
+/// `-f <config>` for every known compose file and chdir-ing into the
+/// project's working dir if available. Without these the daemon's
+/// `docker compose -p <name>` lookup fails with "no configuration file
+/// provided" because compose can't locate the YAML from a project name
+/// alone.
+fn compose_invocation(project_name: &str, working_dir: Option<&str>, config_files: &[String]) -> Command {
+  let mut cmd = docker_cmd();
+  if let Some(dir) = working_dir {
+    cmd.current_dir(dir);
+  }
+  cmd.arg("compose");
+  for f in config_files {
+    cmd.args(["-f", f]);
+  }
+  cmd.args(["-p", project_name]);
+  cmd
+}
+
+pub fn compose_up(project_name: String, working_dir: Option<String>, config_files: Vec<String>, cx: &mut App) {
   let task_id = start_task(cx, format!("Starting '{project_name}'..."));
   let disp = dispatcher(cx);
 
   cx.spawn(async move |cx| {
     let project = project_name.clone();
+    let working_dir = working_dir.clone();
+    let config_files = config_files.clone();
     let result = cx
       .background_executor()
       .spawn(async move {
-        let output = docker_cmd().args(["compose", "-p", &project, "up", "-d"]).output();
+        let output = compose_invocation(&project, working_dir.as_deref(), &config_files)
+          .args(["up", "-d"])
+          .output();
 
         match output {
           Ok(out) if out.status.success() => Ok(()),
@@ -54,16 +77,20 @@ pub fn compose_up(project_name: String, cx: &mut App) {
   .detach();
 }
 
-pub fn compose_down(project_name: String, cx: &mut App) {
+pub fn compose_down(project_name: String, working_dir: Option<String>, config_files: Vec<String>, cx: &mut App) {
   let task_id = start_task(cx, format!("Stopping '{project_name}'..."));
   let disp = dispatcher(cx);
 
   cx.spawn(async move |cx| {
     let project = project_name.clone();
+    let working_dir = working_dir.clone();
+    let config_files = config_files.clone();
     let result = cx
       .background_executor()
       .spawn(async move {
-        let output = docker_cmd().args(["compose", "-p", &project, "down"]).output();
+        let output = compose_invocation(&project, working_dir.as_deref(), &config_files)
+          .arg("down")
+          .output();
 
         match output {
           Ok(out) if out.status.success() => Ok(()),
@@ -102,7 +129,14 @@ pub fn compose_down(project_name: String, cx: &mut App) {
 /// `LogStream` on the caller side is the documented stop signal (the
 /// downstream channel will close and the next write returns broken
 /// pipe, which we treat as termination).
-pub fn compose_watch(project_name: String, profile: Option<String>, log_stream: &Arc<LogStream>, cx: &mut App) {
+pub fn compose_watch(
+  project_name: String,
+  working_dir: Option<String>,
+  config_files: Vec<String>,
+  profile: Option<String>,
+  log_stream: &Arc<LogStream>,
+  cx: &mut App,
+) {
   let task_id = start_task(cx, format!("compose watch '{project_name}'..."));
   let project_for_msg = project_name.clone();
   let disp = dispatcher(cx);
@@ -112,8 +146,7 @@ pub fn compose_watch(project_name: String, profile: Option<String>, log_stream: 
     let result = cx
       .background_executor()
       .spawn(async move {
-        let mut cmd = docker_cmd();
-        cmd.args(["compose", "-p", &project_name]);
+        let mut cmd = compose_invocation(&project_name, working_dir.as_deref(), &config_files);
         if let Some(p) = profile.as_deref() {
           cmd.args(["--profile", p]);
         }
@@ -197,16 +230,20 @@ fn crlf_normalize(input: &[u8]) -> Vec<u8> {
   out
 }
 
-pub fn compose_restart(project_name: String, cx: &mut App) {
+pub fn compose_restart(project_name: String, working_dir: Option<String>, config_files: Vec<String>, cx: &mut App) {
   let task_id = start_task(cx, format!("Restarting '{project_name}'..."));
   let disp = dispatcher(cx);
 
   cx.spawn(async move |cx| {
     let project = project_name.clone();
+    let working_dir = working_dir.clone();
+    let config_files = config_files.clone();
     let result = cx
       .background_executor()
       .spawn(async move {
-        let output = docker_cmd().args(["compose", "-p", &project, "restart"]).output();
+        let output = compose_invocation(&project, working_dir.as_deref(), &config_files)
+          .arg("restart")
+          .output();
 
         match output {
           Ok(out) if out.status.success() => Ok(()),
