@@ -181,6 +181,86 @@ pub fn build_image(
   .detach();
 }
 
+/// Scan every local image with Trivy sequentially, marking each
+/// image's `scan_loading` / `scan` / `scan_error` state through the
+/// existing `StateChanged::ImageScan*` pipeline so the detail tab
+/// updates live as we walk the list. A single global task ticks
+/// through the progress bar (1/N) so the user can monitor without
+/// per-image notifications.
+pub fn scan_all_images(cx: &mut App) {
+  let images = docker_state(cx).read(cx).images.clone();
+  if images.is_empty() {
+    return;
+  }
+  let task_id = start_task(cx, format!("Scanning {} images...", images.len()));
+  let total = images.len();
+  let state = docker_state(cx);
+  let disp = dispatcher(cx);
+
+  cx.spawn(async move |cx| {
+    for (idx, img) in images.iter().enumerate() {
+      let image_id = img.id.clone();
+      let image_ref = img
+        .repo_tags
+        .first()
+        .cloned()
+        .unwrap_or_else(|| img.id.clone());
+      let display = img.repo_tags.first().cloned().unwrap_or_else(|| img.short_id().to_string());
+
+      // Mark this image as in-flight so the detail panel shows the
+      // running spinner if the user has it open.
+      let _ = cx.update(|cx| {
+        state.update(cx, |_, cx| {
+          cx.emit(StateChanged::ImageScanStarted {
+            image_id: image_id.clone(),
+          });
+        });
+      });
+
+      let result = cx
+        .background_executor()
+        .spawn(async move { crate::docker::scan_image(&image_ref) })
+        .await;
+
+      let _ = cx.update(|cx| {
+        let state = docker_state(cx);
+        match result {
+          Ok(summary) => state.update(cx, |_, cx| {
+            cx.emit(StateChanged::ImageScanCompleted {
+              image_id: image_id.clone(),
+              summary,
+            });
+          }),
+          Err(e) => state.update(cx, |_, cx| {
+            cx.emit(StateChanged::ImageScanFailed {
+              image_id: image_id.clone(),
+              error: e.to_string(),
+            });
+          }),
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let frac = (idx + 1) as f32 / total as f32;
+        crate::services::task_manager::set_task_progress(
+          cx,
+          task_id,
+          frac,
+          Some(format!("{}/{}: {display}", idx + 1, total)),
+        );
+      });
+    }
+
+    let _ = cx.update(|cx| {
+      complete_task(cx, task_id);
+      disp.update(cx, |_, cx| {
+        cx.emit(DispatcherEvent::TaskCompleted {
+          message: format!("Scanned {total} images"),
+        });
+      });
+    });
+  })
+  .detach();
+}
+
 /// Scan an image with Trivy in the background and emit progress events.
 pub fn scan_image(image_id: String, image_ref: String, cx: &mut App) {
   let state = docker_state(cx);

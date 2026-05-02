@@ -54,6 +54,9 @@ impl ImagesView {
         ImageListEvent::LoadTarball => {
           dialogs::prompt_load_image_tarball(window, cx);
         }
+        ImageListEvent::ScanAll => {
+          services::scan_all_images(cx);
+        }
       },
     )
     .detach();

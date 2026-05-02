@@ -23,6 +23,7 @@ pub enum ImageListEvent {
   BuildImage,
   BrowseRegistry,
   LoadTarball,
+  ScanAll,
 }
 
 /// Delegate for the image list
@@ -572,6 +573,15 @@ impl Render for ImageList {
               .compact()
               .on_click(cx.listener(|_this, _ev, _window, cx| {
                 cx.emit(ImageListEvent::LoadTarball);
+              })),
+          )
+          .child(
+            Button::new("scan-all")
+              .label("Scan all")
+              .ghost()
+              .compact()
+              .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.emit(ImageListEvent::ScanAll);
               })),
           ),
       );
