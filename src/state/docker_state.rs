@@ -188,6 +188,15 @@ pub enum CronJobDetailTab {
   Yaml = 2,
 }
 
+/// Tab indices for ingress detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum IngressDetailTab {
+  #[default]
+  Info = 0,
+  Yaml = 1,
+}
+
 /// Represents the currently selected item across all views
 /// This enables keyboard shortcuts to act on the selection
 #[derive(Clone, Debug, Default)]
@@ -223,6 +232,10 @@ pub enum Selection {
     namespace: String,
   },
   CronJob {
+    name: String,
+    namespace: String,
+  },
+  Ingress {
     name: String,
     namespace: String,
   },
@@ -424,6 +437,16 @@ pub enum StateChanged {
     name: String,
     namespace: String,
     tab: CronJobDetailTab,
+  },
+  IngressYamlLoaded {
+    name: String,
+    namespace: String,
+    yaml: String,
+  },
+  IngressTabRequest {
+    name: String,
+    namespace: String,
+    tab: IngressDetailTab,
   },
   JobsUpdated,
   CronJobsUpdated,
@@ -787,6 +810,13 @@ impl DockerState {
       .cronjobs
       .iter()
       .find(|c| c.name == name && c.namespace == namespace)
+  }
+
+  pub fn get_ingress(&self, name: &str, namespace: &str) -> Option<&IngressInfo> {
+    self
+      .ingresses
+      .iter()
+      .find(|i| i.name == name && i.namespace == namespace)
   }
 
   // Navigation

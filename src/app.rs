@@ -1284,6 +1284,9 @@ impl Render for DocksideApp {
           Selection::CronJob { name, namespace } => {
             crate::services::delete_cronjob(name, namespace, cx);
           }
+          Selection::Ingress { name, namespace } => {
+            crate::services::delete_ingress(name, namespace, cx);
+          }
           Selection::Machine(MachineId::Colima(name)) => {
             crate::services::delete_machine(name, cx);
           }
