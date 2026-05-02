@@ -4,27 +4,32 @@
 
 use gpui::{App, IntoElement};
 use gpui_component::{
-  button::{Button, ButtonVariants},
+  Sizable,
+  button::Button,
   menu::{DropdownMenu, PopupMenuItem},
 };
 
 use crate::services;
 use crate::state::docker_state;
 
-/// Render the global namespace dropdown. Always reflects the current
-/// `selected_namespace` from `DockerState` and dispatches
-/// `services::set_namespace` on click.
+/// Render the global namespace dropdown. Outlined trigger with a caret
+/// so it reads as a control rather than another tab.
 pub fn render_namespace_selector(cx: &App) -> impl IntoElement {
   let state = docker_state(cx).read(cx);
   let selected = state.selected_namespace.clone();
   let namespaces = state.namespaces.clone();
 
-  let display = if selected == "all" { "All".to_string() } else { selected };
+  let display = if selected == "all" {
+    "Namespace: All".to_string()
+  } else {
+    format!("Namespace: {selected}")
+  };
 
   Button::new("namespace-selector")
     .label(display)
-    .ghost()
-    .compact()
+    .outline()
+    .small()
+    .dropdown_caret(true)
     .dropdown_menu(move |menu, _window, _cx| {
       let mut menu = menu.item(PopupMenuItem::new("All Namespaces").on_click(|_, _, cx| {
         services::set_namespace("all".to_string(), cx);

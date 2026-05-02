@@ -100,8 +100,13 @@ impl Render for WorkloadsView {
           .flex_shrink_0()
           .border_b_1()
           .border_color(colors.border)
-          .child(tab_bar)
-          .child(h_flex().pr(px(12.)).child(render_namespace_selector(cx))),
+          .child(div().flex_1().min_w_0().overflow_hidden().child(tab_bar))
+          .child(
+            h_flex()
+              .px(px(12.))
+              .flex_shrink_0()
+              .child(render_namespace_selector(cx)),
+          ),
       )
       .child(div().flex_1().min_h_0().child(body))
   }
