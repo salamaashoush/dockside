@@ -3,6 +3,7 @@ mod pty_terminal;
 #[cfg(not(unix))]
 mod pty_terminal_stub;
 
+mod grid_element;
 mod terminal_view;
 
 #[cfg(unix)]

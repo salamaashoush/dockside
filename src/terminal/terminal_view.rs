@@ -37,6 +37,8 @@ pub struct TerminalView {
   scroll_offset: usize,
   /// Last known terminal size (cols, rows) for resize detection
   last_size: (u16, u16),
+  /// Cursor blink phase. `true` = visible, `false` = hidden during blink off-phase.
+  cursor_visible_phase: bool,
 }
 
 impl TerminalView {
@@ -62,11 +64,13 @@ impl TerminalView {
       is_connected: false,
       error: None,
       scroll_offset: 0,
-      last_size: (80, 24), // Initial default, will be updated dynamically
+      last_size: (80, 24),
+      cursor_visible_phase: true,
     };
 
     view.connect(cx);
     Self::start_polling(cx);
+    Self::start_cursor_blink(cx);
 
     view
   }
@@ -88,6 +92,28 @@ impl TerminalView {
       }
     }
     cx.notify();
+  }
+
+  /// Toggle `cursor_visible_phase` every ~500 ms. The render path inspects
+  /// `settings.terminal_cursor_blink` and only hides the cursor when both the
+  /// setting is on AND the phase is off.
+  fn start_cursor_blink(cx: &mut Context<'_, Self>) {
+    cx.spawn(async move |this, cx| {
+      loop {
+        gpui::Timer::after(std::time::Duration::from_millis(530)).await;
+        let alive = this
+          .update(cx, |this, cx| {
+            this.cursor_visible_phase = !this.cursor_visible_phase;
+            cx.notify();
+            true
+          })
+          .unwrap_or(false);
+        if !alive {
+          break;
+        }
+      }
+    })
+    .detach();
   }
 
   fn start_polling(cx: &mut Context<'_, Self>) {
@@ -129,20 +155,20 @@ impl TerminalView {
     }
   }
 
-  #[allow(clippy::cast_sign_loss)]
-  fn scroll(&mut self, delta: i32, max_scroll: usize) {
-    // View-level scrolling - update our scroll offset
-    // Positive delta = scroll up (increase offset), negative = scroll down (decrease offset)
-    let new_offset = if delta > 0 {
-      self.scroll_offset.saturating_add(delta as usize)
-    } else {
-      self.scroll_offset.saturating_sub((-delta) as usize)
-    };
-    self.scroll_offset = new_offset.min(max_scroll);
+  /// Forward a wheel scroll into libghostty's viewport. Positive `delta` =
+  /// scroll up (into history), negative = scroll down (toward active area).
+  fn scroll(&mut self, delta: i32, _max_scroll: usize) {
+    if let Some(terminal) = &self.terminal
+      && delta != 0
+    {
+      terminal.scroll_by(-isize::from(i16::try_from(delta).unwrap_or(0)));
+    }
   }
 
   fn scroll_to_bottom(&mut self) {
-    self.scroll_offset = 0;
+    if let Some(terminal) = &self.terminal {
+      terminal.scroll_to_bottom();
+    }
   }
 
   /// Resize terminal to fit given bounds (for future bounds-based resize)
@@ -200,62 +226,32 @@ impl Focusable for TerminalView {
 
 impl Render for TerminalView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-    let font_size = self.font_size;
-    let line_height = self.line_height;
-    let char_width = self.char_width;
-    let cursor_style = self.cursor_style;
+    // Re-read terminal settings each frame so changes from the Settings view
+    // (font size, line height, cursor style) take effect without rebuilding
+    // the view.
+    let settings = settings_state(cx).read(cx).settings.clone();
+    let font_size = settings.terminal_font_size;
+    let line_height = font_size * settings.terminal_line_height;
+    let char_width = font_size * 0.6;
+    let cursor_style = settings.terminal_cursor_style;
+    self.font_size = font_size;
+    self.line_height = line_height;
+    self.char_width = char_width;
+    self.cursor_style = cursor_style;
 
     // Theme colors
     let colors = cx.theme().colors;
     let bg_color = colors.sidebar;
     let cursor_color = colors.link;
 
-    // Dynamic resize based on window viewport
-    // Use viewport size to estimate terminal area
-    let viewport = window.viewport_size();
-    let viewport_width: f32 = viewport.width.into();
-    let viewport_height: f32 = viewport.height.into();
-
-    // Estimate content area based on typical layout:
-    // - Sidebar: ~220px
-    // - List panel: ~300px
-    // - Remaining is detail panel (~55% of window)
-    // - Toolbar/tabs: ~50px
-    // - Padding: ~50px
-    let estimated_width = (viewport_width * 0.55 - 50.0).max(200.0);
-    let estimated_height = (viewport_height - 100.0).max(200.0);
-
-    // Calculate terminal dimensions
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let cols = (estimated_width / char_width).floor() as u16;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let rows = (estimated_height / line_height).floor() as u16;
-
-    // Clamp to reasonable values
-    let cols = cols.clamp(40, 300);
-    let rows = rows.clamp(10, 150);
-
-    // Resize terminal if size changed
-    if cols != self.last_size.0 || rows != self.last_size.1 {
-      self.last_size = (cols, rows);
-      if let Some(ref terminal) = self.terminal {
-        terminal.resize(cols, rows);
-      }
-    }
+    // Bounds-driven resize: the TerminalGrid element computes (cols, rows)
+    // from the actual container bounds in `prepaint` and calls the
+    // `on_resize` callback below. No more viewport-share guessing.
+    let _ = window;
 
     // Handle error state
     if let Some(ref err) = self.error {
-      let error_message =
-        if err.contains("No such container") || err.contains("container not found") || err.contains("is not running") {
-          "Container is not running or no longer exists".to_string()
-        } else if err.contains("OCI runtime exec failed")
-          || err.contains("executable file not found")
-          || err.contains("no such file or directory")
-        {
-          "Container does not have a shell available (minimal image)".to_string()
-        } else {
-          format!("Connection failed: {err}")
-        };
+      let (headline, hint) = classify_terminal_error(err);
 
       return div()
         .id("terminal-error")
@@ -269,26 +265,46 @@ impl Render for TerminalView {
         .child(
           v_flex()
             .items_center()
-            .gap(px(16.))
+            .gap(px(12.))
+            .max_w(px(520.))
+            .px(px(24.))
             .child(Icon::new(IconName::CircleX).size(px(48.)).text_color(colors.danger))
             .child(
               div()
-                .text_sm()
+                .text_lg()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(colors.danger)
-                .max_w(px(400.))
                 .text_center()
-                .child(error_message),
+                .child(headline.to_string()),
             )
             .child(
-              h_flex().gap(px(8.)).child(
-                Button::new("reconnect")
-                  .label("Reconnect")
-                  .primary()
-                  .on_click(cx.listener(|this, _ev, _window, cx| {
-                    this.error = None;
-                    this.connect(cx);
-                  })),
-              ),
+              div()
+                .text_sm()
+                .text_color(colors.muted_foreground)
+                .text_center()
+                .child(hint.to_string()),
+            )
+            .child(
+              div()
+                .text_xs()
+                .font_family("monospace")
+                .text_color(colors.muted_foreground.opacity(0.7))
+                .text_center()
+                .child(err.clone()),
+            )
+            .child(
+              h_flex()
+                .gap(px(8.))
+                .mt(px(8.))
+                .child(
+                  Button::new("reconnect")
+                    .label("Reconnect")
+                    .primary()
+                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                      this.error = None;
+                      this.connect(cx);
+                    })),
+                ),
             ),
         )
         .into_any_element();
@@ -336,113 +352,45 @@ impl Render for TerminalView {
       (super::TerminalContent::default(), 0)
     };
 
-    // Build terminal lines with per-cell coloring
-    let mut line_elements: Vec<gpui::AnyElement> = Vec::new();
-
-    for (row_idx, line) in content.lines.iter().enumerate() {
-      let show_cursor = content.cursor_visible && row_idx == content.cursor_row;
-
-      // Build line with per-cell colors
-      let mut cell_elements: Vec<gpui::AnyElement> = Vec::new();
-
-      for (col_idx, cell) in line.cells.iter().enumerate() {
-        let is_cursor = show_cursor && col_idx == content.cursor_col;
-
-        // Get cell colors
-        let foreground = rgb_to_hsla(cell.fg.0, cell.fg.1, cell.fg.2);
-        let background = rgb_to_hsla(cell.bg.0, cell.bg.1, cell.bg.2);
-
-        // Apply dim effect by reducing saturation/lightness
-        let foreground = if cell.dim {
-          hsla(foreground.h, foreground.s * 0.7, foreground.l * 0.7, foreground.a)
-        } else {
-          foreground
-        };
-
-        let char_str = if cell.char == '\0' || cell.char == ' ' {
-          "\u{00A0}".to_string() // Non-breaking space for proper sizing
-        } else {
-          cell.char.to_string()
-        };
-
-        let mut cell_div = div()
-          .text_size(px(font_size))
-          .font_family("monospace")
-          .text_color(foreground)
-          .bg(background)
-          .child(char_str);
-
-        // Apply text styles
-        if cell.bold {
-          cell_div = cell_div.font_weight(gpui::FontWeight::BOLD);
-        }
-        if cell.italic {
-          cell_div = cell_div.italic();
-        }
-        if cell.underline {
-          cell_div = cell_div.text_decoration_1();
-        }
-        if cell.strikethrough {
-          cell_div = cell_div.line_through();
-        }
-
-        // Apply cursor styling based on cursor_style
-        if is_cursor {
-          cell_div = match cursor_style {
-            TerminalCursorStyle::Block => cell_div.bg(cursor_color).text_color(bg_color),
-            TerminalCursorStyle::Underline => cell_div.border_b_2().border_color(cursor_color),
-            TerminalCursorStyle::Bar => cell_div.border_l_2().border_color(cursor_color),
-          };
-        }
-
-        cell_elements.push(cell_div.into_any_element());
-      }
-
-      // Add cursor at end if needed
-      if show_cursor && content.cursor_col >= line.cells.len() {
-        let mut end_cursor = div()
-          .text_size(px(font_size))
-          .font_family("monospace")
-          .child("\u{00A0}");
-
-        end_cursor = match cursor_style {
-          TerminalCursorStyle::Block => end_cursor.bg(cursor_color).text_color(bg_color),
-          TerminalCursorStyle::Underline => end_cursor.border_b_2().border_color(cursor_color),
-          TerminalCursorStyle::Bar => end_cursor.border_l_2().border_color(cursor_color),
-        };
-
-        cell_elements.push(end_cursor.into_any_element());
-      }
-
-      let line_div = div()
-        .w_full()
-        .h(px(line_height))
-        .flex()
-        .items_center()
-        .children(cell_elements);
-
-      line_elements.push(line_div.into_any_element());
+    // Apply blink: when the setting is enabled and we're in the off-phase,
+    // hide the cursor for this frame.
+    let mut content = content;
+    if settings.terminal_cursor_blink && !self.cursor_visible_phase {
+      content.cursor_visible = false;
     }
+    let total_lines_for_scrollbar = content.lines.len();
+    let visible_rows = content.rows;
+    let scroll_offset_for_bar = content.scroll_offset;
+
+    // Custom GPUI element handles the actual cell grid.
+    let on_resize = self.terminal.as_ref().map(PtyTerminal::resize_callback);
+    let grid = super::grid_element::TerminalGrid {
+      content,
+      font_size: px(font_size),
+      line_height_factor: settings.terminal_line_height,
+      default_fg: colors.foreground,
+      default_bg: bg_color,
+      cursor_color,
+      cursor_style,
+      on_resize,
+      last_reported_size: None,
+    };
 
     // Scrollbar - only show if there's content to scroll
     #[allow(clippy::cast_precision_loss)]
-    let scrollbar = if content.total_lines > content.rows {
-      // Use the actual rendered content height for scrollbar
-      let content_height = line_elements.len() as f32 * line_height;
-      let track_height = content_height.max(100.0); // Minimum track height
+    let scrollbar = if total_lines_for_scrollbar > visible_rows {
+      let content_height = total_lines_for_scrollbar as f32 * line_height;
+      let track_height = content_height.max(100.0);
 
-      // Calculate thumb size proportional to visible content
-      let visible_ratio = content.rows as f32 / content.total_lines as f32;
+      let visible_ratio = visible_rows as f32 / total_lines_for_scrollbar as f32;
       let thumb_height = (visible_ratio * track_height).max(20.0).min(track_height);
 
-      // Calculate scroll position (0 = at bottom, 1 = at top of history)
-      let max_scroll = (content.total_lines - content.rows) as f32;
-      let scroll_ratio = if max_scroll > 0.0 {
-        content.scroll_offset as f32 / max_scroll
+      let max_lines = (total_lines_for_scrollbar - visible_rows) as f32;
+      let scroll_ratio = if max_lines > 0.0 {
+        scroll_offset_for_bar as f32 / max_lines
       } else {
         0.0
       };
-      // Thumb position: at bottom when scroll_ratio=0, at top when scroll_ratio=1
       let thumb_top = (1.0 - scroll_ratio) * (track_height - thumb_height);
 
       Some(
@@ -570,7 +518,7 @@ impl Render for TerminalView {
         this.focus_handle.focus(window);
         cx.notify();
       }))
-      // Terminal content area - flex to fill available space
+      // Terminal content area — custom Element renders the cell grid.
       .child(
         div()
           .id("terminal-content")
@@ -579,14 +527,61 @@ impl Render for TerminalView {
           .w_full()
           .overflow_hidden()
           .relative()
-          .children(line_elements)
+          .child(grid)
           .children(scrollbar),
       )
       .into_any_element()
   }
 }
 
-/// Convert RGB values (0-255) to HSLA color
+/// Classify a raw terminal error into (headline, hint) for the user.
+fn classify_terminal_error(err: &str) -> (&'static str, &'static str) {
+  let lower = err.to_lowercase();
+  if lower.contains("no such container") || lower.contains("container not found") || lower.contains("no longer exists")
+  {
+    return (
+      "Container not found",
+      "It may have been removed. Refresh the container list and try again.",
+    );
+  }
+  if lower.contains("is not running") || lower.contains("has exited") || lower.contains("exited") {
+    return ("Container is not running", "Start the container first, then reconnect.");
+  }
+  if lower.contains("is paused") {
+    return (
+      "Container is paused",
+      "Unpause the container to open a terminal session.",
+    );
+  }
+  if lower.contains("oci runtime exec failed")
+    || lower.contains("executable file not found")
+    || lower.contains("no such file or directory")
+  {
+    return (
+      "No shell available in this container",
+      "Minimal images (distroless, scratch) ship without /bin/sh. Use `docker run --rm -it your-image sh` on a debug variant instead.",
+    );
+  }
+  if lower.contains("permission denied") {
+    return (
+      "Permission denied",
+      "The container or Docker daemon refused the exec. You may need elevated privileges.",
+    );
+  }
+  if lower.contains("not supported on this platform") {
+    return (
+      "Terminal not supported on this platform",
+      "Terminal sessions currently work on macOS and Linux only.",
+    );
+  }
+  (
+    "Failed to attach terminal",
+    "Inspect the error below for details, then try Reconnect.",
+  )
+}
+
+/// Convert RGB values (0-255) to HSLA color (kept for potential future use).
+#[allow(dead_code, clippy::many_single_char_names)]
 fn rgb_to_hsla(red: u8, green: u8, blue: u8) -> Hsla {
   let red_f = f32::from(red) / 255.0;
   let green_f = f32::from(green) / 255.0;

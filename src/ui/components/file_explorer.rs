@@ -11,6 +11,48 @@ use gpui_component::{
 };
 use std::rc::Rc;
 
+/// Classify a raw file explorer error into (headline, hint) for the user.
+fn classify_file_explorer_error(error: &str) -> (&'static str, &'static str) {
+  let lower = error.to_lowercase();
+  if lower.contains("no such container") || lower.contains("no longer exists") {
+    return (
+      "Container not found",
+      "It may have been removed. Refresh the container list.",
+    );
+  }
+  if lower.contains("is not running") || lower.contains("has exited") {
+    return (
+      "Container is not running",
+      "Start the container before browsing its filesystem.",
+    );
+  }
+  if lower.contains("does not include the required tools") {
+    return (
+      "This image has no shell or coreutils",
+      "Distroless / scratch images don't ship with `ls` or `cat`. Use `docker cp` from the CLI to extract files instead.",
+    );
+  }
+  if lower.contains("does not exist") {
+    return ("Path does not exist", "The directory may have been removed.");
+  }
+  if lower.contains("permission denied") {
+    return ("Permission denied", "The container user lacks access to this path.");
+  }
+  if lower.contains("not a directory") {
+    return ("Not a directory", "Click a file from the parent listing instead.");
+  }
+  if lower.contains("appears to be binary") {
+    return (
+      "File is binary",
+      "Use `docker cp` to copy it out, or open a text file to preview it here.",
+    );
+  }
+  (
+    "Failed to load files",
+    "See the details below for the underlying error.",
+  )
+}
+
 /// Trait for file entry types that can be displayed in the file explorer.
 /// All file entry types (`ContainerFileEntry`, `VolumeFileEntry`, `VmFileEntry`) implement this.
 pub trait FileEntry: Clone {
@@ -454,36 +496,41 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
 
   fn render_error(error: &str, cx: &App) -> gpui::Div {
     let colors = &cx.theme().colors;
-
-    // Parse error to show friendlier message
-    let error_message = if error.contains("No such container")
-      || error.contains("container not found")
-      || error.contains("is not running")
-    {
-      "Container is not running or no longer exists".to_string()
-    } else if error.contains("Permission denied") {
-      "Permission denied - cannot access this directory".to_string()
-    } else if error.contains("No such file or directory") {
-      "Directory does not exist".to_string()
-    } else {
-      format!("Failed to list files: {error}")
-    };
+    let (headline, hint) = classify_file_explorer_error(error);
 
     v_flex()
       .flex_1()
       .w_full()
-      .p(px(16.))
+      .p(px(24.))
       .items_center()
       .justify_center()
-      .gap(px(16.))
+      .gap(px(12.))
       .child(Icon::new(IconName::CircleX).size(px(48.)).text_color(colors.danger))
       .child(
         div()
-          .text_sm()
+          .text_lg()
+          .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.danger)
-          .max_w(px(400.))
+          .max_w(px(520.))
           .text_center()
-          .child(error_message),
+          .child(headline.to_string()),
+      )
+      .child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .max_w(px(520.))
+          .text_center()
+          .child(hint.to_string()),
+      )
+      .child(
+        div()
+          .text_xs()
+          .font_family("monospace")
+          .text_color(colors.muted_foreground.opacity(0.7))
+          .max_w(px(520.))
+          .text_center()
+          .child(error.to_string()),
       )
   }
 
@@ -576,29 +623,38 @@ impl<F: FileEntry + 'static> FileExplorer<F> {
       })
       .when(!is_loading && has_error, |el| {
         let error = self.state.file_content_error.clone().unwrap_or_default();
-        let error_message = if error.contains("Permission denied") {
-          "Permission denied - cannot read this file".to_string()
-        } else if error.contains("Is a directory") {
-          "Cannot read a directory as a file".to_string()
-        } else if error.contains("Binary file") || error.contains("binary") {
-          "Cannot display binary file contents".to_string()
-        } else {
-          format!("Failed to read file: {error}")
-        };
+        let (headline, hint) = classify_file_explorer_error(&error);
 
         el.child(
           div().flex_1().flex().items_center().justify_center().child(
             v_flex()
               .items_center()
-              .gap(px(16.))
+              .gap(px(12.))
+              .max_w(px(520.))
+              .px(px(24.))
               .child(Icon::new(IconName::CircleX).size(px(48.)).text_color(colors.danger))
               .child(
                 div()
-                  .text_sm()
+                  .text_lg()
+                  .font_weight(gpui::FontWeight::SEMIBOLD)
                   .text_color(colors.danger)
-                  .max_w(px(400.))
                   .text_center()
-                  .child(error_message),
+                  .child(headline.to_string()),
+              )
+              .child(
+                div()
+                  .text_sm()
+                  .text_color(colors.muted_foreground)
+                  .text_center()
+                  .child(hint.to_string()),
+              )
+              .child(
+                div()
+                  .text_xs()
+                  .font_family("monospace")
+                  .text_color(colors.muted_foreground.opacity(0.7))
+                  .text_center()
+                  .child(error),
               ),
           ),
         )

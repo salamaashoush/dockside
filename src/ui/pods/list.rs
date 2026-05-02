@@ -15,7 +15,7 @@ use crate::assets::AppIcon;
 use crate::kubernetes::{PodInfo, PodPhase};
 use crate::services;
 use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
-use crate::ui::components::{render_error, render_loading};
+use crate::ui::components::{render_k8s_error, render_loading};
 
 /// Pod list events emitted to parent
 pub enum PodListEvent {
@@ -707,7 +707,7 @@ impl Render for PodList {
       LoadState::NotLoaded | LoadState::Loading => render_loading("pods", cx),
       LoadState::Error(e) => {
         let error_msg = e.clone();
-        render_error(
+        render_k8s_error(
           "pods",
           &error_msg,
           |_ev, _window, cx| {

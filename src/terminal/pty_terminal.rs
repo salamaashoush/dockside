@@ -17,9 +17,8 @@
 //! Available on Unix targets only. Windows uses the stub in `pty_terminal_stub.rs`.
 
 use std::io::{Read, Write};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, atomic::AtomicBool, atomic::AtomicUsize, atomic::Ordering};
 use std::thread;
 
 use anyhow::{Result, anyhow};
@@ -27,7 +26,7 @@ use libghostty_vt::render::{CellIterator, Dirty, RenderState, RowIterator};
 use libghostty_vt::style::RgbColor;
 use libghostty_vt::terminal::{Options as TermOptions, Terminal};
 use parking_lot::Mutex;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 /// Type of terminal session
 #[derive(Debug, Clone)]
@@ -139,32 +138,21 @@ impl TerminalSessionType {
   }
 }
 
-/// A terminal cell with text and styling
-#[derive(Debug, Clone)]
+/// A terminal cell with text and styling.
+///
+/// `fg` / `bg` are `None` when the cell has no explicit color (the renderer
+/// substitutes the theme's foreground / background so the terminal honors the
+/// app theme).
+#[derive(Debug, Clone, Default)]
 pub struct TerminalCell {
   pub char: char,
-  pub fg: (u8, u8, u8),
-  pub bg: (u8, u8, u8),
+  pub fg: Option<(u8, u8, u8)>,
+  pub bg: Option<(u8, u8, u8)>,
   pub bold: bool,
   pub italic: bool,
   pub underline: bool,
   pub strikethrough: bool,
   pub dim: bool,
-}
-
-impl Default for TerminalCell {
-  fn default() -> Self {
-    Self {
-      char: ' ',
-      fg: (169, 177, 214),
-      bg: (26, 27, 38),
-      bold: false,
-      italic: false,
-      underline: false,
-      strikethrough: false,
-      dim: false,
-    }
-  }
 }
 
 /// Rendered line from terminal
@@ -181,6 +169,8 @@ pub struct TerminalContent {
   pub cursor_col: usize,
   pub cursor_visible: bool,
   pub rows: usize,
+  /// Total scrollback + visible rows (placeholder; libghostty exposes only viewport).
+  #[allow(dead_code)]
   pub total_lines: usize,
   pub scroll_offset: usize,
 }
@@ -221,6 +211,10 @@ enum Cmd {
   KeyInput(Vec<u8>),
   /// Resize the terminal (cols/rows + a cosmetic cell pixel size).
   Resize { cols: u16, rows: u16 },
+  /// Scroll the viewport by `delta` lines (negative = into history).
+  ScrollDelta(isize),
+  /// Snap viewport to bottom (active area).
+  ScrollToBottom,
   /// Reader thread reached EOF or errored.
   ReaderClosed,
   /// UI requests immediate shutdown (drop the actor thread).
@@ -293,16 +287,21 @@ impl PtyTerminal {
       .map_err(|e| anyhow!("failed to spawn pty reader thread: {e}"))?;
 
     // 6. Spawn the terminal thread (owns the !Send Terminal).
+    //    Move the master into the actor thread so we can issue PTY resizes
+    //    (TIOCSWINSZ → SIGWINCH) when the UI bounds change. Without this,
+    //    full-screen TUIs like vim stay stuck at their original PTY size.
     let term_content = Arc::clone(&content);
     let term_state = Arc::clone(&state);
     let term_max_scroll = Arc::clone(&max_scroll);
     let term_shutdown = Arc::clone(&shutdown);
+    let master = pair.master;
     thread::Builder::new()
       .name("dockside-terminal".into())
       .spawn(move || {
         let res = terminal_actor_loop(
           cmd_rx,
           pty_writer,
+          master,
           cols,
           rows,
           &term_content,
@@ -380,6 +379,25 @@ impl PtyTerminal {
     let _ = self.cmd_tx.send(Cmd::Resize { cols, rows });
   }
 
+  /// Scroll the viewport by `delta` lines (negative = into history).
+  pub fn scroll_by(&self, delta: isize) {
+    let _ = self.cmd_tx.send(Cmd::ScrollDelta(delta));
+  }
+
+  /// Snap the viewport back to the bottom (active area).
+  pub fn scroll_to_bottom(&self) {
+    let _ = self.cmd_tx.send(Cmd::ScrollToBottom);
+  }
+
+  /// Build a resize callback that the GPUI element can call from inside
+  /// `prepaint`. Cmd is private so callers must go through this helper.
+  pub fn resize_callback(&self) -> Arc<dyn Fn(u16, u16) + Send + Sync + 'static> {
+    let tx = self.cmd_tx.clone();
+    Arc::new(move |cols, rows| {
+      let _ = tx.send(Cmd::Resize { cols, rows });
+    })
+  }
+
   /// Get current terminal dimensions (cols, rows).
   #[allow(dead_code)]
   pub fn size(&self) -> (usize, usize) {
@@ -426,10 +444,11 @@ fn pty_reader_loop(mut reader: Box<dyn Read + Send>, tx: Sender<Cmd>, shutdown: 
 // Terminal thread (owns the !Send Terminal + RenderState + Encoder)
 // ============================================================================
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn terminal_actor_loop(
   cmd_rx: mpsc::Receiver<Cmd>,
   pty_writer_handle: Box<dyn Write + Send>,
+  pty_master: Box<dyn MasterPty + Send>,
   initial_cols: u16,
   initial_rows: u16,
   content: &Arc<Mutex<TerminalContent>>,
@@ -497,12 +516,29 @@ fn terminal_actor_loop(
         if cols == current_cols && rows == current_rows {
           continue;
         }
+        // Resize the libghostty viewport AND signal the child via the PTY
+        // master (TIOCSWINSZ → SIGWINCH). TUI apps like vim need both —
+        // libghostty alone doesn't reach the shell.
         if let Err(e) = terminal.resize(cols, rows, CELL_PIXEL_W, CELL_PIXEL_H) {
           state.lock().error = Some(format!("resize failed: {e:?}"));
           continue;
         }
+        if let Err(e) = pty_master.resize(PtySize {
+          rows,
+          cols,
+          pixel_width: 0,
+          pixel_height: 0,
+        }) {
+          tracing::debug!("pty master resize failed: {e}");
+        }
         current_cols = cols;
         current_rows = rows;
+      }
+      Cmd::ScrollDelta(delta) => {
+        terminal.scroll_viewport(libghostty_vt::terminal::ScrollViewport::Delta(delta));
+      }
+      Cmd::ScrollToBottom => {
+        terminal.scroll_viewport(libghostty_vt::terminal::ScrollViewport::Bottom);
       }
       Cmd::ReaderClosed | Cmd::Shutdown => break,
     }
@@ -539,11 +575,6 @@ fn snapshot_into(
     .update(terminal)
     .map_err(|e| anyhow!("render update failed: {e:?}"))?;
 
-  let snap_dirty = snapshot.dirty().map_err(|e| anyhow!("dirty query failed: {e:?}"))?;
-  if matches!(snap_dirty, Dirty::Clean) {
-    return Ok(());
-  }
-
   let colors = snapshot.colors().map_err(|e| anyhow!("colors query failed: {e:?}"))?;
   let cursor_visible = snapshot
     .cursor_visible()
@@ -552,8 +583,7 @@ fn snapshot_into(
     .cursor_viewport()
     .map_err(|e| anyhow!("cursor_viewport failed: {e:?}"))?;
 
-  let bg_default = rgb_tuple(colors.background);
-  let fg_default = rgb_tuple(colors.foreground);
+  let _ = colors; // theme defaults are applied in the renderer, not here
 
   let mut lines: Vec<TerminalLine> = Vec::with_capacity(rows as usize);
   let mut row_iteration = row_iter
@@ -573,11 +603,11 @@ fn snapshot_into(
       let mut fg = cell
         .fg_color()
         .map_err(|e| anyhow!("fg_color failed: {e:?}"))?
-        .map_or(fg_default, rgb_tuple);
+        .map(rgb_tuple);
       let mut bg = cell
         .bg_color()
         .map_err(|e| anyhow!("bg_color failed: {e:?}"))?
-        .map_or(bg_default, rgb_tuple);
+        .map(rgb_tuple);
 
       if style.inverse {
         std::mem::swap(&mut fg, &mut bg);
@@ -605,30 +635,18 @@ fn snapshot_into(
       });
     }
 
-    // Pad to expected column count if cells are missing.
     while cells.len() < cols as usize {
-      cells.push(TerminalCell {
-        char: ' ',
-        fg: fg_default,
-        bg: bg_default,
-        ..TerminalCell::default()
-      });
+      cells.push(TerminalCell::default());
     }
 
     lines.push(TerminalLine { cells });
     row.set_dirty(false).ok();
   }
 
-  // Pad rows if the snapshot returned fewer than expected.
   while lines.len() < rows as usize {
     let mut cells = Vec::with_capacity(cols as usize);
     for _ in 0..cols {
-      cells.push(TerminalCell {
-        char: ' ',
-        fg: fg_default,
-        bg: bg_default,
-        ..TerminalCell::default()
-      });
+      cells.push(TerminalCell::default());
     }
     lines.push(TerminalLine { cells });
   }
@@ -650,10 +668,10 @@ fn snapshot_into(
   // as flat for now (UI can still scroll through the visible rows).
   max_scroll.store(0, Ordering::SeqCst);
 
-  // Mark the snapshot clean so the next update only reports changes.
-  snapshot
-    .set_dirty(Dirty::Clean)
-    .map_err(|e| anyhow!("set_dirty failed: {e:?}"))?;
+  // Best-effort: mark the snapshot clean so future updates can short-circuit.
+  // Some libghostty builds reject this on the very first call; ignore the
+  // error since rendering already succeeded.
+  let _ = snapshot.set_dirty(Dirty::Clean);
 
   Ok(())
 }

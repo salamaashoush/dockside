@@ -422,6 +422,14 @@ impl ContainersView {
       self.on_navigate_path("/", cx);
     }
 
+    // Re-create per-container views if we're already on their tab. Without this,
+    // switching containers while on Terminal/Processes leaves the user staring
+    // at an indefinite "Connecting..." spinner because on_tab_change never fires.
+    let tab = self.active_tab;
+    if tab == ContainerDetailTab::Terminal || tab == ContainerDetailTab::Processes {
+      self.on_tab_change(tab, window, cx);
+    }
+
     cx.notify();
   }
 

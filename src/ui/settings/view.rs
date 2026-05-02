@@ -14,7 +14,7 @@ use gpui_component::{
 
 use crate::assets::AppIcon;
 use crate::colima::ColimaClient;
-use crate::state::{ExternalEditor, SettingsChanged, SettingsState, ThemeName, settings_state};
+use crate::state::{ExternalEditor, SettingsChanged, SettingsState, TerminalCursorStyle, ThemeName, settings_state};
 
 /// Theme wrapper for Select
 #[derive(Debug, Clone)]
@@ -76,6 +76,34 @@ impl SelectItem for EditorOption {
   }
 }
 
+#[derive(Debug, Clone)]
+struct CursorStyleOption {
+  style: TerminalCursorStyle,
+  label: SharedString,
+}
+
+impl CursorStyleOption {
+  fn new(style: TerminalCursorStyle) -> Self {
+    Self {
+      label: SharedString::from(style.display_name().to_string()),
+      style,
+    }
+  }
+  fn all() -> Vec<Self> {
+    TerminalCursorStyle::all().into_iter().map(Self::new).collect()
+  }
+}
+
+impl SelectItem for CursorStyleOption {
+  type Value = CursorStyleOption;
+  fn value(&self) -> &Self::Value {
+    self
+  }
+  fn title(&self) -> SharedString {
+    self.label.clone()
+  }
+}
+
 /// Settings view - full page settings
 pub struct SettingsView {
   settings_state: Entity<SettingsState>,
@@ -88,6 +116,9 @@ pub struct SettingsView {
   stats_refresh_input: Option<Entity<InputState>>,
   log_lines_input: Option<Entity<InputState>>,
   font_size_input: Option<Entity<InputState>>,
+  line_height_input: Option<Entity<InputState>>,
+  scrollback_lines_input: Option<Entity<InputState>>,
+  cursor_style_select: Option<Entity<SelectState<Vec<CursorStyleOption>>>>,
   initialized: bool,
   last_theme_index: Option<usize>,
   // Colima cache state
@@ -112,6 +143,9 @@ impl SettingsView {
       stats_refresh_input: None,
       log_lines_input: None,
       font_size_input: None,
+      line_height_input: None,
+      scrollback_lines_input: None,
+      cursor_style_select: None,
       initialized: false,
       last_theme_index: None,
       cache_size,
@@ -186,6 +220,20 @@ impl SettingsView {
 
     self.font_size_input =
       Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.terminal_font_size.to_string())));
+
+    self.line_height_input =
+      Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.terminal_line_height.to_string())));
+
+    self.scrollback_lines_input =
+      Some(cx.new(|cx| InputState::new(window, cx).default_value(settings.terminal_scrollback_lines.to_string())));
+
+    let cursor_styles = CursorStyleOption::all();
+    let current_cursor_idx = cursor_styles
+      .iter()
+      .position(|c| c.style == settings.terminal_cursor_style)
+      .unwrap_or(0);
+    self.cursor_style_select =
+      Some(cx.new(|cx| SelectState::new(cursor_styles, Some(IndexPath::new(current_cursor_idx)), window, cx)));
 
     self.initialized = true;
   }
@@ -267,6 +315,18 @@ impl SettingsView {
       .to_string()
       .parse::<f32>()
       .unwrap_or(14.0);
+    let line_height = self
+      .line_height_input
+      .as_ref()
+      .map_or(1.4, |i| i.read(cx).text().to_string().parse::<f32>().unwrap_or(1.4));
+    let scrollback_lines = self.scrollback_lines_input.as_ref().map_or(10_000, |i| {
+      i.read(cx).text().to_string().parse::<usize>().unwrap_or(10_000)
+    });
+    let cursor_style = self
+      .cursor_style_select
+      .as_ref()
+      .and_then(|s| s.read(cx).selected_value().map(|opt| opt.style))
+      .unwrap_or_default();
 
     // Get selected theme
     let theme = theme_select
@@ -297,6 +357,9 @@ impl SettingsView {
       state.settings.stats_refresh_interval = stats_refresh;
       state.settings.max_log_lines = log_lines;
       state.settings.terminal_font_size = font_size;
+      state.settings.terminal_line_height = line_height;
+      state.settings.terminal_scrollback_lines = scrollback_lines;
+      state.settings.terminal_cursor_style = cursor_style;
       state.settings.theme = theme.clone();
       state.settings.external_editor = external_editor;
       let _ = state.settings.save();
@@ -562,6 +625,85 @@ impl SettingsView {
     });
   }
 
+  /// Render the terminal cursor-blink toggle as a `render_form_row`-style entry.
+  /// Saves immediately on toggle (no Apply needed).
+  fn render_cursor_blink_row(state: &Entity<SettingsState>, cx: &Context<'_, Self>) -> impl IntoElement {
+    let colors = cx.theme().colors;
+    let blink = state.read(cx).settings.terminal_cursor_blink;
+
+    h_flex()
+      .w_full()
+      .py(px(12.))
+      .justify_between()
+      .items_center()
+      .gap(px(16.))
+      .border_b_1()
+      .border_color(colors.border.opacity(0.5))
+      .child(
+        v_flex()
+          .flex_1()
+          .gap(px(2.))
+          .child(Label::new("Terminal Cursor Blink").text_color(colors.foreground))
+          .child(
+            div()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("Blink the terminal cursor"),
+          ),
+      )
+      .child(Switch::new("cursor-blink").checked(blink).on_click(cx.listener(
+        move |this, checked: &bool, _window, cx| {
+          this.settings_state.update(cx, |state, cx| {
+            state.settings.terminal_cursor_blink = *checked;
+            let _ = state.settings.save();
+            cx.emit(SettingsChanged::SettingsUpdated);
+          });
+          cx.notify();
+        },
+      )))
+  }
+
+  /// Render the Kubernetes feature toggle. Independent of cluster availability:
+  /// the toggle controls whether the Pods/Deployments/Services sidebar group is
+  /// visible at all. Cluster connection failures still surface inline.
+  fn render_kubernetes_section(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+    let colors = cx.theme().colors;
+    let kubernetes_enabled = self.settings_state.read(cx).settings.kubernetes_enabled;
+
+    h_flex()
+      .w_full()
+      .py(px(12.))
+      .justify_between()
+      .items_center()
+      .gap(px(16.))
+      .border_b_1()
+      .border_color(colors.border.opacity(0.5))
+      .child(
+        v_flex()
+          .flex_1()
+          .gap(px(2.))
+          .child(Label::new("Enable Kubernetes").text_color(colors.foreground))
+          .child(
+            div()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("Show Pods, Deployments and Services in the sidebar (requires kubectl + kubeconfig)"),
+          ),
+      )
+      .child(
+        Switch::new("kubernetes-enabled")
+          .checked(kubernetes_enabled)
+          .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+            this.settings_state.update(cx, |state, cx| {
+              state.settings.kubernetes_enabled = *checked;
+              let _ = state.settings.save();
+              cx.emit(SettingsChanged::SettingsUpdated);
+            });
+            cx.notify();
+          })),
+      )
+  }
+
   #[allow(clippy::unused_self)]
   fn show_colima_install_dialog(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
     use crate::platform::Platform;
@@ -741,9 +883,37 @@ impl Render for SettingsView {
                     Input::new(font_size_input).small().w_full(),
                     cx,
                 ))
+                .when_some(self.line_height_input.clone(), |el, input| {
+                    el.child(Self::render_form_row(
+                        "Terminal Line Height",
+                        "Line height multiplier (e.g. 1.4)",
+                        Input::new(&input).small().w_full(),
+                        cx,
+                    ))
+                })
+                .when_some(self.cursor_style_select.clone(), |el, select| {
+                    el.child(Self::render_form_row(
+                        "Terminal Cursor Style",
+                        "Cursor shape: Block, Underline, or thin Bar",
+                        Select::new(&select).w_full().small(),
+                        cx,
+                    ))
+                })
+                .child(Self::render_cursor_blink_row(&self.settings_state, cx))
+                .when_some(self.scrollback_lines_input.clone(), |el, input| {
+                    el.child(Self::render_form_row(
+                        "Terminal Scrollback Lines",
+                        "Lines of scrollback history kept by the terminal",
+                        Input::new(&input).small().w_full(),
+                        cx,
+                    ))
+                })
                 // Colima section
                 .child(Self::render_section_header("Colima", cx))
                 .child(self.render_colima_section(cx))
+                // Kubernetes section (optional feature)
+                .child(Self::render_section_header("Kubernetes", cx))
+                .child(self.render_kubernetes_section(cx))
     } else {
       v_flex().child("Loading...")
     };

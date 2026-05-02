@@ -130,9 +130,13 @@ impl DocksideApp {
     let activity_view = cx.new(|cx| ActivityMonitorView::new(window, cx));
     let settings_view = cx.new(SettingsView::new);
 
-    // Run setup checks async - only show dialog if there are issues
+    // Run setup checks async — only surface the dialog if a *required* piece is
+    // missing. Docker is the only universal must-have. Colima is only required
+    // on macOS (where it provides the runtime); elsewhere it's an opt-in
+    // feature gated by `colima_enabled`. Kubernetes diagnostics only matter
+    // when the user has explicitly enabled the feature in Settings.
+    let settings_snapshot = crate::state::settings_state(cx).read(cx).settings.clone();
     cx.spawn(async move |this, cx| {
-      // Run checks in background (non-blocking)
       let (colima_installed, docker_installed, colima_running, k8s_diag) = cx
         .background_executor()
         .spawn(async move {
@@ -145,18 +149,19 @@ impl DocksideApp {
         })
         .await;
 
-      // Check if setup is needed
-      // K8s issues: only check context mismatch at startup (API check is slow and done in dialog)
-      let has_k8s_issues = colima_installed
+      let colima_required = cfg!(target_os = "macos") || settings_snapshot.colima_enabled;
+      let kubernetes_enabled = settings_snapshot.kubernetes_enabled;
+
+      let docker_problem = !docker_installed;
+      let colima_problem = colima_required && (!colima_installed || !colima_running);
+      let k8s_problem = kubernetes_enabled
+        && colima_installed
         && docker_installed
         && colima_running
         && k8s_diag.expected_context.is_some()
         && k8s_diag.context_mismatch;
 
-      let needs_setup = !colima_installed || !docker_installed || !colima_running || has_k8s_issues;
-
-      if needs_setup {
-        // Show dialog on main thread
+      if docker_problem || colima_problem || k8s_problem {
         this
           .update(cx, |this, cx| {
             this.pending_setup_check = Some((colima_installed, docker_installed, colima_running));
@@ -505,6 +510,13 @@ impl DocksideApp {
       "Docker".to_string()
     };
 
+    // Optional features driven by settings + platform.
+    // Colima is required on macOS (where it's the container runtime); on Linux/
+    // Windows it's an opt-in feature controlled by Settings.
+    let settings = crate::state::settings_state(cx).read(cx).settings.clone();
+    let show_colima = settings.colima_enabled || cfg!(target_os = "macos");
+    let show_kubernetes = settings.kubernetes_enabled;
+
     Sidebar::left()
             .collapsible(false)
             .pt(px(52.)) // Space for traffic lights
@@ -553,47 +565,51 @@ impl DocksideApp {
                         ),
                 ),
             )
-            .child(
-                SidebarGroup::new("Kubernetes").child(
-                    SidebarMenu::new()
-                        .child(
-                            SidebarMenuItem::new("Pods")
-                                .icon(AppIcon::Pod)
-                                .active(current_view == CurrentView::Pods)
+            .when(show_kubernetes, |sidebar| {
+                sidebar.child(
+                    SidebarGroup::new("Kubernetes").child(
+                        SidebarMenu::new()
+                            .child(
+                                SidebarMenuItem::new("Pods")
+                                    .icon(AppIcon::Pod)
+                                    .active(current_view == CurrentView::Pods)
+                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                        crate::services::set_view(CurrentView::Pods, cx);
+                                    })),
+                            )
+                            .child(
+                                SidebarMenuItem::new("Deployments")
+                                    .icon(AppIcon::Deployment)
+                                    .active(current_view == CurrentView::Deployments)
+                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                        crate::services::set_view(CurrentView::Deployments, cx);
+                                    })),
+                            )
+                            .child(
+                                SidebarMenuItem::new("Services")
+                                    .icon(AppIcon::Service)
+                                    .active(current_view == CurrentView::Services)
+                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                        crate::services::set_view(CurrentView::Services, cx);
+                                    })),
+                            ),
+                    ),
+                )
+            })
+            .when(show_colima, |sidebar| {
+                sidebar.child(
+                    SidebarGroup::new("Colima").child(
+                        SidebarMenu::new().child(
+                            SidebarMenuItem::new("Machines")
+                                .icon(AppIcon::Machine)
+                                .active(current_view == CurrentView::Machines)
                                 .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                    crate::services::set_view(CurrentView::Pods, cx);
-                                })),
-                        )
-                        .child(
-                            SidebarMenuItem::new("Deployments")
-                                .icon(AppIcon::Deployment)
-                                .active(current_view == CurrentView::Deployments)
-                                .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                    crate::services::set_view(CurrentView::Deployments, cx);
-                                })),
-                        )
-                        .child(
-                            SidebarMenuItem::new("Services")
-                                .icon(AppIcon::Service)
-                                .active(current_view == CurrentView::Services)
-                                .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                    crate::services::set_view(CurrentView::Services, cx);
+                                    crate::services::set_view(CurrentView::Machines, cx);
                                 })),
                         ),
-                ),
-            )
-            .child(
-                SidebarGroup::new("Colima").child(
-                    SidebarMenu::new().child(
-                        SidebarMenuItem::new("Machines")
-                            .icon(AppIcon::Machine)
-                            .active(current_view == CurrentView::Machines)
-                            .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                crate::services::set_view(CurrentView::Machines, cx);
-                            })),
                     ),
-                ),
-            )
+                )
+            })
             .child(
                 SidebarGroup::new("General").child(
                     SidebarMenu::new()
@@ -825,10 +841,13 @@ impl Render for DocksideApp {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     // Check if we need to show setup dialog (from async check)
     if let Some((colima_installed, docker_installed, colima_running)) = self.pending_setup_check.take() {
-      // Determine title based on the issue
-      let title = if !colima_installed || !docker_installed {
+      let colima_required =
+        cfg!(target_os = "macos") || crate::state::settings_state(cx).read(cx).settings.colima_enabled;
+      let title = if !docker_installed {
+        "Docker Not Installed"
+      } else if colima_required && !colima_installed {
         "Setup Required"
-      } else if !colima_running {
+      } else if colima_required && !colima_running {
         "Start Colima"
       } else {
         "Kubernetes Issue Detected"

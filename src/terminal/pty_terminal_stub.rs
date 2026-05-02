@@ -47,8 +47,8 @@ impl TerminalSessionType {
 #[derive(Debug, Clone, Default)]
 pub struct TerminalCell {
   pub char: char,
-  pub fg: (u8, u8, u8),
-  pub bg: (u8, u8, u8),
+  pub fg: Option<(u8, u8, u8)>,
+  pub bg: Option<(u8, u8, u8)>,
   pub bold: bool,
   pub italic: bool,
   pub underline: bool,
@@ -124,6 +124,13 @@ impl PtyTerminal {
   }
 
   pub fn resize(&self, _cols: u16, _rows: u16) {}
+  pub fn scroll_by(&self, _delta: isize) {}
+  pub fn scroll_to_bottom(&self) {}
+
+  pub fn resize_callback(&self) -> std::sync::Arc<dyn Fn(u16, u16) + Send + Sync + 'static> {
+    use std::sync::Arc;
+    Arc::new(|_, _| {})
+  }
 
   #[allow(dead_code)]
   pub fn size(&self) -> (usize, usize) {

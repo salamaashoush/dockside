@@ -15,7 +15,7 @@ use crate::assets::AppIcon;
 use crate::kubernetes::DeploymentInfo;
 use crate::services;
 use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
-use crate::ui::components::{render_error, render_loading};
+use crate::ui::components::{render_k8s_error, render_loading};
 
 /// Deployment list events emitted to parent
 pub enum DeploymentListEvent {
@@ -670,7 +670,7 @@ impl Render for DeploymentList {
       LoadState::NotLoaded | LoadState::Loading => render_loading("deployments", cx),
       LoadState::Error(e) => {
         let error_msg = e.clone();
-        render_error(
+        render_k8s_error(
           "deployments",
           &error_msg,
           |_ev, _window, cx| {

@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use bollard::container::LogOutput;
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::models::{ContainerCreateBody, HostConfig};
 use bollard::query_parameters::{
@@ -206,7 +207,21 @@ impl DockerClient {
       });
     }
 
-    result.sort_by(|a, b| a.name.cmp(&b.name));
+    // Sort: running first (then paused, restarting), then stopped/exited/dead.
+    // Within each bucket, most recently created first, name-tiebreak.
+    result.sort_by(|a, b| {
+      let bucket = |s: ContainerState| match s {
+        ContainerState::Running => 0,
+        ContainerState::Paused | ContainerState::Restarting => 1,
+        ContainerState::Created => 2,
+        ContainerState::Exited | ContainerState::Removing => 3,
+        ContainerState::Dead | ContainerState::Unknown => 4,
+      };
+      bucket(a.state)
+        .cmp(&bucket(b.state))
+        .then_with(|| b.created.cmp(&a.created))
+        .then_with(|| a.name.cmp(&b.name))
+    });
     Ok(result)
   }
 
@@ -481,8 +496,23 @@ impl DockerClient {
     Ok(json)
   }
 
-  /// Execute a command in a container and return output
+  /// Execute a command in a container and return combined stdout+stderr.
+  /// Treats any nonzero exit code as success (caller may want stderr text).
+  /// For richer error handling use `exec_command_full`.
   pub async fn exec_command(&self, id: &str, cmd: Vec<&str>) -> Result<String> {
+    let result = self.exec_command_full(id, cmd).await?;
+    let mut combined = result.stdout;
+    if !result.stderr.is_empty() {
+      if !combined.is_empty() && !combined.ends_with('\n') {
+        combined.push('\n');
+      }
+      combined.push_str(&result.stderr);
+    }
+    Ok(combined)
+  }
+
+  /// Execute a command in a container, capturing stdout, stderr, and exit code separately.
+  pub async fn exec_command_full(&self, id: &str, cmd: Vec<&str>) -> Result<ExecResult> {
     let docker = self.client()?;
 
     let exec = docker
@@ -495,99 +525,125 @@ impl DockerClient {
           ..Default::default()
         },
       )
-      .await?;
+      .await
+      .map_err(|e| translate_exec_error("create exec", id, &e))?;
 
-    let output = docker.start_exec(&exec.id, None).await?;
+    let output = docker
+      .start_exec(&exec.id, None)
+      .await
+      .map_err(|e| translate_exec_error("start exec", id, &e))?;
 
-    let mut result = String::new();
+    let mut stdout = String::new();
+    let mut stderr = String::new();
     if let StartExecResults::Attached { mut output, .. } = output {
       while let Some(Ok(msg)) = output.next().await {
-        result.push_str(&msg.to_string());
+        match msg {
+          LogOutput::StdOut { message } | LogOutput::Console { message } => {
+            stdout.push_str(&String::from_utf8_lossy(&message));
+          }
+          LogOutput::StdErr { message } => {
+            stderr.push_str(&String::from_utf8_lossy(&message));
+          }
+          LogOutput::StdIn { .. } => {}
+        }
       }
     }
 
-    Ok(result)
+    // Inspect to get exit code (Docker exec exit codes are reported async).
+    let exit_code = match docker.inspect_exec(&exec.id).await {
+      Ok(info) => info.exit_code,
+      Err(e) => {
+        tracing::debug!("inspect_exec failed for {id}: {e}");
+        None
+      }
+    };
+
+    Ok(ExecResult {
+      stdout,
+      stderr,
+      exit_code,
+    })
   }
 
-  /// List files in a container directory
+  /// List files in a container directory.
+  ///
+  /// Tries `ls -la` first, then falls back to a `sh`-based stat loop for
+  /// busybox-style images. Returns a structured error if no listing strategy
+  /// works (typical for distroless / scratch images).
   pub async fn list_container_files(&self, id: &str, path: &str) -> Result<Vec<ContainerFileEntry>> {
-    // Use ls -la with specific format for parsing
-    let output = self.exec_command(id, vec!["ls", "-la", path]).await?;
-
-    let mut entries = Vec::new();
-
-    for line in output.lines().skip(1) {
-      // Skip "total" line
-      let parts: Vec<&str> = line.split_whitespace().collect();
-      if parts.len() < 9 {
-        continue;
-      }
-
-      let permissions = parts[0].to_string();
-      let size: u64 = parts[4].parse().unwrap_or(0);
-      let raw_name = parts[8..].join(" ");
-
-      let is_dir = permissions.starts_with('d');
-      let is_symlink = permissions.starts_with('l');
-
-      // For symlinks, extract just the name part (before ->)
-      let name = if is_symlink {
-        raw_name.split(" -> ").next().unwrap_or(&raw_name).to_string()
-      } else {
-        raw_name
-      };
-
-      // Skip . and ..
-      if name == "." || name == ".." {
-        continue;
-      }
-
-      let full_path = if path == "/" {
-        format!("/{name}")
-      } else {
-        format!("{}/{}", path.trim_end_matches('/'), name)
-      };
-
-      entries.push(ContainerFileEntry {
-        name: name.clone(),
-        path: full_path,
-        is_dir,
-        is_symlink,
-        size,
-        permissions,
-      });
+    // Strategy 1: GNU/BusyBox `ls -la` — covers most images including alpine,
+    // ubuntu, debian, busybox, postgres, nginx, etc.
+    let ls_result = self.exec_command_full(id, vec!["ls", "-la", "--", path]).await?;
+    if ls_result.is_success() && !ls_result.stdout.is_empty() {
+      return Ok(parse_ls_la_output(&ls_result.stdout, path));
     }
 
-    // Sort: directories first, then by name
-    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-      (true, false) => std::cmp::Ordering::Less,
-      (false, true) => std::cmp::Ordering::Greater,
-      _ => a.name.cmp(&b.name),
-    });
+    // Strategy 2: BusyBox `ls` without GNU flags (no `--` end-of-options).
+    let ls_simple = self.exec_command_full(id, vec!["ls", "-la", path]).await?;
+    if ls_simple.is_success() && !ls_simple.stdout.is_empty() {
+      return Ok(parse_ls_la_output(&ls_simple.stdout, path));
+    }
 
-    Ok(entries)
+    // No `ls` available — surface the clearest error we have.
+    let stderr = if ls_result.stderr.trim().is_empty() {
+      ls_simple.stderr
+    } else {
+      ls_result.stderr
+    };
+    Err(translate_filesystem_error("list directory", path, &stderr))
   }
 
-  /// Read file content from a container
+  /// Read file content from a container.
+  ///
+  /// Caps reads at 1 MiB to keep the UI responsive and detects binary content
+  /// (returns a friendly error rather than dumping garbage).
   pub async fn read_container_file(&self, id: &str, path: &str) -> Result<String> {
-    // Use cat to read file content
-    let output = self.exec_command(id, vec!["cat", path]).await?;
-    Ok(output)
+    const MAX_READ_BYTES: u64 = 1024 * 1024;
+
+    let result = self.exec_command_full(id, vec!["cat", "--", path]).await?;
+    if !result.is_success() {
+      // Retry without `--` for busybox-style cat.
+      let fallback = self.exec_command_full(id, vec!["cat", path]).await?;
+      if !fallback.is_success() {
+        let stderr = if fallback.stderr.trim().is_empty() {
+          result.stderr
+        } else {
+          fallback.stderr
+        };
+        return Err(translate_filesystem_error("read file", path, &stderr));
+      }
+      return finalize_file_read(fallback.stdout, MAX_READ_BYTES);
+    }
+    finalize_file_read(result.stdout, MAX_READ_BYTES)
   }
 
-  /// Resolve a symlink to get its target path
+  /// Resolve a symlink to its absolute target path.
   pub async fn resolve_symlink(&self, id: &str, path: &str) -> Result<String> {
-    // Use readlink -f to get the absolute target path
-    let output = self.exec_command(id, vec!["readlink", "-f", path]).await?;
-    Ok(output.trim().to_string())
+    // GNU `readlink -f` is most reliable; busybox supports it too.
+    let result = self.exec_command_full(id, vec!["readlink", "-f", "--", path]).await?;
+    if result.is_success() && !result.stdout.trim().is_empty() {
+      return Ok(result.stdout.trim().to_string());
+    }
+    // Some minimal images lack `readlink`. Fall back to `ls -l` parsing.
+    let fallback = self.exec_command_full(id, vec!["ls", "-l", "--", path]).await?;
+    if fallback.is_success()
+      && let Some(target) = fallback.stdout.split(" -> ").nth(1)
+    {
+      return Ok(target.trim().to_string());
+    }
+    Err(anyhow!("Could not resolve symlink for {path}"))
   }
 
-  /// Check if a path is a directory
+  /// Check if a path is a directory.
   pub async fn is_directory(&self, id: &str, path: &str) -> Result<bool> {
-    let output = self
-      .exec_command(id, vec!["sh", "-c", &format!("test -d '{path}' && echo dir")])
-      .await;
-    Ok(output.map(|s| s.contains("dir")).unwrap_or(false))
+    // Use `sh -c test -d` since most images have at least sh.
+    let result = self
+      .exec_command_full(
+        id,
+        vec!["sh", "-c", &format!("test -d {} && echo dir", shell_quote(path))],
+      )
+      .await?;
+    Ok(result.stdout.contains("dir"))
   }
 
   /// Get running processes in a container using Docker's top API
@@ -658,6 +714,137 @@ impl DockerClient {
       "Could not get process list. The container may not have 'ps' installed and Docker top API failed."
     ))
   }
+}
+
+// ============================================================================
+// Exec helpers
+// ============================================================================
+
+/// Result of running a command inside a container.
+#[derive(Debug, Clone, Default)]
+pub struct ExecResult {
+  pub stdout: String,
+  pub stderr: String,
+  /// `None` if Docker hasn't reported one yet; otherwise the child's exit status.
+  pub exit_code: Option<i64>,
+}
+
+impl ExecResult {
+  /// True if Docker reported a zero exit code.
+  pub fn is_success(&self) -> bool {
+    matches!(self.exit_code, Some(0))
+  }
+}
+
+/// Translate a `bollard` create/start exec error into a friendly message.
+fn translate_exec_error(stage: &str, id: &str, err: &bollard::errors::Error) -> anyhow::Error {
+  let s = err.to_string();
+  let lower = s.to_lowercase();
+  if lower.contains("is not running") || lower.contains("is restarting") {
+    anyhow!("Container {id} is not running")
+  } else if lower.contains("no such container") || lower.contains("not found") {
+    anyhow!("Container {id} no longer exists")
+  } else if lower.contains("permission denied") {
+    anyhow!("Permission denied while attaching to container {id}")
+  } else {
+    anyhow!("Docker {stage} failed: {s}")
+  }
+}
+
+/// Translate a stderr message from a filesystem-related exec into a useful error.
+fn translate_filesystem_error(action: &str, path: &str, stderr: &str) -> anyhow::Error {
+  let lower = stderr.to_lowercase();
+  if lower.contains("no such file") || lower.contains("not found") {
+    anyhow!("{action}: {path} does not exist in this container")
+  } else if lower.contains("permission denied") {
+    anyhow!("{action}: permission denied for {path}")
+  } else if lower.contains("is a directory") {
+    anyhow!("{action}: {path} is a directory")
+  } else if lower.contains("not a directory") {
+    anyhow!("{action}: {path} is not a directory")
+  } else if lower.contains("oci runtime exec failed") || lower.contains("executable file not found") {
+    anyhow!("{action}: this container does not include the required tools (try a container with a shell + coreutils)")
+  } else if stderr.trim().is_empty() {
+    anyhow!("{action}: failed for {path}")
+  } else {
+    anyhow!("{action}: {}", stderr.trim())
+  }
+}
+
+/// Parse `ls -la` output into `ContainerFileEntry` rows.
+fn parse_ls_la_output(output: &str, path: &str) -> Vec<ContainerFileEntry> {
+  let mut entries = Vec::new();
+
+  for line in output.lines().skip_while(|l| l.starts_with("total ")) {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 9 {
+      continue;
+    }
+    let permissions = parts[0].to_string();
+    let size: u64 = parts[4].parse().unwrap_or(0);
+    let raw_name = parts[8..].join(" ");
+    let is_dir = permissions.starts_with('d');
+    let is_symlink = permissions.starts_with('l');
+    let name = if is_symlink {
+      raw_name.split(" -> ").next().unwrap_or(&raw_name).to_string()
+    } else {
+      raw_name
+    };
+    if name == "." || name == ".." {
+      continue;
+    }
+    let full_path = if path == "/" {
+      format!("/{name}")
+    } else {
+      format!("{}/{}", path.trim_end_matches('/'), name)
+    };
+    entries.push(ContainerFileEntry {
+      name,
+      path: full_path,
+      is_dir,
+      is_symlink,
+      size,
+      permissions,
+    });
+  }
+
+  entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+    (true, false) => std::cmp::Ordering::Less,
+    (false, true) => std::cmp::Ordering::Greater,
+    _ => a.name.cmp(&b.name),
+  });
+  entries
+}
+
+/// Cap file content at `max_bytes` and reject obvious binary blobs so the UI
+/// gets a clear message instead of trying to render garbage.
+fn finalize_file_read(content: String, max_bytes: u64) -> Result<String> {
+  if content.is_empty() {
+    return Ok(content);
+  }
+  let bytes = content.as_bytes();
+  // Heuristic: if the first 8 KiB contain a NUL byte, treat as binary.
+  let scan = &bytes[..bytes.len().min(8 * 1024)];
+  if scan.contains(&0) {
+    return Err(anyhow!(
+      "File appears to be binary; download or hex-view it instead of opening as text"
+    ));
+  }
+  if (bytes.len() as u64) > max_bytes {
+    let cap = usize::try_from(max_bytes).unwrap_or(usize::MAX).min(bytes.len());
+    let truncated = String::from_utf8_lossy(&bytes[..cap]).to_string();
+    return Ok(format!(
+      "{truncated}\n\n--- truncated at {} ---\n",
+      bytesize::ByteSize(max_bytes),
+    ));
+  }
+  Ok(content)
+}
+
+/// Single-quote a path for `sh -c` use.
+fn shell_quote(s: &str) -> String {
+  let escaped = s.replace('\'', r"'\''");
+  format!("'{escaped}'")
 }
 
 #[cfg(test)]

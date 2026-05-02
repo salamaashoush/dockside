@@ -161,9 +161,10 @@ pub enum ExternalEditor {
 /// Terminal cursor style
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TerminalCursorStyle {
-  #[default]
   Block,
   Underline,
+  /// Thin I-beam (default).
+  #[default]
   Bar,
 }
 
@@ -226,9 +227,14 @@ pub struct AppSettings {
   pub docker_socket: String,
   /// Default Colima profile name
   pub default_colima_profile: String,
-  /// Enable Colima VM support (default: true on macOS, false on Linux)
+  /// Enable Colima VM support (default: true on macOS, false on Linux/Windows).
+  /// When disabled, the Colima sidebar group + Machines view are hidden.
   #[serde(default = "default_colima_enabled")]
   pub colima_enabled: bool,
+  /// Enable Kubernetes feature (Pods/Deployments/Services). Default: true.
+  /// When disabled, the Kubernetes sidebar group is hidden.
+  #[serde(default = "default_kubernetes_enabled")]
+  pub kubernetes_enabled: bool,
   /// Refresh interval for containers (in seconds)
   pub container_refresh_interval: u64,
   /// Refresh interval for stats (in seconds)
@@ -256,6 +262,13 @@ fn default_colima_enabled() -> bool {
   cfg!(target_os = "macos")
 }
 
+/// Default value for `kubernetes_enabled`. Off by default — most users only need
+/// the Docker side; we don't want to make missing kubeconfigs scream errors at
+/// every launch. Users can enable it from Settings.
+fn default_kubernetes_enabled() -> bool {
+  false
+}
+
 impl Default for AppSettings {
   fn default() -> Self {
     Self {
@@ -263,6 +276,7 @@ impl Default for AppSettings {
       docker_socket: String::new(),
       default_colima_profile: "default".to_string(),
       colima_enabled: default_colima_enabled(),
+      kubernetes_enabled: default_kubernetes_enabled(),
       container_refresh_interval: 5,
       stats_refresh_interval: 2,
       max_log_lines: 1000,
@@ -439,6 +453,7 @@ mod tests {
       docker_socket: "/custom/docker.sock".to_string(),
       default_colima_profile: "dev".to_string(),
       colima_enabled: true,
+      kubernetes_enabled: true,
       container_refresh_interval: 10,
       stats_refresh_interval: 5,
       max_log_lines: 5000,
@@ -459,7 +474,7 @@ mod tests {
 
   #[test]
   fn test_terminal_cursor_style_default() {
-    assert_eq!(TerminalCursorStyle::default(), TerminalCursorStyle::Block);
+    assert_eq!(TerminalCursorStyle::default(), TerminalCursorStyle::Bar);
   }
 
   #[test]

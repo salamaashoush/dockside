@@ -238,6 +238,13 @@ impl MachinesView {
       self.on_navigate_path("/", cx);
     }
 
+    // Re-create per-machine views if we're already on their tab. Without this,
+    // switching machines while on Terminal/Processes leaves a stale empty view.
+    let tab = self.active_tab;
+    if tab == MachineDetailTab::Terminal || tab == MachineDetailTab::Processes {
+      self.on_tab_change(tab, window, cx);
+    }
+
     cx.notify();
   }
 
