@@ -7,9 +7,12 @@
 //! - Dynamic terminal resize based on container bounds
 //! - vim, nano, htop, and other full-screen applications
 
+use std::sync::{Arc, Mutex};
+
 use gpui::{
-  App, Bounds, Context, FocusHandle, Focusable, Hsla, InteractiveElement, KeyDownEvent, MouseButton, ParentElement,
-  Pixels, Render, ScrollWheelEvent, Styled, Window, div, hsla, prelude::*, px,
+  App, Bounds, ClipboardItem, Context, FocusHandle, Focusable, Hsla, InteractiveElement, KeyDownEvent, MouseButton,
+  MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollWheelEvent, Styled,
+  Window, div, hsla, prelude::*, px,
 };
 use gpui_component::{
   Icon, IconName,
@@ -19,8 +22,68 @@ use gpui_component::{
   v_flex,
 };
 
-use super::{PtyTerminal, TerminalSessionType};
+use super::{PtyTerminal, TerminalSessionType, grid_element::GridMetrics};
 use crate::state::{TerminalCursorStyle, settings_state};
+
+/// Cell in scroll-aware coords. `col` is the viewport column (cols don't
+/// move with scrolling). `abs_row` is `viewport_row - scroll_offset` at
+/// record time, so it stays attached to the same line of content as the
+/// user scrolls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AbsCell {
+  col: u16,
+  abs_row: i32,
+}
+
+/// Normalized absolute selection (start precedes end in reading order).
+#[derive(Debug, Clone, Copy)]
+struct AbsSelection {
+  start: AbsCell,
+  end: AbsCell,
+}
+
+/// Active drag-selection state in scroll-aware cell coords.
+#[derive(Debug, Clone)]
+struct SelectionState {
+  anchor: AbsCell,
+  focus: AbsCell,
+  /// Mouse button still held — keep extending on move.
+  dragging: bool,
+  /// Cell content captured per `abs_row` while the row was visible in the
+  /// viewport. Lets copy work even after the row has scrolled out.
+  captured: std::collections::HashMap<i32, Vec<super::TerminalCell>>,
+}
+
+impl SelectionState {
+  fn normalized(&self) -> AbsSelection {
+    let (a, b) = (self.anchor, self.focus);
+    let (start, end) = if a.abs_row < b.abs_row || (a.abs_row == b.abs_row && a.col <= b.col) {
+      (a, b)
+    } else {
+      (b, a)
+    };
+    AbsSelection { start, end }
+  }
+  fn is_empty(&self) -> bool {
+    self.anchor == self.focus
+  }
+  fn new(anchor: AbsCell, focus: AbsCell, dragging: bool) -> Self {
+    Self {
+      anchor,
+      focus,
+      dragging,
+      captured: std::collections::HashMap::new(),
+    }
+  }
+}
+
+/// Convert a viewport cell at the given view scroll into an `AbsCell`.
+fn viewport_to_abs(col: u16, viewport_row: u16, view_scroll: i32) -> AbsCell {
+  AbsCell {
+    col,
+    abs_row: i32::from(viewport_row) - view_scroll,
+  }
+}
 
 /// A functional terminal view with full keyboard and color support
 pub struct TerminalView {
@@ -39,6 +102,23 @@ pub struct TerminalView {
   last_size: (u16, u16),
   /// Cursor blink phase. `true` = visible, `false` = hidden during blink off-phase.
   cursor_visible_phase: bool,
+  /// Active text selection in scroll-aware cell coords.
+  selection: Option<SelectionState>,
+  /// Live cell-grid metrics published by the grid element each frame.
+  /// Read on mouse events to convert pixel coords back to cell coords.
+  grid_metrics: Arc<Mutex<Option<GridMetrics>>>,
+  /// Our own running count of how far the viewport has been scrolled up
+  /// from the active area (positive = into history, 0 = at bottom).
+  /// libghostty does NOT expose a scroll-offset on its snapshot — every
+  /// snapshot just contains "the current viewport rows" — so we have to
+  /// keep this counter ourselves and feed it into selection coord math.
+  view_scroll: i32,
+  /// Last mouse position observed during a drag. The auto-scroll loop
+  /// polls this to decide whether to scroll the viewport.
+  last_drag_pos: Option<Point<Pixels>>,
+  /// True while the auto-scroll-during-drag task is running. Prevents
+  /// spawning duplicates when re-entering drag.
+  drag_scroll_running: bool,
 }
 
 impl TerminalView {
@@ -66,6 +146,11 @@ impl TerminalView {
       scroll_offset: 0,
       last_size: (80, 24),
       cursor_visible_phase: true,
+      selection: None,
+      grid_metrics: Arc::new(Mutex::new(None)),
+      view_scroll: 0,
+      last_drag_pos: None,
+      drag_scroll_running: false,
     };
 
     view.connect(cx);
@@ -155,19 +240,26 @@ impl TerminalView {
     }
   }
 
-  /// Forward a wheel scroll into libghostty's viewport. Positive `delta` =
-  /// scroll up (into history), negative = scroll down (toward active area).
+  /// Forward a wheel scroll into libghostty's viewport.
+  /// `delta > 0` = scroll up (reveal history) — libghostty wants negative.
+  /// Also updates the view-scroll counter so selection abs_row math stays
+  /// in sync with what libghostty actually shows.
   fn scroll(&mut self, delta: i32, _max_scroll: usize) {
     if let Some(terminal) = &self.terminal
       && delta != 0
     {
-      terminal.scroll_by(-isize::from(i16::try_from(delta).unwrap_or(0)));
+      let clamped = i16::try_from(delta).unwrap_or(0);
+      terminal.scroll_by(-isize::from(clamped));
+      // Mirror in our own counter. Clamp to >= 0 — libghostty silently
+      // ignores requests to scroll below the active area, so we should too.
+      self.view_scroll = (self.view_scroll + i32::from(clamped)).max(0);
     }
   }
 
   fn scroll_to_bottom(&mut self) {
     if let Some(terminal) = &self.terminal {
       terminal.scroll_to_bottom();
+      self.view_scroll = 0;
     }
   }
 
@@ -211,10 +303,204 @@ impl TerminalView {
     }
   }
 
-  #[allow(clippy::unused_self)]
-  fn copy_selection(&self, _cx: &mut Context<'_, Self>) {
-    // TODO: Implement text selection and copy
-    // For now, this is a placeholder
+  fn copy_selection(&self, cx: &mut Context<'_, Self>) {
+    let Some(sel) = self.selection.as_ref() else {
+      return;
+    };
+    if sel.is_empty() {
+      return;
+    }
+    let Some(terminal) = &self.terminal else { return };
+    let content = terminal.get_content_with_offset(self.scroll_offset);
+    let total_rows = content.lines.len();
+    if total_rows == 0 {
+      return;
+    }
+    let total_cols = content.lines.first().map_or(0, |l| l.cells.len());
+    if total_cols == 0 {
+      return;
+    }
+    let last_col = u16::try_from(total_cols - 1).unwrap_or(u16::MAX);
+    let cur_scroll = self.view_scroll;
+    let range = sel.normalized();
+    let s_abs = range.start.abs_row;
+    let e_abs = range.end.abs_row;
+
+    let mut out = String::new();
+    for abs in s_abs..=e_abs {
+      let (c0, c1) = if s_abs == e_abs {
+        (range.start.col.min(last_col), range.end.col.min(last_col))
+      } else if abs == s_abs {
+        (range.start.col.min(last_col), last_col)
+      } else if abs == e_abs {
+        (0u16, range.end.col.min(last_col))
+      } else {
+        (0u16, last_col)
+      };
+
+      // Prefer captured snapshot for this abs row (works even after the
+      // row scrolled out of view). Fall back to current viewport if it's
+      // visible right now and we somehow have no captured copy.
+      let cells_owned: Option<Vec<super::TerminalCell>> = sel.captured.get(&abs).cloned().or_else(|| {
+        let v_row = abs + cur_scroll;
+        let v_row_u = usize::try_from(v_row).ok()?;
+        if v_row_u < total_rows {
+          Some(content.lines[v_row_u].cells.clone())
+        } else {
+          None
+        }
+      });
+
+      let mut piece = String::new();
+      if let Some(cells) = cells_owned {
+        let cap = (c1 - c0 + 1) as usize;
+        piece.reserve(cap);
+        for col in c0..=c1 {
+          let ch = cells.get(col as usize).map_or(' ', |c| c.char);
+          piece.push(if ch == '\0' { ' ' } else { ch });
+        }
+      }
+      let trimmed = piece.trim_end_matches(' ').to_string();
+      out.push_str(&trimmed);
+      if abs != e_abs {
+        out.push('\n');
+      }
+    }
+
+    if !out.is_empty() {
+      cx.write_to_clipboard(ClipboardItem::new_string(out));
+    }
+  }
+
+  /// Convert a window-space pixel position into a viewport cell coord using
+  /// the metrics the grid published this frame. Returns `None` if metrics
+  /// are not yet available. The position is clamped INTO the grid even if
+  /// the actual mouse pos is outside (used by the auto-scroll loop to know
+  /// "which side did the cursor leave from").
+  fn pos_to_viewport_cell(&self, pos: Point<Pixels>) -> Option<(u16, u16)> {
+    let m = (*self.grid_metrics.lock().ok()?)?;
+    if f32::from(m.cell_width) <= 0.0 || f32::from(m.line_height) <= 0.0 || m.cols == 0 || m.rows == 0 {
+      return None;
+    }
+    let dx = f32::from(pos.x) - f32::from(m.origin.x);
+    let dy = f32::from(pos.y) - f32::from(m.origin.y);
+    let col_f = (dx / f32::from(m.cell_width)).floor();
+    let row_f = (dy / f32::from(m.line_height)).floor();
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let col = col_f.clamp(0.0, f32::from(m.cols.saturating_sub(1))) as u16;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let row = row_f.clamp(0.0, f32::from(m.rows.saturating_sub(1))) as u16;
+    Some((col, row))
+  }
+
+  /// Convert pos to an `AbsCell` using the most recently rendered scroll
+  /// offset. This is what mouse handlers call so the recorded coords stay
+  /// stable as content scrolls.
+  fn pos_to_abs_cell(&self, pos: Point<Pixels>) -> Option<AbsCell> {
+    let (col, row) = self.pos_to_viewport_cell(pos)?;
+    Some(viewport_to_abs(col, row, self.view_scroll))
+  }
+
+  /// Returns -1 if `pos` is above the grid, +1 if below, 0 if inside.
+  /// Used by the drag auto-scroll loop.
+  fn drag_edge(&self, pos: Point<Pixels>) -> i32 {
+    let Some(m) = self.grid_metrics.lock().ok().and_then(|g| *g) else {
+      return 0;
+    };
+    let top = f32::from(m.origin.y);
+    #[allow(clippy::cast_precision_loss)]
+    let bottom = top + f32::from(m.line_height) * f32::from(m.rows);
+    let y = f32::from(pos.y);
+    match (y < top, y >= bottom) {
+      (true, _) => -1,
+      (_, true) => 1,
+      _ => 0,
+    }
+  }
+
+  /// Spawn the auto-scroll loop that runs while the user is drag-selecting
+  /// and their cursor is outside the grid. Each tick scrolls the viewport
+  /// by one row toward the cursor and re-anchors the focus, so the
+  /// selection grows like in Ghostty / iTerm.
+  fn start_drag_autoscroll(cx: &mut Context<'_, Self>) {
+    cx.spawn(async move |this, cx| {
+      loop {
+        gpui::Timer::after(std::time::Duration::from_millis(33)).await;
+        let still_alive = this
+          .update(cx, |this, cx| {
+            let active = this
+              .selection
+              .as_ref()
+              .is_some_and(|s| s.dragging);
+            if !active {
+              this.drag_scroll_running = false;
+              return false;
+            }
+            let Some(pos) = this.last_drag_pos else {
+              return true;
+            };
+            let edge = this.drag_edge(pos);
+            if edge == 0 {
+              return true;
+            }
+            // edge < 0: cursor above grid → scroll into history (positive
+            // delta in `scroll()`'s convention reveals older lines).
+            this.scroll(if edge < 0 { 1 } else { -1 }, 0);
+            // Recompute focus from the (now-clamped) cursor position so
+            // selection extends to the new top/bottom row of the viewport.
+            if let Some(new_focus) = this.pos_to_abs_cell(pos)
+              && let Some(sel) = this.selection.as_mut()
+            {
+              sel.focus = new_focus;
+            }
+            cx.notify();
+            true
+          })
+          .unwrap_or(false);
+        if !still_alive {
+          break;
+        }
+      }
+    })
+    .detach();
+  }
+
+  /// Snap `cell` outward to a word boundary in the given line. A "word" is
+  /// a run of non-space chars.
+  fn word_bounds_at(line: &super::TerminalLine, col: u16) -> (u16, u16) {
+    let cells = &line.cells;
+    if cells.is_empty() {
+      return (col, col);
+    }
+    let last = u16::try_from(cells.len() - 1).unwrap_or(u16::MAX);
+    let c = usize::from(col.min(last));
+    let is_word = |ch: char| !ch.is_whitespace() && ch != '\0';
+    if !is_word(cells[c].char) {
+      return (col, col);
+    }
+    let mut left = c;
+    while left > 0 && is_word(cells[left - 1].char) {
+      left -= 1;
+    }
+    let mut right = c;
+    while right + 1 < cells.len() && is_word(cells[right + 1].char) {
+      right += 1;
+    }
+    (
+      u16::try_from(left).unwrap_or(u16::MAX),
+      u16::try_from(right).unwrap_or(u16::MAX),
+    )
+  }
+
+  /// Last column with non-space content in the row, or 0 if blank.
+  fn line_end_col(line: &super::TerminalLine) -> u16 {
+    let mut last = 0u16;
+    for (i, c) in line.cells.iter().enumerate() {
+      if c.char != ' ' && c.char != '\0' {
+        last = u16::try_from(i).unwrap_or(u16::MAX);
+      }
+    }
+    last
   }
 }
 
@@ -362,8 +648,77 @@ impl Render for TerminalView {
     let visible_rows = content.rows;
     let scroll_offset_for_bar = content.scroll_offset;
 
+    // Capture cells for any selection rows currently in viewport. This
+    // is what makes copy work after the user scrolls past the selection
+    // — every visible row in range gets its content snapshotted while
+    // visible.
+    let cur_scroll = self.view_scroll;
+    if let Some(sel) = self.selection.as_mut() {
+      let range = sel.normalized();
+      for (row_idx, line) in content.lines.iter().enumerate() {
+        let row_i32 = i32::try_from(row_idx).unwrap_or(i32::MAX);
+        let abs = row_i32 - cur_scroll;
+        if abs >= range.start.abs_row && abs <= range.end.abs_row {
+          sel.captured.insert(abs, line.cells.clone());
+        }
+      }
+    }
+
+    // Convert the abs-row selection into clipped viewport coords for the
+    // grid renderer. Rows that are entirely off-screen drop out; the
+    // first/last visible row gets clipped to col 0 / last_col so the
+    // overlay rect stays a continuous shape.
+    let selection_for_grid = self.selection.as_ref().and_then(|sel| {
+      if sel.is_empty() {
+        return None;
+      }
+      let total_rows = content.lines.len();
+      let total_cols = content.lines.first().map_or(0, |l| l.cells.len());
+      if total_rows == 0 || total_cols == 0 {
+        return None;
+      }
+      let last_col = u16::try_from(total_cols - 1).unwrap_or(u16::MAX);
+      let rows_i32 = i32::try_from(total_rows).unwrap_or(i32::MAX);
+      let range = sel.normalized();
+      let s_v = range.start.abs_row + cur_scroll;
+      let e_v = range.end.abs_row + cur_scroll;
+      // Selection entirely above or below the viewport — nothing to draw.
+      if e_v < 0 || s_v >= rows_i32 {
+        return None;
+      }
+      let s_row_clamped = s_v.max(0);
+      let e_row_clamped = e_v.min(rows_i32 - 1);
+      let start_col = if s_row_clamped == s_v {
+        range.start.col.min(last_col)
+      } else {
+        0
+      };
+      let end_col = if e_row_clamped == e_v {
+        range.end.col.min(last_col)
+      } else {
+        last_col
+      };
+      let s_row = u16::try_from(s_row_clamped).unwrap_or(u16::MAX);
+      let e_row = u16::try_from(e_row_clamped).unwrap_or(u16::MAX);
+      Some(super::grid_element::GridSelection {
+        start: (start_col, s_row),
+        end: (end_col, e_row),
+      })
+    });
+
     // Custom GPUI element handles the actual cell grid.
     let on_resize = self.terminal.as_ref().map(PtyTerminal::resize_callback);
+    let selection_color = colors.selection;
+    let selection_color = if selection_color.a >= 0.95 {
+      // If theme reports an opaque selection swatch, drop alpha so glyphs
+      // stay legible under the overlay.
+      Hsla {
+        a: 0.35,
+        ..selection_color
+      }
+    } else {
+      selection_color
+    };
     let grid = super::grid_element::TerminalGrid {
       content,
       font_size: px(font_size),
@@ -374,6 +729,9 @@ impl Render for TerminalView {
       cursor_style,
       on_resize,
       last_reported_size: None,
+      selection: selection_for_grid,
+      selection_color,
+      metrics_sink: Some(self.grid_metrics.clone()),
     };
 
     // Scrollbar - only show if there's content to scroll
@@ -440,7 +798,10 @@ impl Render for TerminalView {
         let shift = event.keystroke.modifiers.shift;
         let cmd = event.keystroke.modifiers.platform; // Cmd on macOS, Ctrl on other platforms
 
-        // Handle clipboard shortcuts (Cmd+V for paste, Cmd+C for copy)
+        // Clipboard shortcuts:
+        //  - Cmd+C / Cmd+V on macOS (platform = Cmd)
+        //  - Ctrl+Shift+C / Ctrl+Shift+V on Linux/Windows so plain Ctrl+C
+        //    still sends SIGINT to the foreground process.
         if cmd && !ctrl && !alt {
           match key.to_lowercase().as_str() {
             "v" => {
@@ -455,6 +816,23 @@ impl Render for TerminalView {
             _ => {}
           }
         }
+        if ctrl && shift && !alt {
+          match key.to_lowercase().as_str() {
+            "c" => {
+              this.copy_selection(cx);
+              return;
+            }
+            "v" => {
+              this.paste(cx);
+              this.scroll_to_bottom();
+              return;
+            }
+            _ => {}
+          }
+        }
+
+        // Typing past the modifier guards above invalidates any selection.
+        this.selection = None;
 
         // Auto-scroll to bottom when typing
         this.scroll_to_bottom();
@@ -506,18 +884,110 @@ impl Render for TerminalView {
           0
         };
 
-        // Apply scroll if we have any delta
-        // Negate for natural scrolling: swipe down (negative y) = scroll up (increase offset)
+        // `lines > 0` from GPUI = wheel scrolled up. Pass through directly
+        // — `scroll()` translates "+ = into history" into libghostty's
+        // negative-delta convention.
         if lines != 0 {
-          this.scroll(-lines, scroll_max);
+          // Selection is anchored in scroll-aware (abs_row) coords, so the
+          // highlight stays attached to the same content as the viewport
+          // moves — no clear here.
+          this.scroll(lines, scroll_max);
           cx.notify();
         }
       }))
-      // Click to focus
-      .on_mouse_down(MouseButton::Left, cx.listener(|this, _ev, window, cx| {
-        this.focus_handle.focus(window);
+      // Mouse-down: focus + start (or extend) selection.
+      .on_mouse_down(
+        MouseButton::Left,
+        cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+          this.focus_handle.focus(window);
+          let Some(viewport_cell) = this.pos_to_viewport_cell(ev.position) else {
+            cx.notify();
+            return;
+          };
+          let scroll = this.view_scroll;
+          let abs = viewport_to_abs(viewport_cell.0, viewport_cell.1, scroll);
+          let row_v = viewport_cell.1;
+          match ev.click_count {
+            1 if ev.modifiers.shift => {
+              if let Some(sel) = this.selection.as_mut() {
+                sel.focus = abs;
+                sel.dragging = true;
+              } else {
+                this.selection = Some(SelectionState::new(abs, abs, true));
+              }
+            }
+            2 => {
+              if let Some(terminal) = &this.terminal {
+                let content = terminal.get_content_with_offset(this.scroll_offset);
+                if let Some(line) = content.lines.get(row_v as usize) {
+                  let (l, r) = Self::word_bounds_at(line, viewport_cell.0);
+                  let a = viewport_to_abs(l, row_v, scroll);
+                  let f = viewport_to_abs(r, row_v, scroll);
+                  this.selection = Some(SelectionState::new(a, f, false));
+                }
+              }
+            }
+            3 => {
+              if let Some(terminal) = &this.terminal {
+                let content = terminal.get_content_with_offset(this.scroll_offset);
+                if let Some(line) = content.lines.get(row_v as usize) {
+                  let end = Self::line_end_col(line);
+                  let a = viewport_to_abs(0, row_v, scroll);
+                  let f = viewport_to_abs(end, row_v, scroll);
+                  this.selection = Some(SelectionState::new(a, f, false));
+                }
+              }
+            }
+            _ => {
+              this.selection = Some(SelectionState::new(abs, abs, true));
+            }
+          }
+          // If we just entered a drag, kick off the auto-scroll loop.
+          if this
+            .selection
+            .as_ref()
+            .is_some_and(|s| s.dragging)
+            && !this.drag_scroll_running
+          {
+            this.drag_scroll_running = true;
+            this.last_drag_pos = Some(ev.position);
+            Self::start_drag_autoscroll(cx);
+          }
+          cx.notify();
+        }),
+      )
+      // Mouse-move: extend selection while the left button is held.
+      .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _window, cx| {
+        if !ev.dragging() {
+          return;
+        }
+        let still_dragging = this.selection.as_ref().is_some_and(|s| s.dragging);
+        if !still_dragging {
+          return;
+        }
+        // Always remember the latest position so the auto-scroll loop can
+        // act on it even when the cursor stops moving outside the grid.
+        this.last_drag_pos = Some(ev.position);
+        if let Some(abs) = this.pos_to_abs_cell(ev.position)
+          && let Some(s) = this.selection.as_mut()
+        {
+          s.focus = abs;
+        }
         cx.notify();
       }))
+      // Mouse-up: finalize / clear empty selection.
+      .on_mouse_up(
+        MouseButton::Left,
+        cx.listener(|this, _ev: &MouseUpEvent, _window, cx| {
+          if let Some(sel) = this.selection.as_mut() {
+            sel.dragging = false;
+            if sel.is_empty() {
+              this.selection = None;
+            }
+          }
+          cx.notify();
+        }),
+      )
       // Terminal content area — custom Element renders the cell grid.
       .child(
         div()

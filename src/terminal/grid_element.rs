@@ -29,6 +29,29 @@ use crate::state::TerminalCursorStyle;
 /// no fallbacks — the shaper must produce stable advances across cells.
 const PRIMARY_FAMILY: &str = "DejaVu Sans Mono";
 
+/// Cell-grid coordinate (column, row) inside the rendered viewport.
+pub type GridPoint = (u16, u16);
+
+/// Normalized selection range in viewport cell coords. `start` precedes
+/// `end` in reading order (smaller row, or same row with smaller col).
+#[derive(Debug, Clone, Copy)]
+pub struct GridSelection {
+  pub start: GridPoint,
+  pub end: GridPoint,
+}
+
+/// Live cell metrics published by [`TerminalGrid::prepaint`] each frame so
+/// the parent view can convert window-space mouse coords back into cell
+/// coords using the same metrics the grid actually painted with.
+#[derive(Debug, Clone, Copy)]
+pub struct GridMetrics {
+  pub origin: Point<Pixels>,
+  pub cell_width: Pixels,
+  pub line_height: Pixels,
+  pub cols: u16,
+  pub rows: u16,
+}
+
 /// Render a `TerminalContent` snapshot inside its parent's bounds.
 pub struct TerminalGrid {
   pub content: TerminalContent,
@@ -44,6 +67,12 @@ pub struct TerminalGrid {
   pub on_resize: Option<std::sync::Arc<dyn Fn(u16, u16) + Send + Sync + 'static>>,
   /// Last-known reported size (used to dedupe resize callbacks).
   pub last_reported_size: Option<(u16, u16)>,
+  /// Active text selection (already normalized).
+  pub selection: Option<GridSelection>,
+  /// Selection highlight color (translucent overlay).
+  pub selection_color: Hsla,
+  /// Out-param: the metrics used this frame, written in `prepaint`.
+  pub metrics_sink: Option<std::sync::Arc<std::sync::Mutex<Option<GridMetrics>>>>,
 }
 
 /// Computed layout state for a single frame.
@@ -56,6 +85,8 @@ pub struct GridLayout {
   bg_runs: Vec<BgRun>,
   text_runs: Vec<TextRunSpec>,
   cursor_overlay: Option<CursorOverlay>,
+  selection_rects: Vec<Bounds<Pixels>>,
+  selection_color: Hsla,
 }
 
 struct BgRun {
@@ -179,6 +210,27 @@ impl Element for TerminalGrid {
       px((f32::from(bounds.origin.y) * scale).floor() / scale),
     );
 
+    // Publish live metrics so the parent view can convert mouse coords
+    // back to cell coords using the same numbers we paint with.
+    if let Some(sink) = &self.metrics_sink {
+      #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+      let cols = if f32::from(cell_width) > 0.0 {
+        (f32::from(bounds.size.width) / f32::from(cell_width)).floor() as u16
+      } else {
+        0
+      };
+      let rows_u16 = u16::try_from(self.content.lines.len()).unwrap_or(u16::MAX);
+      if let Ok(mut g) = sink.lock() {
+        *g = Some(GridMetrics {
+          origin,
+          cell_width,
+          line_height,
+          cols,
+          rows: rows_u16,
+        });
+      }
+    }
+
     let bg_default = self.default_bg;
     let fg_default = self.default_fg;
     let mut bg_runs: Vec<BgRun> = Vec::new();
@@ -274,6 +326,48 @@ impl Element for TerminalGrid {
       }
     }
 
+    // Selection rects: one bounds per row spanned, partial on first/last.
+    let mut selection_rects: Vec<Bounds<Pixels>> = Vec::new();
+    if let Some(sel) = self.selection {
+      let total_rows = self.content.lines.len();
+      let total_cols = self
+        .content
+        .lines
+        .first()
+        .map_or(0usize, |l| l.cells.len());
+      if total_rows > 0 && total_cols > 0 {
+        let last_row = u16::try_from(total_rows - 1).unwrap_or(u16::MAX);
+        let last_col = u16::try_from(total_cols - 1).unwrap_or(u16::MAX);
+        let s_row = sel.start.1.min(last_row);
+        let e_row = sel.end.1.min(last_row);
+        for row in s_row..=e_row {
+          let (c0, c1) = if s_row == e_row {
+            (sel.start.0.min(last_col), sel.end.0.min(last_col))
+          } else if row == s_row {
+            (sel.start.0.min(last_col), last_col)
+          } else if row == e_row {
+            (0u16, sel.end.0.min(last_col))
+          } else {
+            (0u16, last_col)
+          };
+          if c0 > c1 {
+            continue;
+          }
+          #[allow(clippy::cast_precision_loss)]
+          let x = f32::from(origin.x) + f32::from(cell_width) * f32::from(c0);
+          #[allow(clippy::cast_precision_loss)]
+          let span = f32::from(c1 - c0 + 1);
+          let w = f32::from(cell_width) * span;
+          #[allow(clippy::cast_precision_loss)]
+          let y = origin.y + line_height * f32::from(row);
+          selection_rects.push(Bounds::new(
+            point(px(x.floor()), y),
+            size(px(w.ceil()), line_height),
+          ));
+        }
+      }
+    }
+
     GridLayout {
       cell_width,
       line_height,
@@ -282,6 +376,8 @@ impl Element for TerminalGrid {
       bg_runs,
       text_runs,
       cursor_overlay,
+      selection_rects,
+      selection_color: self.selection_color,
     }
   }
 
@@ -314,7 +410,13 @@ impl Element for TerminalGrid {
       let _ = shaped.paint(tr.origin, layout.line_height, window, cx);
     }
 
-    // 4. Cursor overlay (Bar / Underline). Block already painted inline.
+    // 4. Selection overlay — translucent rect on top of bg + text. Painted
+    //    before the cursor so the cursor still shows above selection.
+    for rect in &layout.selection_rects {
+      window.paint_quad(fill(*rect, layout.selection_color));
+    }
+
+    // 5. Cursor overlay (Bar / Underline). Block already painted inline.
     if let Some(cur) = &layout.cursor_overlay {
       let bounds = match cur.kind {
         TerminalCursorStyle::Block => cur.bounds,
