@@ -3,6 +3,7 @@ use crate::colima::{ColimaConfig, VmFileEntry, VmOsInfo};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CurrentView {
   #[default]
+  Dashboard,
   Containers,
   Compose,
   Volumes,
@@ -86,7 +87,7 @@ mod tests {
 
   #[test]
   fn test_current_view_default() {
-    assert_eq!(CurrentView::default(), CurrentView::Containers);
+    assert_eq!(CurrentView::default(), CurrentView::Dashboard);
   }
 
   #[test]
@@ -100,6 +101,7 @@ mod tests {
   fn test_current_view_all_variants() {
     // Ensure all views can be created
     let views = vec![
+      CurrentView::Dashboard,
       CurrentView::Containers,
       CurrentView::Compose,
       CurrentView::Volumes,
@@ -125,7 +127,7 @@ mod tests {
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 24);
+    assert_eq!(views.len(), 25);
   }
 
   #[test]

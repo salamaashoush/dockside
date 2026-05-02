@@ -88,6 +88,11 @@ impl ListDelegate for ServiceListDelegate {
     let is_selected = matches!(global_selection, Selection::Service { name, namespace } if *name == service.name && *namespace == service.namespace);
     let service_name = service.name.clone();
     let service_namespace = service.namespace.clone();
+    let pin_favorite = crate::state::FavoriteRef::Service {
+      name: service.name.clone(),
+      namespace: service.namespace.clone(),
+    };
+    let pinned = services::is_favorite(&pin_favorite, cx);
 
     let icon_bg = colors.primary;
 
@@ -110,13 +115,29 @@ impl ListDelegate for ServiceListDelegate {
         let name = service_name.clone();
         let ns = service_namespace.clone();
 
-        let mut menu = menu.item(PopupMenuItem::new("View YAML").icon(IconName::File).on_click({
-          let name = name.clone();
-          let ns = ns.clone();
-          move |_, _, cx| {
-            services::open_service_yaml(name.clone(), ns.clone(), cx);
-          }
-        }));
+        let mut menu = menu
+          .item(PopupMenuItem::new("View YAML").icon(IconName::File).on_click({
+            let name = name.clone();
+            let ns = ns.clone();
+            move |_, _, cx| {
+              services::open_service_yaml(name.clone(), ns.clone(), cx);
+            }
+          }))
+          .separator()
+          .item(
+            PopupMenuItem::new(if pinned {
+              "Unpin from Dashboard"
+            } else {
+              "Pin to Dashboard"
+            })
+            .icon(IconName::Star)
+            .on_click({
+              let pin = pin_favorite.clone();
+              move |_, _, cx| {
+                services::toggle_favorite(pin.clone(), cx);
+              }
+            }),
+          );
 
         // Only show delete for non-system services
         if !is_system_service {

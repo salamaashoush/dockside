@@ -15,6 +15,7 @@
 mod colima;
 mod core;
 mod docker;
+mod favorites;
 mod gpui_tokio;
 mod host;
 mod init;
@@ -28,6 +29,7 @@ mod watchers;
 pub use colima::*;
 pub use core::*;
 pub use docker::*;
+pub use favorites::*;
 pub use gpui_tokio::Tokio;
 pub use host::*;
 pub use init::*;

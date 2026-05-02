@@ -100,6 +100,11 @@ impl ListDelegate for ContainerListDelegate {
     let running = is_running;
     let paused = container.state.is_paused();
     let row = ix.row;
+    let pin_favorite = crate::state::FavoriteRef::Container {
+      id: container_id.clone(),
+      name: container.name.clone(),
+    };
+    let pinned = services::is_favorite(&pin_favorite, cx);
 
     let menu_button = Button::new(("menu", row))
       .icon(IconName::Ellipsis)
@@ -222,7 +227,21 @@ impl ListDelegate for ContainerListDelegate {
         }
 
         // Common actions for all states
+        let pin_label = if pinned {
+          "Unpin from Dashboard"
+        } else {
+          "Pin to Dashboard"
+        };
+        let pin_ref = pin_favorite.clone();
         menu = menu
+          .separator()
+          .item(
+            PopupMenuItem::new(pin_label)
+              .icon(IconName::Star)
+              .on_click(move |_, _, cx| {
+                services::toggle_favorite(pin_ref.clone(), cx);
+              }),
+          )
           .separator()
           .item(PopupMenuItem::new("Rename").icon(Icon::new(AppIcon::Edit)).on_click({
             let id = id.clone();

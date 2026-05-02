@@ -89,6 +89,11 @@ impl ListDelegate for PodListDelegate {
     let is_running = matches!(pod.phase, PodPhase::Running);
     let pod_name = pod.name.clone();
     let pod_namespace = pod.namespace.clone();
+    let pin_favorite = crate::state::FavoriteRef::Pod {
+      name: pod.name.clone(),
+      namespace: pod.namespace.clone(),
+    };
+    let pinned = services::is_favorite(&pin_favorite, cx);
 
     // Check if this is a system pod (don't allow delete)
     let is_system_pod = matches!(
@@ -168,6 +173,21 @@ impl ListDelegate for PodListDelegate {
                   services::restart_pod(name.clone(), ns.clone(), cx);
                 }
               }),
+          )
+          .separator()
+          .item(
+            PopupMenuItem::new(if pinned {
+              "Unpin from Dashboard"
+            } else {
+              "Pin to Dashboard"
+            })
+            .icon(IconName::Star)
+            .on_click({
+              let pin = pin_favorite.clone();
+              move |_, _, cx| {
+                services::toggle_favorite(pin.clone(), cx);
+              }
+            }),
           );
 
         // Only show delete options for non-system pods

@@ -218,6 +218,49 @@ impl ExternalEditor {
   }
 }
 
+/// A pinned favorite shown on the Dashboard. Click navigates to the
+/// corresponding detail view via the existing navigation services.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FavoriteRef {
+  Container { id: String, name: String },
+  Image { id: String, repo_tag: String },
+  Volume { name: String },
+  Network { name: String, id: String },
+  Pod { name: String, namespace: String },
+  Deployment { name: String, namespace: String },
+  Service { name: String, namespace: String },
+  Machine { id: String, label: String },
+}
+
+impl FavoriteRef {
+  pub fn label(&self) -> &str {
+    match self {
+      Self::Image { repo_tag, .. } => repo_tag,
+      Self::Container { name, .. }
+      | Self::Volume { name }
+      | Self::Network { name, .. }
+      | Self::Pod { name, .. }
+      | Self::Deployment { name, .. }
+      | Self::Service { name, .. } => name,
+      Self::Machine { label, .. } => label,
+    }
+  }
+
+  pub fn kind_label(&self) -> &'static str {
+    match self {
+      Self::Container { .. } => "Container",
+      Self::Image { .. } => "Image",
+      Self::Volume { .. } => "Volume",
+      Self::Network { .. } => "Network",
+      Self::Pod { .. } => "Pod",
+      Self::Deployment { .. } => "Deployment",
+      Self::Service { .. } => "Service",
+      Self::Machine { .. } => "Machine",
+    }
+  }
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -283,6 +326,9 @@ pub struct AppSettings {
   /// Default disk size (GiB) for new Colima profiles.
   #[serde(default = "default_colima_disk")]
   pub colima_default_disk_gb: u32,
+  /// Favorites pinned to the Dashboard.
+  #[serde(default)]
+  pub favorites: Vec<FavoriteRef>,
 }
 
 fn default_true() -> bool {
@@ -342,6 +388,7 @@ impl Default for AppSettings {
       colima_default_cpus: 2,
       colima_default_memory_gb: 4,
       colima_default_disk_gb: 60,
+      favorites: Vec::new(),
     }
   }
 }
@@ -529,6 +576,7 @@ mod tests {
       colima_default_cpus: 2,
       colima_default_memory_gb: 4,
       colima_default_disk_gb: 60,
+      favorites: Vec::new(),
     };
 
     assert_eq!(settings.theme, ThemeName::GruvboxDark);

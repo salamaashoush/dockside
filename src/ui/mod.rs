@@ -8,6 +8,7 @@ pub mod configmaps;
 pub mod containers;
 pub mod cronjobs;
 pub mod daemonsets;
+pub mod dashboard;
 pub mod deployments;
 pub mod dialogs;
 pub mod global_search;

@@ -84,6 +84,11 @@ impl ListDelegate for DeploymentListDelegate {
     let is_selected = matches!(global_selection, Selection::Deployment { name, namespace } if *name == deployment.name && *namespace == deployment.namespace);
     let deployment_name = deployment.name.clone();
     let deployment_namespace = deployment.namespace.clone();
+    let pin_favorite = crate::state::FavoriteRef::Deployment {
+      name: deployment.name.clone(),
+      namespace: deployment.namespace.clone(),
+    };
+    let pinned = services::is_favorite(&pin_favorite, cx);
 
     // Check if this is a system deployment (don't allow delete)
     let is_system_deployment = matches!(
@@ -141,7 +146,22 @@ impl ListDelegate for DeploymentListDelegate {
             move |_, _, cx| {
               services::open_deployment_yaml(name.clone(), ns.clone(), cx);
             }
-          }));
+          }))
+          .separator()
+          .item(
+            PopupMenuItem::new(if pinned {
+              "Unpin from Dashboard"
+            } else {
+              "Pin to Dashboard"
+            })
+            .icon(IconName::Star)
+            .on_click({
+              let pin = pin_favorite.clone();
+              move |_, _, cx| {
+                services::toggle_favorite(pin.clone(), cx);
+              }
+            }),
+          );
 
         // Only show delete for non-system deployments
         if !is_system_deployment {

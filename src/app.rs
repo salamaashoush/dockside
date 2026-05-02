@@ -32,6 +32,7 @@ use crate::ui::configmaps::ConfigMapsView;
 use crate::ui::containers::ContainersView;
 use crate::ui::cronjobs::CronJobsView;
 use crate::ui::daemonsets::DaemonSetsView;
+use crate::ui::dashboard::DashboardView;
 use crate::ui::deployments::DeploymentsView;
 use crate::ui::dialogs;
 use crate::ui::global_search::{GlobalSearch, GlobalSearchEvent};
@@ -81,6 +82,7 @@ pub struct DocksideApp {
   pvcs_view: Entity<PvcsView>,
   networking_view: Entity<NetworkingView>,
   cluster_view: Entity<ClusterView>,
+  dashboard_view: Entity<DashboardView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
   pending_notifications: Vec<(NotificationType, String)>,
   // Pending setup check result - triggers dialog when set
@@ -185,6 +187,7 @@ impl DocksideApp {
       move |_| NetworkingView::new(svcs, ing)
     });
     let cluster_view = cx.new(|cx| ClusterView::new(window, cx));
+    let dashboard_view = cx.new(|cx| DashboardView::new(window, cx));
 
     // Run setup checks async — only surface the dialog if a *required* piece is
     // missing. Docker is the only universal must-have. Colima is only required
@@ -257,6 +260,7 @@ impl DocksideApp {
       pvcs_view,
       networking_view,
       cluster_view,
+      dashboard_view,
       pending_notifications: Vec::new(),
       pending_setup_check: None,
       focus_handle,
@@ -593,6 +597,18 @@ impl DocksideApp {
             .collapsible(false)
             .pt(px(52.)) // Space for traffic lights
             .child(
+                SidebarGroup::new("Overview").child(
+                    SidebarMenu::new().child(
+                        SidebarMenuItem::new("Dashboard")
+                            .icon(IconName::LayoutDashboard)
+                            .active(current_view == CurrentView::Dashboard)
+                            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                crate::services::set_view(CurrentView::Dashboard, cx);
+                            })),
+                    ),
+                ),
+            )
+            .child(
                 SidebarGroup::new(docker_header).child(
                     SidebarMenu::new()
                         .child(
@@ -787,6 +803,7 @@ impl DocksideApp {
       CurrentView::Ingresses => div().size_full().child(self.ingresses_view.clone()),
       CurrentView::Pvcs => div().size_full().child(self.pvcs_view.clone()),
       CurrentView::Cluster => div().size_full().child(self.cluster_view.clone()),
+      CurrentView::Dashboard => div().size_full().child(self.dashboard_view.clone()),
     }
   }
 
