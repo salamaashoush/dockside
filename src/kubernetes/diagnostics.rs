@@ -38,22 +38,51 @@ impl K8sStatus {
   }
 }
 
-/// Path to the user's kubeconfig honoring `$KUBECONFIG`, falling back to `~/.kube/config`.
-fn kubeconfig_path() -> Option<PathBuf> {
-  if let Ok(p) = std::env::var("KUBECONFIG")
-    && !p.is_empty()
-  {
-    // KUBECONFIG can be a colon-separated list; take the first non-empty entry.
-    let first = p.split(if cfg!(windows) { ';' } else { ':' }).find(|s| !s.is_empty());
-    if let Some(first) = first {
-      return Some(PathBuf::from(first));
-    }
+/// First kubeconfig path in `$KUBECONFIG`, if set and non-empty.
+fn kubeconfig_env_path() -> Option<PathBuf> {
+  let p = std::env::var("KUBECONFIG").ok()?;
+  if p.is_empty() {
+    return None;
   }
-  dirs::home_dir().map(|home| home.join(".kube").join("config"))
+  let sep = if cfg!(windows) { ';' } else { ':' };
+  p.split(sep).find(|s| !s.is_empty()).map(PathBuf::from)
+}
+
+/// First detected kubeconfig path that actually exists on disk, if any.
+#[must_use]
+pub fn first_existing_known_kubeconfig() -> Option<PathBuf> {
+  known_kubeconfig_paths().into_iter().find(|p| p.exists())
+}
+
+/// Well-known kubeconfig locations across local k8s flavors. Order
+/// matters: anything user-pointed (`KUBECONFIG`, `~/.kube/config`) wins
+/// over distro-managed configs.
+fn known_kubeconfig_paths() -> Vec<PathBuf> {
+  let mut out = Vec::new();
+  if let Some(p) = kubeconfig_env_path() {
+    out.push(p);
+  }
+  if let Some(home) = dirs::home_dir() {
+    out.push(home.join(".kube").join("config"));
+    // microk8s on Linux/macOS via snap.
+    out.push(
+      home
+        .join("snap")
+        .join("microk8s")
+        .join("current")
+        .join("credentials")
+        .join("client.config"),
+    );
+  }
+  // k3s default install (no setup script run).
+  out.push(PathBuf::from("/etc/rancher/k3s/k3s.yaml"));
+  // kubeadm-installed clusters.
+  out.push(PathBuf::from("/etc/kubernetes/admin.conf"));
+  out
 }
 
 fn kubeconfig_exists() -> bool {
-  kubeconfig_path().is_some_and(|p| p.exists())
+  known_kubeconfig_paths().iter().any(|p| p.exists())
 }
 
 /// Platform-specific install command for `kubectl`. Returned as
@@ -77,20 +106,38 @@ pub fn kubectl_install_hint() -> (&'static str, &'static str) {
 }
 
 /// Hints for getting a working kubeconfig once `kubectl` is installed.
+/// Generic across distros — names the common local-cluster options
+/// (k3s, kubeadm, colima, microk8s, Docker Desktop) without prescribing
+/// one. If we detected a known kubeconfig path that the kube crate
+/// can't read directly (e.g. `/etc/rancher/k3s/k3s.yaml` is root-owned),
+/// the second tuple element points at it so the user can copy or
+/// `export KUBECONFIG`.
 #[must_use]
 pub fn kubeconfig_setup_hint() -> (&'static str, &'static str) {
+  // Surface the first known-but-not-default path we find — most likely
+  // user has a cluster, just hasn't pointed kubectl at it.
+  for p in known_kubeconfig_paths() {
+    if p.exists() {
+      // Found something at a non-default location; suggest pointing
+      // KUBECONFIG at it.
+      let s = p.to_string_lossy();
+      // Leak the formatted string so we can return &'static. Acceptable:
+      // hint runs once on error path.
+      let cmd: &'static str = Box::leak(format!("export KUBECONFIG={s}").into_boxed_str());
+      return (
+        cmd,
+        "A kubeconfig was found at a non-default location. Export this in your shell or set the kubeconfig path in Dockside Settings.",
+      );
+    }
+  }
   match Platform::detect() {
-    Platform::MacOS | Platform::Linux => (
-      "colima start --kubernetes",
-      "Start Colima with Kubernetes enabled — it writes ~/.kube/config automatically. Or point KUBECONFIG at an existing cluster's kubeconfig file.",
-    ),
-    Platform::WindowsWsl2 => (
-      "colima start --kubernetes",
-      "Start Colima with Kubernetes enabled inside your WSL2 distro. Or point KUBECONFIG at an existing kubeconfig.",
+    Platform::MacOS | Platform::Linux | Platform::WindowsWsl2 => (
+      "kubectl config view",
+      "No kubeconfig found. Start a cluster (k3s, kubeadm, colima --kubernetes, microk8s, kind, minikube, Docker Desktop, …) so kubectl writes ~/.kube/config, or set KUBECONFIG at an existing one.",
     ),
     Platform::Windows => (
       "kubectl config view",
-      "Configure your kubeconfig: set the KUBECONFIG environment variable, or place a config at %USERPROFILE%\\.kube\\config.",
+      "Configure your kubeconfig: set the KUBECONFIG environment variable, or place a config at %USERPROFILE%\\.kube\\config (Docker Desktop, kind, minikube, etc. write it for you).",
     ),
   }
 }

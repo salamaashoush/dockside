@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
-use k8s_openapi::api::core::v1::{Namespace, Pod};
+use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, Secret};
 use kube::{
   Api, Client, Config,
   api::{DeleteParams, ListParams, LogParams, Patch, PatchParams, PostParams},
@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use k8s_openapi::api::core::v1::Service;
 
-use super::types::{DeploymentInfo, NamespaceInfo, PodInfo, ServiceInfo};
+use super::diagnostics::first_existing_known_kubeconfig;
+use super::types::{ConfigMapInfo, DeploymentInfo, NamespaceInfo, PodInfo, SecretInfo, ServiceInfo};
 
 /// Kubernetes client wrapper
 pub struct KubeClient {
@@ -25,12 +26,28 @@ impl KubeClient {
   /// Includes VPN-aware fallback: if the server URL uses a VM IP that's unreachable,
   /// automatically tries localhost with the same port
   pub async fn new() -> Result<Self> {
-    // First, try to load the config to inspect the server URL.
-    // Honor the user's `kubeconfig_path` setting if set; otherwise
-    // fall back to the standard `Config::infer` discovery.
+    // Honor the user's `kubeconfig_path` setting if set, then standard
+    // `Config::infer` (which respects KUBECONFIG and ~/.kube/config),
+    // then fall back to known distro paths (k3s, kubeadm, microk8s) so
+    // a fresh native install with no `~/.kube/config` still works.
     let custom_path = crate::state::AppSettings::load().kubeconfig_path;
     let config = if custom_path.is_empty() {
-      Config::infer().await.context("Failed to load kubeconfig")?
+      match Config::infer().await {
+        Ok(c) => c,
+        Err(infer_err) => {
+          if let Some(path) = first_existing_known_kubeconfig() {
+            let path_str = path.to_string_lossy().into_owned();
+            tracing::info!("Config::infer failed; falling back to detected kubeconfig at {path_str}");
+            let kubeconfig = Kubeconfig::read_from(&path)
+              .with_context(|| format!("Failed to read detected kubeconfig at {path_str}"))?;
+            Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
+              .await
+              .with_context(|| format!("Failed to build kube config from {path_str}"))?
+          } else {
+            return Err(infer_err).context("Failed to load kubeconfig");
+          }
+        }
+      }
     } else {
       let kubeconfig =
         Kubeconfig::read_from(&custom_path).with_context(|| format!("Failed to read kubeconfig at {custom_path}"))?;
@@ -422,6 +439,120 @@ impl KubeClient {
     let svc = api.get(name).await.context(format!("Failed to get service {name}"))?;
 
     serde_yaml::to_string(&svc).context("Failed to serialize service to YAML")
+  }
+
+  // ========================================================================
+  // Secret + ConfigMap Methods
+  // ========================================================================
+
+  pub async fn list_secrets(&self, namespace: Option<&str>) -> Result<Vec<SecretInfo>> {
+    let secrets = if let Some(ns) = namespace {
+      let api: Api<Secret> = Api::namespaced(self.client.clone(), ns);
+      api
+        .list(&ListParams::default())
+        .await
+        .context(format!("Failed to list secrets in namespace {ns}"))?
+    } else {
+      let api: Api<Secret> = Api::all(self.client.clone());
+      api
+        .list(&ListParams::default())
+        .await
+        .context("Failed to list secrets in all namespaces")?
+    };
+    Ok(secrets.items.iter().map(SecretInfo::from_secret).collect())
+  }
+
+  pub async fn delete_secret(&self, name: &str, namespace: &str) -> Result<()> {
+    let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .delete(name, &DeleteParams::default())
+      .await
+      .context(format!("Failed to delete secret {name} in namespace {namespace}"))?;
+    Ok(())
+  }
+
+  #[allow(dead_code)]
+  pub async fn get_secret_yaml(&self, name: &str, namespace: &str) -> Result<String> {
+    let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+    let s = api.get(name).await.context(format!("Failed to get secret {name}"))?;
+    serde_yaml::to_string(&s).context("Failed to serialize secret to YAML")
+  }
+
+  /// Read raw secret data as `(key, base64-encoded-value)` pairs.
+  /// `string_data` keys are returned with raw plaintext (not base64).
+  pub async fn read_secret_entries(&self, name: &str, namespace: &str) -> Result<Vec<(String, String)>> {
+    use base64::Engine;
+    let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+    let s = api.get(name).await.context(format!("Failed to get secret {name}"))?;
+    let mut entries: Vec<(String, String)> = Vec::new();
+    if let Some(data) = s.data {
+      for (k, v) in data {
+        // ByteString -> Vec<u8>; decode as utf8 if possible, else base64-encoded raw
+        match String::from_utf8(v.0.clone()) {
+          Ok(text) if text.chars().all(|c| !c.is_control() || c == '\n' || c == '\t') => entries.push((k, text)),
+          _ => entries.push((k, base64::engine::general_purpose::STANDARD.encode(&v.0))),
+        }
+      }
+    }
+    if let Some(string_data) = s.string_data {
+      for (k, v) in string_data {
+        entries.push((k, v));
+      }
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(entries)
+  }
+
+  pub async fn list_configmaps(&self, namespace: Option<&str>) -> Result<Vec<ConfigMapInfo>> {
+    let cms = if let Some(ns) = namespace {
+      let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), ns);
+      api
+        .list(&ListParams::default())
+        .await
+        .context(format!("Failed to list configmaps in namespace {ns}"))?
+    } else {
+      let api: Api<ConfigMap> = Api::all(self.client.clone());
+      api
+        .list(&ListParams::default())
+        .await
+        .context("Failed to list configmaps in all namespaces")?
+    };
+    Ok(cms.items.iter().map(ConfigMapInfo::from_configmap).collect())
+  }
+
+  pub async fn delete_configmap(&self, name: &str, namespace: &str) -> Result<()> {
+    let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .delete(name, &DeleteParams::default())
+      .await
+      .context(format!("Failed to delete configmap {name} in namespace {namespace}"))?;
+    Ok(())
+  }
+
+  #[allow(dead_code)]
+  pub async fn get_configmap_yaml(&self, name: &str, namespace: &str) -> Result<String> {
+    let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+    let cm = api.get(name).await.context(format!("Failed to get configmap {name}"))?;
+    serde_yaml::to_string(&cm).context("Failed to serialize configmap to YAML")
+  }
+
+  pub async fn read_configmap_entries(&self, name: &str, namespace: &str) -> Result<Vec<(String, String)>> {
+    let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+    let cm = api.get(name).await.context(format!("Failed to get configmap {name}"))?;
+    let mut entries: Vec<(String, String)> = Vec::new();
+    if let Some(data) = cm.data {
+      for (k, v) in data {
+        entries.push((k, v));
+      }
+    }
+    if let Some(binary) = cm.binary_data {
+      use base64::Engine;
+      for (k, v) in binary {
+        entries.push((k, base64::engine::general_purpose::STANDARD.encode(&v.0)));
+      }
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(entries)
   }
 
   // ========================================================================

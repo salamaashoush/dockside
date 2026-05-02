@@ -2,7 +2,7 @@ use gpui::{App, AppContext, Entity, EventEmitter, Global};
 
 use crate::colima::{ColimaVm, Machine, MachineId};
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
-use crate::kubernetes::{DeploymentInfo, PodInfo, ServiceInfo};
+use crate::kubernetes::{ConfigMapInfo, DeploymentInfo, PodInfo, SecretInfo, ServiceInfo};
 
 use super::app_state::CurrentView;
 
@@ -308,6 +308,34 @@ pub enum StateChanged {
   },
   /// Request to open Host Docker configuration dialog
   ConfigureHostRequest,
+
+  // Secrets
+  SecretsUpdated,
+  #[allow(dead_code)]
+  SecretYamlLoaded {
+    name: String,
+    namespace: String,
+    yaml: String,
+  },
+  SecretEntriesLoaded {
+    name: String,
+    namespace: String,
+    entries: Vec<(String, String)>,
+  },
+
+  // ConfigMaps
+  ConfigMapsUpdated,
+  #[allow(dead_code)]
+  ConfigMapYamlLoaded {
+    name: String,
+    namespace: String,
+    yaml: String,
+  },
+  ConfigMapEntriesLoaded {
+    name: String,
+    namespace: String,
+    entries: Vec<(String, String)>,
+  },
 }
 
 /// Represents the load state of a resource
@@ -338,6 +366,8 @@ pub struct DockerState {
   pub pods: Vec<PodInfo>,
   pub services: Vec<ServiceInfo>,
   pub deployments: Vec<DeploymentInfo>,
+  pub secrets: Vec<SecretInfo>,
+  pub configmaps: Vec<ConfigMapInfo>,
   pub namespaces: Vec<String>,
   pub selected_namespace: String,
   pub k8s_available: bool,
@@ -363,6 +393,8 @@ pub struct DockerState {
   pub pods_state: LoadState,
   pub services_state: LoadState,
   pub deployments_state: LoadState,
+  pub secrets_state: LoadState,
+  pub configmaps_state: LoadState,
   pub machines_state: LoadState,
 }
 
@@ -378,6 +410,8 @@ impl DockerState {
       pods: Vec::new(),
       services: Vec::new(),
       deployments: Vec::new(),
+      secrets: Vec::new(),
+      configmaps: Vec::new(),
       namespaces: vec!["default".to_string()],
       selected_namespace: "default".to_string(),
       k8s_available: false,
@@ -394,6 +428,8 @@ impl DockerState {
       networks_state: LoadState::NotLoaded,
       pods_state: LoadState::NotLoaded,
       services_state: LoadState::NotLoaded,
+      secrets_state: LoadState::NotLoaded,
+      configmaps_state: LoadState::NotLoaded,
       deployments_state: LoadState::NotLoaded,
       machines_state: LoadState::NotLoaded,
     }

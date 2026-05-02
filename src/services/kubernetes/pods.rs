@@ -104,15 +104,19 @@ pub fn refresh_namespaces(cx: &mut App) {
   .detach();
 }
 
-/// Set the selected namespace for pod filtering
+/// Set the selected namespace for k8s filtering. Refreshes every k8s
+/// resource list so each view sees the new scope.
 pub fn set_namespace(namespace: String, cx: &mut App) {
   let state = docker_state(cx);
   state.update(cx, |state, cx| {
     state.set_selected_namespace(namespace);
     cx.emit(StateChanged::NamespacesUpdated);
   });
-  // Refresh pods with new namespace filter
   refresh_pods(cx);
+  super::deployments::refresh_deployments(cx);
+  super::services::refresh_services(cx);
+  super::secrets::refresh_secrets(cx);
+  super::configmaps::refresh_configmaps(cx);
 }
 
 /// Delete a pod

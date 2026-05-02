@@ -321,6 +321,85 @@ impl DeploymentInfo {
   }
 }
 
+// ============================================================================
+// Secret + ConfigMap Types
+// ============================================================================
+
+#[derive(Debug, Clone)]
+pub struct SecretInfo {
+  pub name: String,
+  pub namespace: String,
+  pub secret_type: String,
+  pub keys: Vec<String>,
+  pub age: String,
+  #[allow(dead_code)]
+  pub labels: HashMap<String, String>,
+}
+
+impl SecretInfo {
+  pub fn from_secret(s: &k8s_openapi::api::core::v1::Secret) -> Self {
+    let metadata = &s.metadata;
+    let name = metadata.name.clone().unwrap_or_default();
+    let namespace = metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+    let labels: HashMap<String, String> = metadata.labels.clone().unwrap_or_default().into_iter().collect();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+    let secret_type = s.type_.clone().unwrap_or_else(|| "Opaque".to_string());
+    let mut keys: Vec<String> = s.data.as_ref().map(|d| d.keys().cloned().collect()).unwrap_or_default();
+    if let Some(string_data) = s.string_data.as_ref() {
+      keys.extend(string_data.keys().cloned());
+    }
+    keys.sort();
+    keys.dedup();
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+    Self {
+      name,
+      namespace,
+      secret_type,
+      keys,
+      age,
+      labels,
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigMapInfo {
+  pub name: String,
+  pub namespace: String,
+  pub keys: Vec<String>,
+  pub age: String,
+  #[allow(dead_code)]
+  pub labels: HashMap<String, String>,
+}
+
+impl ConfigMapInfo {
+  pub fn from_configmap(cm: &k8s_openapi::api::core::v1::ConfigMap) -> Self {
+    let metadata = &cm.metadata;
+    let name = metadata.name.clone().unwrap_or_default();
+    let namespace = metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+    let labels: HashMap<String, String> = metadata.labels.clone().unwrap_or_default().into_iter().collect();
+    let creation_timestamp = metadata.creation_timestamp.as_ref().map(|t| t.0);
+    let mut keys: Vec<String> = cm
+      .data
+      .as_ref()
+      .map(|d| d.keys().cloned().collect())
+      .unwrap_or_default();
+    if let Some(binary) = cm.binary_data.as_ref() {
+      keys.extend(binary.keys().cloned());
+    }
+    keys.sort();
+    keys.dedup();
+    let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
+    Self {
+      name,
+      namespace,
+      keys,
+      age,
+      labels,
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

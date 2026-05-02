@@ -11,6 +11,10 @@ pub enum CurrentView {
   Pods,
   Services,
   Deployments,
+  #[allow(dead_code)]
+  Secrets,
+  #[allow(dead_code)]
+  ConfigMaps,
   Machines,
   /// AI Models — sidebar entry only on macOS aarch64, but variant is
   /// always defined so match arms compile on every platform.
@@ -95,12 +99,14 @@ mod tests {
       CurrentView::Pods,
       CurrentView::Services,
       CurrentView::Deployments,
+      CurrentView::Secrets,
+      CurrentView::ConfigMaps,
       CurrentView::Machines,
       CurrentView::Models,
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 12);
+    assert_eq!(views.len(), 14);
   }
 
   #[test]
