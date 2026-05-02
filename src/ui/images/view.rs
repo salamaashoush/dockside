@@ -38,24 +38,9 @@ impl ImagesView {
     cx.subscribe_in(
       &image_list,
       window,
-      |this, _list, event: &ImageListEvent, window, cx| match event {
+      |this, _list, event: &ImageListEvent, _window, cx| match event {
         ImageListEvent::Selected(image) => {
           this.on_select_image(image.as_ref(), cx);
-        }
-        ImageListEvent::PullImage => {
-          Self::show_pull_dialog(window, cx);
-        }
-        ImageListEvent::BuildImage => {
-          dialogs::open_build_image_dialog(window, cx);
-        }
-        ImageListEvent::BrowseRegistry => {
-          dialogs::open_registry_browser_dialog(window, cx);
-        }
-        ImageListEvent::LoadTarball => {
-          dialogs::prompt_load_image_tarball(window, cx);
-        }
-        ImageListEvent::ScanAll => {
-          services::scan_all_images(cx);
         }
       },
     )
@@ -140,10 +125,6 @@ impl ImagesView {
       inspect_data: None,
       active_tab: 0,
     }
-  }
-
-  fn show_pull_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    dialogs::open_pull_image_dialog(window, cx);
   }
 
   fn on_select_image(&mut self, image: &ImageInfo, cx: &mut Context<'_, Self>) {

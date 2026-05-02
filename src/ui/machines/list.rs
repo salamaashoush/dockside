@@ -20,7 +20,6 @@ use crate::ui::components::{render_error, render_loading};
 /// Machine list events emitted to parent
 pub enum MachineListEvent {
   Selected(Box<Machine>),
-  NewMachine,
 }
 
 /// Delegate for the machine list
@@ -510,9 +509,9 @@ impl MachineList {
         Button::new("new-machine")
           .label("New Machine")
           .primary()
-          .on_click(cx.listener(|_this, _ev, _window, cx| {
-            cx.emit(MachineListEvent::NewMachine);
-          })),
+          .on_click(|_ev, window, cx| {
+            crate::ui::dialogs::open_create_machine_dialog(window, cx);
+          }),
       )
   }
 
@@ -619,28 +618,23 @@ impl Render for MachineList {
                 this.toggle_search(window, cx);
               })),
           )
-          // Add Machine button - only show when Colima is enabled
+          // Single Ellipsis menu — only present when Colima is enabled.
           .when(colima_enabled, |el| {
             el.child(
-              Button::new("add")
-                .icon(Icon::new(AppIcon::Plus))
-                .label("Create")
-                .ghost()
-                .compact()
-                .on_click(cx.listener(|_this, _ev, _window, cx| {
-                  cx.emit(MachineListEvent::NewMachine);
-                })),
-            )
-          })
-          // General Colima actions dropdown - only show when Colima is enabled
-          .when(colima_enabled, |el| {
-            el.child(
-              Button::new("colima-actions")
+              Button::new("machine-toolbar-actions")
                 .icon(Icon::new(IconName::Ellipsis))
                 .ghost()
                 .compact()
                 .dropdown_menu(|menu, _window, _cx| {
                   menu
+                    .item(
+                      PopupMenuItem::new("Create")
+                        .icon(Icon::new(AppIcon::Plus))
+                        .on_click(|_, window, cx| {
+                          crate::ui::dialogs::open_create_machine_dialog(window, cx);
+                        }),
+                    )
+                    .separator()
                     .item(
                       PopupMenuItem::new("Update All Runtimes")
                         .icon(Icon::new(AppIcon::Refresh))
@@ -655,7 +649,6 @@ impl Render for MachineList {
                           services::prune_cache(false, cx);
                         }),
                     )
-                    .separator()
                     .item(
                       PopupMenuItem::new("Refresh Machines")
                         .icon(Icon::new(AppIcon::Refresh))

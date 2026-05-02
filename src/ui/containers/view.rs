@@ -13,7 +13,6 @@ use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_
 use crate::terminal::{LogStream, TerminalSessionType, TerminalView};
 use crate::ui::components::{ProcessView, detect_language_from_path};
 
-use super::create_dialog::CreateContainerDialog;
 use super::detail::{ContainerDetail, ContainerDetailTab, ContainerTabState};
 use super::list::{ContainerList, ContainerListEvent};
 
@@ -67,9 +66,6 @@ impl ContainersView {
       |this, _list, event: &ContainerListEvent, window, cx| match event {
         ContainerListEvent::Selected(container) => {
           this.on_select_container(container.as_ref(), window, cx);
-        }
-        ContainerListEvent::NewContainer => {
-          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -175,55 +171,6 @@ impl ContainersView {
     }
   }
 
-  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    let dialog_entity = cx.new(CreateContainerDialog::new);
-
-    window.open_dialog(cx, move |dialog, _window, cx| {
-      let _colors = cx.theme().colors;
-      let dialog_clone = dialog_entity.clone();
-      let dialog_clone2 = dialog_entity.clone();
-
-      dialog
-        .title("New Container")
-        .min_w(px(550.))
-        .child(dialog_entity.clone())
-        .footer(move |_dialog_state, _, _window, _cx| {
-          let dialog_for_create = dialog_clone.clone();
-          let dialog_for_start = dialog_clone2.clone();
-
-          vec![
-            Button::new("create")
-              .label("Create")
-              .ghost()
-              .on_click({
-                let dialog = dialog_for_create.clone();
-                move |_ev, window, cx| {
-                  let options = dialog.read(cx).get_options(cx, false);
-                  if !options.image.is_empty() {
-                    services::create_container(options, cx);
-                    window.close_dialog(cx);
-                  }
-                }
-              })
-              .into_any_element(),
-            Button::new("create-start")
-              .label("Create & Start")
-              .primary()
-              .on_click({
-                let dialog = dialog_for_start.clone();
-                move |_ev, window, cx| {
-                  let options = dialog.read(cx).get_options(cx, true);
-                  if !options.image.is_empty() {
-                    services::create_container(options, cx);
-                    window.close_dialog(cx);
-                  }
-                }
-              })
-              .into_any_element(),
-          ]
-        })
-    });
-  }
 
   fn show_rename_dialog(container_id: String, current_name: String, window: &mut Window, cx: &mut Context<'_, Self>) {
     use gpui_component::input::{Input, InputState};

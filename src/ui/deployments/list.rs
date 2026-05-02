@@ -20,7 +20,6 @@ use crate::ui::components::{render_k8s_error, render_loading};
 /// Deployment list events emitted to parent
 pub enum DeploymentListEvent {
   Selected(DeploymentInfo),
-  NewDeployment,
 }
 
 /// Delegate for the deployment list
@@ -611,22 +610,28 @@ impl Render for DeploymentList {
               })),
           )
           .child(
-            Button::new("refresh")
-              .icon(Icon::new(AppIcon::Restart))
+            Button::new("deployment-toolbar-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                services::refresh_deployments(cx);
-              })),
-          )
-          .child(
-            Button::new("add")
-              .icon(Icon::new(AppIcon::Plus))
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(DeploymentListEvent::NewDeployment);
-              })),
+              .dropdown_menu(|menu, _window, _cx| {
+                menu
+                  .item(
+                    PopupMenuItem::new("Create")
+                      .icon(Icon::new(AppIcon::Plus))
+                      .on_click(|_, window, cx| {
+                        crate::ui::dialogs::open_create_deployment_dialog(window, cx);
+                      }),
+                  )
+                  .separator()
+                  .item(
+                    PopupMenuItem::new("Refresh")
+                      .icon(Icon::new(AppIcon::Refresh))
+                      .on_click(|_, _, cx| {
+                        services::refresh_deployments(cx);
+                      }),
+                  )
+              }),
           ),
       );
 

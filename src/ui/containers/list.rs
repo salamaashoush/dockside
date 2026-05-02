@@ -20,7 +20,6 @@ use crate::ui::components::{render_error, render_loading};
 /// Container list events emitted to parent
 pub enum ContainerListEvent {
   Selected(Box<ContainerInfo>),
-  NewContainer,
 }
 
 /// Delegate for the container list
@@ -599,14 +598,19 @@ impl Render for ContainerList {
               })),
           )
           .child(
-            Button::new("add")
-              .icon(Icon::new(AppIcon::Plus))
-              .label("Create")
+            Button::new("container-toolbar-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(ContainerListEvent::NewContainer);
-              })),
+              .dropdown_menu(|menu, _window, _cx| {
+                menu.item(
+                  PopupMenuItem::new("Create")
+                    .icon(Icon::new(AppIcon::Plus))
+                    .on_click(|_, window, cx| {
+                      crate::ui::dialogs::open_create_container_dialog(window, cx);
+                    }),
+                )
+              }),
           ),
       );
 

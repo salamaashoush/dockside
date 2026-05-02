@@ -20,11 +20,6 @@ use crate::ui::components::{render_error, render_loading};
 /// Image list events emitted to parent
 pub enum ImageListEvent {
   Selected(Box<ImageInfo>),
-  PullImage,
-  BuildImage,
-  BrowseRegistry,
-  LoadTarball,
-  ScanAll,
 }
 
 /// Delegate for the image list
@@ -552,54 +547,49 @@ impl Render for ImageList {
               })),
           )
           .child(
-            Button::new("browse")
-              .icon(Icon::new(IconName::ExternalLink))
-              .label("Browse")
+            Button::new("image-toolbar-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(ImageListEvent::BrowseRegistry);
-              })),
-          )
-          .child(
-            Button::new("build")
-              .icon(Icon::new(IconName::Frame))
-              .label("Build")
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(ImageListEvent::BuildImage);
-              })),
-          )
-          .child(
-            Button::new("pull")
-              .icon(Icon::new(AppIcon::Plus))
-              .label("Pull")
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(ImageListEvent::PullImage);
-              })),
-          )
-          .child(
-            Button::new("load")
-              .icon(Icon::new(IconName::Inbox))
-              .label("Load")
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(ImageListEvent::LoadTarball);
-              })),
-          )
-          .child(
-            Button::new("scan-all")
-              .icon(Icon::new(IconName::Eye))
-              .label("Scan all")
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(ImageListEvent::ScanAll);
-              })),
+              .dropdown_menu(|menu, _window, _cx| {
+                menu
+                  .item(
+                    PopupMenuItem::new("Browse")
+                      .icon(Icon::new(IconName::ExternalLink))
+                      .on_click(|_, window, cx| {
+                        crate::ui::dialogs::open_registry_browser_dialog(window, cx);
+                      }),
+                  )
+                  .item(
+                    PopupMenuItem::new("Build")
+                      .icon(Icon::new(IconName::Frame))
+                      .on_click(|_, window, cx| {
+                        crate::ui::dialogs::open_build_image_dialog(window, cx);
+                      }),
+                  )
+                  .item(
+                    PopupMenuItem::new("Pull")
+                      .icon(Icon::new(AppIcon::Plus))
+                      .on_click(|_, window, cx| {
+                        crate::ui::dialogs::open_pull_image_dialog(window, cx);
+                      }),
+                  )
+                  .item(
+                    PopupMenuItem::new("Load")
+                      .icon(Icon::new(IconName::Inbox))
+                      .on_click(|_, window, cx| {
+                        crate::ui::dialogs::prompt_load_image_tarball(window, cx);
+                      }),
+                  )
+                  .separator()
+                  .item(
+                    PopupMenuItem::new("Scan all")
+                      .icon(Icon::new(IconName::Eye))
+                      .on_click(|_, _, cx| {
+                        services::scan_all_images(cx);
+                      }),
+                  )
+              }),
           ),
       );
 

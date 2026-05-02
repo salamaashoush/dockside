@@ -13,7 +13,6 @@ use super::scale_dialog::ScaleDialog;
 use crate::kubernetes::DeploymentInfo;
 use crate::services;
 use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
-use crate::ui::dialogs;
 
 /// Main deployments view with list and detail panels
 pub struct DeploymentsView {
@@ -47,7 +46,7 @@ impl DeploymentsView {
     cx.subscribe_in(
       &list,
       window,
-      |this, _list, event: &DeploymentListEvent, window, cx| match event {
+      |this, _list, event: &DeploymentListEvent, _window, cx| match event {
         DeploymentListEvent::Selected(deployment) => {
           this.detail.update(cx, |detail, cx| {
             detail.set_deployment(deployment.clone(), cx);
@@ -60,9 +59,6 @@ impl DeploymentsView {
             });
           });
           cx.notify();
-        }
-        DeploymentListEvent::NewDeployment => {
-          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -157,10 +153,6 @@ impl DeploymentsView {
       list,
       detail,
     }
-  }
-
-  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    dialogs::open_create_deployment_dialog(window, cx);
   }
 
   fn show_scale_dialog(

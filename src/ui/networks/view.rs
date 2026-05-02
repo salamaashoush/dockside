@@ -3,7 +3,6 @@ use gpui_component::theme::ActiveTheme;
 
 use crate::docker::NetworkInfo;
 use crate::state::{DockerState, Selection, StateChanged, docker_state};
-use crate::ui::dialogs;
 
 use super::detail::NetworkDetail;
 use super::list::{NetworkList, NetworkListEvent};
@@ -37,12 +36,9 @@ impl NetworksView {
     cx.subscribe_in(
       &network_list,
       window,
-      |this, _list, event: &NetworkListEvent, window, cx| match event {
+      |this, _list, event: &NetworkListEvent, _window, cx| match event {
         NetworkListEvent::Selected(network) => {
           this.on_select_network(network.as_ref(), cx);
-        }
-        NetworkListEvent::CreateNetwork => {
-          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -82,10 +78,6 @@ impl NetworksView {
       network_list,
       active_tab: 0,
     }
-  }
-
-  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    dialogs::open_create_network_dialog(window, cx);
   }
 
   fn on_select_network(&mut self, network: &NetworkInfo, cx: &mut Context<'_, Self>) {

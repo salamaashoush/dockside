@@ -5,7 +5,6 @@ use crate::docker::VolumeInfo;
 use crate::services;
 use crate::state::{DockerState, Selection, StateChanged, docker_state};
 use crate::ui::components::detect_language_from_path;
-use crate::ui::dialogs;
 
 use super::detail::{VolumeDetail, VolumeTabState};
 use super::list::{VolumeList, VolumeListEvent};
@@ -42,12 +41,9 @@ impl VolumesView {
     cx.subscribe_in(
       &volume_list,
       window,
-      |this, _list, event: &VolumeListEvent, window, cx| match event {
+      |this, _list, event: &VolumeListEvent, _window, cx| match event {
         VolumeListEvent::Selected(volume) => {
           this.on_select_volume(volume.as_ref(), cx);
-        }
-        VolumeListEvent::NewVolume => {
-          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -117,10 +113,6 @@ impl VolumesView {
       file_content_editor: None,
       last_synced_file_content: String::new(),
     }
-  }
-
-  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    dialogs::open_create_volume_dialog(window, cx);
   }
 
   fn on_select_volume(&mut self, volume: &VolumeInfo, cx: &mut Context<'_, Self>) {

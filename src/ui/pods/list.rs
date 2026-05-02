@@ -657,13 +657,19 @@ impl Render for PodList {
               })),
           )
           .child(
-            Button::new("refresh")
-              .icon(Icon::new(AppIcon::Restart))
+            Button::new("pod-toolbar-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                services::refresh_pods(cx);
-              })),
+              .dropdown_menu(|menu, _window, _cx| {
+                menu.item(
+                  PopupMenuItem::new("Refresh")
+                    .icon(Icon::new(AppIcon::Refresh))
+                    .on_click(|_, _, cx| {
+                      services::refresh_pods(cx);
+                    }),
+                )
+              }),
           ),
       );
 

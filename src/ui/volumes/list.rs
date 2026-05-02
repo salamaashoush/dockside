@@ -20,7 +20,6 @@ use crate::ui::components::{render_error, render_loading};
 /// Volume list events emitted to parent
 pub enum VolumeListEvent {
   Selected(Box<VolumeInfo>),
-  NewVolume,
 }
 
 /// Delegate for the volume list
@@ -446,14 +445,19 @@ impl Render for VolumeList {
               })),
           )
           .child(
-            Button::new("add")
-              .icon(Icon::new(AppIcon::Plus))
-              .label("Create")
+            Button::new("volume-toolbar-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(VolumeListEvent::NewVolume);
-              })),
+              .dropdown_menu(|menu, _window, _cx| {
+                menu.item(
+                  PopupMenuItem::new("Create")
+                    .icon(Icon::new(AppIcon::Plus))
+                    .on_click(|_, window, cx| {
+                      crate::ui::dialogs::open_create_volume_dialog(window, cx);
+                    }),
+                )
+              }),
           ),
       );
 

@@ -463,14 +463,19 @@ impl Render for ComposeView {
                         h_flex()
                             .gap(px(8.))
                             .child(
-                                Button::new("refresh-compose")
-                                    .icon(Icon::new(AppIcon::Refresh))
-                                    .label("Refresh")
+                                Button::new("compose-toolbar-actions")
+                                    .icon(IconName::Ellipsis)
                                     .compact()
                                     .ghost()
-                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                        services::refresh_containers(cx);
-                                    })),
+                                    .dropdown_menu(|menu, _window, _cx| {
+                                        menu.item(
+                                            PopupMenuItem::new("Refresh")
+                                                .icon(Icon::new(AppIcon::Refresh))
+                                                .on_click(|_, _, cx| {
+                                                    services::refresh_containers(cx);
+                                                }),
+                                        )
+                                    }),
                             ),
                     ),
             )

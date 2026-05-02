@@ -20,7 +20,6 @@ use crate::ui::components::{render_error, render_loading};
 /// Network list events emitted to parent
 pub enum NetworkListEvent {
   Selected(Box<NetworkInfo>),
-  CreateNetwork,
 }
 
 /// Delegate for the network list
@@ -502,14 +501,19 @@ impl Render for NetworkList {
               })),
           )
           .child(
-            Button::new("create")
-              .icon(Icon::new(AppIcon::Plus))
-              .label("Create")
+            Button::new("network-toolbar-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(NetworkListEvent::CreateNetwork);
-              })),
+              .dropdown_menu(|menu, _window, _cx| {
+                menu.item(
+                  PopupMenuItem::new("Create")
+                    .icon(Icon::new(AppIcon::Plus))
+                    .on_click(|_, window, cx| {
+                      crate::ui::dialogs::open_create_network_dialog(window, cx);
+                    }),
+                )
+              }),
           ),
       );
 

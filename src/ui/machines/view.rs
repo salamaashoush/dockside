@@ -11,7 +11,6 @@ use crate::services;
 use crate::state::{DockerState, MachineTabState, Selection, StateChanged, docker_state};
 use crate::terminal::TerminalView;
 use crate::ui::components::ProcessView;
-use crate::ui::dialogs;
 
 use super::detail::{MachineDetail, MachineDetailTab};
 use super::host_dialog::HostDialog;
@@ -68,9 +67,6 @@ impl MachinesView {
       |this, _list, event: &MachineListEvent, window, cx| match event {
         MachineListEvent::Selected(machine) => {
           this.on_select_machine(machine.as_ref(), window, cx);
-        }
-        MachineListEvent::NewMachine => {
-          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -157,9 +153,6 @@ impl MachinesView {
     }
   }
 
-  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    dialogs::open_create_machine_dialog(window, cx);
-  }
 
   fn show_host_dialog(host_info: crate::docker::DockerHostInfo, window: &mut Window, cx: &mut Context<'_, Self>) {
     let dialog_entity = cx.new(|cx| HostDialog::new(host_info, window, cx));

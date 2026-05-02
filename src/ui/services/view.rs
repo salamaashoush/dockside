@@ -8,7 +8,6 @@ use super::list::{ServiceList, ServiceListEvent};
 use crate::kubernetes::ServiceInfo;
 use crate::services;
 use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
-use crate::ui::dialogs;
 
 /// Main services view with list and detail panels
 pub struct ServicesView {
@@ -42,7 +41,7 @@ impl ServicesView {
     cx.subscribe_in(
       &list,
       window,
-      |this, _list, event: &ServiceListEvent, window, cx| match event {
+      |this, _list, event: &ServiceListEvent, _window, cx| match event {
         ServiceListEvent::Selected(service) => {
           this.detail.update(cx, |detail, cx| {
             detail.set_service(service.as_ref().clone(), cx);
@@ -55,9 +54,6 @@ impl ServicesView {
             });
           });
           cx.notify();
-        }
-        ServiceListEvent::NewService => {
-          Self::show_create_dialog(window, cx);
         }
       },
     )
@@ -147,9 +143,6 @@ impl ServicesView {
     }
   }
 
-  fn show_create_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    dialogs::open_create_service_dialog(window, cx);
-  }
 }
 
 impl Render for ServicesView {

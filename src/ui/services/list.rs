@@ -20,7 +20,6 @@ use crate::ui::components::{render_k8s_error, render_loading};
 /// Service list events emitted to parent
 pub enum ServiceListEvent {
   Selected(Box<ServiceInfo>),
-  NewService,
 }
 
 /// Delegate for the service list
@@ -584,22 +583,28 @@ impl Render for ServiceList {
               })),
           )
           .child(
-            Button::new("refresh")
-              .icon(Icon::new(AppIcon::Restart))
+            Button::new("service-toolbar-actions")
+              .icon(IconName::Ellipsis)
               .ghost()
               .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                services::refresh_services(cx);
-              })),
-          )
-          .child(
-            Button::new("add")
-              .icon(Icon::new(AppIcon::Plus))
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _window, cx| {
-                cx.emit(ServiceListEvent::NewService);
-              })),
+              .dropdown_menu(|menu, _window, _cx| {
+                menu
+                  .item(
+                    PopupMenuItem::new("Create")
+                      .icon(Icon::new(AppIcon::Plus))
+                      .on_click(|_, window, cx| {
+                        crate::ui::dialogs::open_create_service_dialog(window, cx);
+                      }),
+                  )
+                  .separator()
+                  .item(
+                    PopupMenuItem::new("Refresh")
+                      .icon(Icon::new(AppIcon::Refresh))
+                      .on_click(|_, _, cx| {
+                        services::refresh_services(cx);
+                      }),
+                  )
+              }),
           ),
       );
 
