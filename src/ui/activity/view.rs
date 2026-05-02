@@ -1,17 +1,21 @@
 // Allow precision loss for display formatting of resource statistics
 #![allow(clippy::cast_precision_loss)]
 
-use gpui::{Context, Hsla, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui::{Context, Entity, Hsla, Render, Styled, Timer, Window, div, prelude::*, px};
 use gpui_component::{Icon, h_flex, label::Label, scroll::ScrollableElement, theme::ActiveTheme, v_flex};
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use crate::assets::AppIcon;
 use crate::docker::{AggregateStats, ContainerStats};
 use crate::services;
-use crate::state::settings_state;
+use crate::state::{DockerState, docker_state, settings_state};
+
+const PER_ROW_SAMPLES: usize = 60;
 
 /// Activity monitor showing container resource usage
 pub struct ActivityMonitorView {
+  docker_state: Entity<DockerState>,
   stats: AggregateStats,
   expanded: bool,
   is_loading: bool,
@@ -20,12 +24,30 @@ pub struct ActivityMonitorView {
   memory_history: Vec<u64>,
   network_history: Vec<u64>,
   disk_history: Vec<u64>,
+  /// Per-container CPU% ring buffer keyed by container id. Trimmed to
+  /// `PER_ROW_SAMPLES` so the inline row sparkline matches the bottom
+  /// summary cards.
+  cpu_history_per: HashMap<String, VecDeque<f64>>,
 }
 
 impl ActivityMonitorView {
   pub fn new(_window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     // Get refresh interval from settings
     let refresh_interval = settings_state(cx).read(cx).settings.stats_refresh_interval;
+    let docker_state_entity = docker_state(cx);
+
+    // Re-render the breakdown badges whenever the global container
+    // list ticks so paused / exited counts stay live without us
+    // having to poll docker for state ourselves.
+    cx.subscribe(
+      &docker_state_entity,
+      |_this, _state, event: &crate::state::StateChanged, cx| {
+        if matches!(event, crate::state::StateChanged::ContainersUpdated) {
+          cx.notify();
+        }
+      },
+    )
+    .detach();
 
     // Start periodic refresh
     cx.spawn(async move |this, cx| {
@@ -43,6 +65,7 @@ impl ActivityMonitorView {
 
     // Initial refresh
     let view = Self {
+      docker_state: docker_state(cx),
       stats: AggregateStats::default(),
       expanded: true,
       is_loading: true,
@@ -50,6 +73,7 @@ impl ActivityMonitorView {
       memory_history: Vec::with_capacity(60),
       network_history: Vec::with_capacity(60),
       disk_history: Vec::with_capacity(60),
+      cpu_history_per: HashMap::new(),
     };
 
     Self::refresh_stats(cx);
@@ -98,6 +122,24 @@ impl ActivityMonitorView {
           if this.disk_history.len() > 60 {
             this.disk_history.remove(0);
           }
+
+          // Per-container CPU history: append the latest sample for
+          // every container reporting stats this tick, then drop any
+          // entries no longer present so containers that disappear
+          // don't keep stale ring buffers around forever.
+          let mut alive: std::collections::HashSet<&str> = std::collections::HashSet::new();
+          for s in &stats.container_stats {
+            alive.insert(s.id.as_str());
+            let entry = this
+              .cpu_history_per
+              .entry(s.id.clone())
+              .or_insert_with(|| VecDeque::with_capacity(PER_ROW_SAMPLES));
+            entry.push_back(s.cpu_percent);
+            while entry.len() > PER_ROW_SAMPLES {
+              entry.pop_front();
+            }
+          }
+          this.cpu_history_per.retain(|id, _| alive.contains(id.as_str()));
 
           this.stats = stats;
         }
@@ -268,12 +310,19 @@ impl ActivityMonitorView {
                     self.stats
                         .container_stats
                         .iter()
-                        .map(|stats| Self::render_container_row(stats, cx)),
+                        .map(|stats| {
+                            let series = self
+                                .cpu_history_per
+                                .get(&stats.id)
+                                .map(|q| q.iter().copied().collect::<Vec<_>>())
+                                .unwrap_or_default();
+                            Self::render_container_row(stats, series, cx)
+                        }),
                 )
             })
   }
 
-  fn render_container_row(stats: &ContainerStats, cx: &Context<'_, Self>) -> impl IntoElement {
+  fn render_container_row(stats: &ContainerStats, cpu_series: Vec<f64>, cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
     let name = if stats.name.is_empty() {
       stats.id.chars().take(12).collect::<String>()
@@ -304,11 +353,18 @@ impl ActivityMonitorView {
                     )
                     .child(
                         div()
-                            .w(px(100.))
+                            .w(px(60.))
                             .text_sm()
                             .text_color(colors.secondary_foreground)
                             .text_right()
                             .child(format!("{:.1}", stats.cpu_percent)),
+                    )
+                    .child(
+                        div()
+                            .w(px(40.))
+                            .h(px(20.))
+                            .ml(px(4.))
+                            .child(crate::ui::components::Sparkline::new(cpu_series, colors.link).max(100.0)),
                     )
                     .child(
                         div()
@@ -428,6 +484,59 @@ impl ActivityMonitorView {
       .child(crate::ui::components::Sparkline::new(data, color))
   }
 
+  /// Status breakdown badges: running / paused / exited container
+  /// counts pulled from the global container list (the docker daemon
+  /// is the source of truth for state — `AggregateStats` only knows
+  /// about the running set).
+  fn render_status_breakdown(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+    let colors = &cx.theme().colors;
+    let containers = &self.docker_state.read(cx).containers;
+    let mut running = 0_usize;
+    let mut paused = 0_usize;
+    let mut exited = 0_usize;
+    for c in containers {
+      if c.state.is_running() {
+        running += 1;
+      } else if c.state.is_paused() {
+        paused += 1;
+      } else if matches!(
+        c.state,
+        crate::docker::ContainerState::Exited
+          | crate::docker::ContainerState::Dead
+          | crate::docker::ContainerState::Removing
+      ) {
+        exited += 1;
+      }
+    }
+    let badge = move |label: &'static str, count: usize, color: Hsla| -> gpui::Div {
+      v_flex()
+        .px(px(10.))
+        .py(px(4.))
+        .gap(px(0.))
+        .rounded(px(6.))
+        .bg(if count > 0 { color.opacity(0.15) } else { colors.muted })
+        .child(
+          div()
+            .text_xs()
+            .text_color(if count > 0 { color } else { colors.muted_foreground })
+            .child(label),
+        )
+        .child(
+          div()
+            .text_sm()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(colors.foreground)
+            .child(count.to_string()),
+        )
+    };
+    h_flex()
+      .gap(px(8.))
+      .items_center()
+      .child(badge("RUNNING", running, colors.success))
+      .child(badge("PAUSED", paused, colors.warning))
+      .child(badge("EXITED", exited, colors.muted_foreground))
+  }
+
   fn render_empty(cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
 
@@ -478,13 +587,15 @@ impl Render for ActivityMonitorView {
                     .h(px(52.))
                     .px(px(16.))
                     .items_center()
+                    .justify_between()
                     .border_b_1()
                     .border_color(colors.border)
                     .child(
                         Label::new("Activity Monitor")
                             .text_color(colors.foreground)
                             .font_weight(gpui::FontWeight::SEMIBOLD),
-                    ),
+                    )
+                    .child(self.render_status_breakdown(cx)),
             )
             // Table header
             .child(Self::render_header(cx))

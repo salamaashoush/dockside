@@ -36,11 +36,6 @@ impl Sparkline {
     }
   }
 
-  pub fn fill(mut self, fill: Hsla) -> Self {
-    self.fill = fill;
-    self
-  }
-
   pub fn max(mut self, max: f64) -> Self {
     self.max_override = Some(max);
     self
