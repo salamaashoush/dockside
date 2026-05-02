@@ -197,6 +197,15 @@ pub enum IngressDetailTab {
   Yaml = 1,
 }
 
+/// Tab indices for PVC detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum PvcDetailTab {
+  #[default]
+  Info = 0,
+  Yaml = 1,
+}
+
 /// Represents the currently selected item across all views
 /// This enables keyboard shortcuts to act on the selection
 #[derive(Clone, Debug, Default)]
@@ -236,6 +245,10 @@ pub enum Selection {
     namespace: String,
   },
   Ingress {
+    name: String,
+    namespace: String,
+  },
+  Pvc {
     name: String,
     namespace: String,
   },
@@ -447,6 +460,16 @@ pub enum StateChanged {
     name: String,
     namespace: String,
     tab: IngressDetailTab,
+  },
+  PvcYamlLoaded {
+    name: String,
+    namespace: String,
+    yaml: String,
+  },
+  PvcTabRequest {
+    name: String,
+    namespace: String,
+    tab: PvcDetailTab,
   },
   JobsUpdated,
   CronJobsUpdated,
@@ -817,6 +840,10 @@ impl DockerState {
       .ingresses
       .iter()
       .find(|i| i.name == name && i.namespace == namespace)
+  }
+
+  pub fn get_pvc(&self, name: &str, namespace: &str) -> Option<&PvcInfo> {
+    self.pvcs.iter().find(|p| p.name == name && p.namespace == namespace)
   }
 
   // Navigation

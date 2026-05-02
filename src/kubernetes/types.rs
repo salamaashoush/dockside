@@ -79,6 +79,8 @@ pub struct PodInfo {
   pub ip: Option<String>,
   pub containers: Vec<PodContainer>,
   pub labels: HashMap<String, String>,
+  /// Names of PVCs claimed by this pod's volumes.
+  pub pvc_claims: Vec<String>,
 }
 
 impl PodInfo {
@@ -117,6 +119,16 @@ impl PodInfo {
     // Calculate age
     let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
 
+    let pvc_claims: Vec<String> = spec
+      .and_then(|s| s.volumes.as_ref())
+      .map(|vols| {
+        vols
+          .iter()
+          .filter_map(|v| v.persistent_volume_claim.as_ref().map(|pvc| pvc.claim_name.clone()))
+          .collect()
+      })
+      .unwrap_or_default();
+
     Self {
       name,
       namespace,
@@ -128,6 +140,7 @@ impl PodInfo {
       ip,
       containers: container_statuses,
       labels,
+      pvc_claims,
     }
   }
 }
@@ -941,6 +954,7 @@ mod tests {
         restart_count: 0,
       }],
       labels: HashMap::from([("app".to_string(), "nginx".to_string())]),
+      pvc_claims: Vec::new(),
     };
     assert_eq!(pod.name, "my-pod");
     assert_eq!(pod.namespace, "default");
@@ -1149,6 +1163,7 @@ mod tests {
         },
       ],
       labels: HashMap::new(),
+      pvc_claims: Vec::new(),
     };
     assert_eq!(pod.containers.len(), 3);
     assert_eq!(pod.restarts, 5);

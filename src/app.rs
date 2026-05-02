@@ -1287,6 +1287,9 @@ impl Render for DocksideApp {
           Selection::Ingress { name, namespace } => {
             crate::services::delete_ingress(name, namespace, cx);
           }
+          Selection::Pvc { name, namespace } => {
+            crate::services::delete_pvc(name, namespace, cx);
+          }
           Selection::Machine(MachineId::Colima(name)) => {
             crate::services::delete_machine(name, cx);
           }

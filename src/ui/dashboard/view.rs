@@ -315,7 +315,7 @@ impl DashboardView {
       let icon = match &fav {
         FavoriteRef::Container { .. } => Icon::new(AppIcon::Container),
         FavoriteRef::Image { .. } => Icon::new(AppIcon::Image),
-        FavoriteRef::Volume { .. } => Icon::new(AppIcon::Volume),
+        FavoriteRef::Volume { .. } | FavoriteRef::Pvc { .. } => Icon::new(AppIcon::Volume),
         FavoriteRef::Network { .. } => Icon::new(AppIcon::Network),
         FavoriteRef::Pod { .. } | FavoriteRef::Job { .. } | FavoriteRef::CronJob { .. } => Icon::new(AppIcon::Pod),
         FavoriteRef::Deployment { .. } | FavoriteRef::StatefulSet { .. } | FavoriteRef::DaemonSet { .. } => {

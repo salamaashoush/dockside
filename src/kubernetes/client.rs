@@ -1017,6 +1017,25 @@ impl KubeClient {
     Ok(())
   }
 
+  pub async fn get_pvc_yaml(&self, name: &str, namespace: &str) -> Result<String> {
+    let api: Api<PersistentVolumeClaim> = Api::namespaced(self.client.clone(), namespace);
+    let p = api.get(name).await.context(format!("Failed to get PVC {name}"))?;
+    serde_yaml::to_string(&p).context("Failed to serialize PVC to YAML")
+  }
+
+  pub async fn apply_pvc_yaml(&self, name: &str, namespace: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut p: PersistentVolumeClaim = serde_yaml::from_str(yaml_str).context("Failed to parse PVC YAML")?;
+    p.metadata.name = Some(name.to_string());
+    p.metadata.namespace = Some(namespace.to_string());
+    let api: Api<PersistentVolumeClaim> = Api::namespaced(self.client.clone(), namespace);
+    api
+      .replace(name, &PostParams::default(), &p)
+      .await
+      .with_context(|| format!("Failed to apply PVC {name}"))?;
+    Ok(())
+  }
+
   pub async fn read_configmap_entries(&self, name: &str, namespace: &str) -> Result<Vec<(String, String)>> {
     let api: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
     let cm = api.get(name).await.context(format!("Failed to get configmap {name}"))?;

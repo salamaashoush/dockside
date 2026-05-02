@@ -1,41 +1,120 @@
-//! K8s `PersistentVolumeClaim` list view.
+//! K8s `PersistentVolumeClaim` view: list + detail split.
 
 use std::time::Duration;
 
-use gpui::{Context, Entity, Render, SharedString, Styled, Timer, Window, div, prelude::*, px};
-use gpui_component::{
-  Icon, IconName, Sizable,
-  button::{Button, ButtonVariants},
-  h_flex,
-  menu::{DropdownMenu, PopupMenuItem},
-  theme::ActiveTheme,
-  v_flex,
-};
+use gpui::{App, Context, Entity, Render, Styled, Timer, Window, div, prelude::*, px};
+use gpui_component::theme::ActiveTheme;
 
-use crate::assets::AppIcon;
+use super::detail::PvcDetail;
+use super::list::{PvcList, PvcListEvent};
+use crate::kubernetes::PvcInfo;
 use crate::services;
-use crate::state::{DockerState, LoadState, StateChanged, docker_state, settings_state};
-use crate::ui::components::{render_k8s_error, render_loading};
+use crate::state::{DockerState, Selection, StateChanged, docker_state, settings_state};
 
 pub struct PvcsView {
   docker_state: Entity<DockerState>,
+  list: Entity<PvcList>,
+  detail: Entity<PvcDetail>,
 }
 
 impl PvcsView {
-  pub fn new(_window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+  fn selected(&self, cx: &App) -> Option<PvcInfo> {
+    let state = self.docker_state.read(cx);
+    if let Selection::Pvc {
+      ref name,
+      ref namespace,
+    } = state.selection
+    {
+      state.get_pvc(name, namespace).cloned()
+    } else {
+      None
+    }
+  }
+
+  pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     let docker_state = docker_state(cx);
 
-    cx.subscribe(&docker_state, |_this, _state, event: &StateChanged, cx| {
-      if matches!(event, StateChanged::PvcsUpdated | StateChanged::NamespacesUpdated) {
-        cx.notify();
-      }
-    })
+    let list = cx.new(|cx| PvcList::new(window, cx));
+    let detail = cx.new(PvcDetail::new);
+
+    cx.subscribe_in(
+      &list,
+      window,
+      |this, _list, event: &PvcListEvent, _window, cx| match event {
+        PvcListEvent::Selected(item) => {
+          let already_selected = matches!(
+            this.docker_state.read(cx).selection,
+            Selection::Pvc { ref name, ref namespace } if *name == item.name && *namespace == item.namespace
+          );
+          if already_selected {
+            return;
+          }
+          this.detail.update(cx, |detail, cx| {
+            detail.set_item(item.clone(), cx);
+          });
+          this.docker_state.update(cx, |state, _cx| {
+            state.set_selection(Selection::Pvc {
+              name: item.name.clone(),
+              namespace: item.namespace.clone(),
+            });
+          });
+          cx.notify();
+        }
+      },
+    )
     .detach();
 
-    let refresh = settings_state(cx).read(cx).settings.container_refresh_interval.max(5);
+    cx.subscribe_in(
+      &docker_state,
+      window,
+      |this, ds, event: &StateChanged, _w, cx| match event {
+        StateChanged::PvcTabRequest {
+          name,
+          namespace,
+          tab: _,
+        } => {
+          let opt = ds.read(cx).get_pvc(name, namespace).cloned();
+          if let Some(item) = opt {
+            this.docker_state.update(cx, |state, _| {
+              state.set_selection(Selection::Pvc {
+                name: item.name.clone(),
+                namespace: item.namespace.clone(),
+              });
+            });
+            cx.notify();
+          }
+        }
+        StateChanged::PvcsUpdated => {
+          let key = if let Selection::Pvc {
+            ref name,
+            ref namespace,
+          } = this.docker_state.read(cx).selection
+          {
+            Some((name.clone(), namespace.clone()))
+          } else {
+            None
+          };
+          if let Some((name, namespace)) = key {
+            let opt = ds.read(cx).get_pvc(&name, &namespace).cloned();
+            if let Some(item) = opt {
+              this.detail.update(cx, |detail, dcx| {
+                detail.update_item(item, dcx);
+              });
+            } else {
+              this.docker_state.update(cx, |s, _| s.set_selection(Selection::None));
+            }
+          }
+          cx.notify();
+        }
+        _ => {}
+      },
+    )
+    .detach();
+
+    let refresh_interval = settings_state(cx).read(cx).settings.container_refresh_interval.max(5);
     cx.spawn(async move |_this, cx| {
       loop {
-        Timer::after(Duration::from_secs(refresh)).await;
+        Timer::after(Duration::from_secs(refresh_interval)).await;
         let _ = cx.update(services::refresh_pvcs);
       }
     })
@@ -44,226 +123,36 @@ impl PvcsView {
     services::refresh_pvcs(cx);
     services::refresh_namespaces(cx);
 
-    Self { docker_state }
+    Self {
+      docker_state,
+      list,
+      detail,
+    }
   }
 }
 
 impl Render for PvcsView {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let colors = cx.theme().colors;
-    let state = self.docker_state.read(cx);
-    let items = state.pvcs.clone();
-    let load_state = state.pvcs_state.clone();
-    let count = items.len();
+    let has_selection = self.selected(cx).is_some();
 
-    let _ = count;
-    let _ = state;
-
-    let body: gpui::Div = match &load_state {
-      LoadState::NotLoaded | LoadState::Loading => render_loading("pvcs", cx),
-      LoadState::Error(e) => render_k8s_error("pvcs", &e.clone(), |_ev, _w, cx| services::refresh_pvcs(cx), cx),
-      LoadState::Loaded => {
-        if items.is_empty() {
-          div().size_full().flex().items_center().justify_center().child(
-            div()
-              .text_sm()
-              .text_color(colors.muted_foreground)
-              .child("No PVCs in selected namespace."),
-          )
-        } else {
-          let header = h_flex()
-            .w_full()
-            .min_w(px(900.))
-            .px(px(12.))
-            .py(px(6.))
-            .gap(px(8.))
-            .bg(colors.muted)
-            .flex_shrink_0()
-            .child(
-              div()
-                .flex_1()
-                .min_w(px(200.))
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("NAME"),
-            )
-            .child(
-              div()
-                .w(px(140.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("NAMESPACE"),
-            )
-            .child(
-              div()
-                .w(px(80.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("STATUS"),
-            )
-            .child(
-              div()
-                .w(px(80.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("CAPACITY"),
-            )
-            .child(
-              div()
-                .w(px(120.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("ACCESS"),
-            )
-            .child(
-              div()
-                .w(px(140.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("STORAGE CLASS"),
-            )
-            .child(
-              div()
-                .w(px(60.))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child("AGE"),
-            )
-            .child(div().w(px(28.)));
-          let mut rows = v_flex().w_full().min_w(px(900.));
-          for p in &items {
-            let name = p.name.clone();
-            let namespace = p.namespace.clone();
-            let status_color = match p.status.as_str() {
-              "Bound" => colors.success,
-              "Pending" => colors.warning,
-              "Lost" => colors.danger,
-              _ => colors.muted_foreground,
-            };
-            rows = rows.child(
-              h_flex()
-                .w_full()
-                .px(px(12.))
-                .py(px(8.))
-                .gap(px(8.))
-                .items_center()
-                .border_b_1()
-                .border_color(colors.border)
-                .child(
-                  div()
-                    .flex_1()
-                    .min_w(px(200.))
-                    .text_sm()
-                    .text_color(colors.foreground)
-                    .text_ellipsis()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .child(p.name.clone()),
-                )
-                .child(
-                  div()
-                    .w(px(140.))
-                    .flex_shrink_0()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(p.namespace.clone()),
-                )
-                .child(
-                  div()
-                    .w(px(80.))
-                    .flex_shrink_0()
-                    .text_xs()
-                    .text_color(status_color)
-                    .child(p.status.clone()),
-                )
-                .child(
-                  div()
-                    .w(px(80.))
-                    .flex_shrink_0()
-                    .text_xs()
-                    .text_color(colors.foreground)
-                    .child(if p.capacity.is_empty() {
-                      "—".to_string()
-                    } else {
-                      p.capacity.clone()
-                    }),
-                )
-                .child(
-                  div()
-                    .w(px(120.))
-                    .flex_shrink_0()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .text_ellipsis()
-                    .overflow_hidden()
-                    .child(if p.access_modes.is_empty() {
-                      "—".to_string()
-                    } else {
-                      p.access_modes.join(",")
-                    }),
-                )
-                .child(
-                  div()
-                    .w(px(140.))
-                    .flex_shrink_0()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .text_ellipsis()
-                    .overflow_hidden()
-                    .child(p.storage_class.clone().unwrap_or_else(|| "—".to_string())),
-                )
-                .child(
-                  div()
-                    .w(px(60.))
-                    .flex_shrink_0()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(p.age.clone()),
-                )
-                .child(
-                  Button::new(SharedString::from(format!("menu-{name}-{namespace}")))
-                    .icon(IconName::Ellipsis)
-                    .ghost()
-                    .xsmall()
-                    .dropdown_menu({
-                      let n = name.clone();
-                      let ns = namespace.clone();
-                      move |menu, _, _| {
-                        let delete_name = n.clone();
-                        let delete_namespace = ns.clone();
-                        menu.item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click(
-                          move |_, _, cx| {
-                            services::delete_pvc(delete_name.clone(), delete_namespace.clone(), cx);
-                          },
-                        ))
-                      }
-                    }),
-                ),
-            );
-          }
-          div().size_full().child(
-            div().id("pvcs-h-scroll").size_full().overflow_x_scroll().child(
-              v_flex().w_full().min_w(px(900.)).size_full().child(header).child(
-                div()
-                  .id("pvcs-v-scroll")
-                  .flex_1()
-                  .min_h_0()
-                  .w_full()
-                  .overflow_y_scroll()
-                  .child(rows),
-              ),
-            ),
-          )
-        }
-      }
-    };
-
-    v_flex().size_full().child(div().flex_1().min_h_0().child(body))
+    div()
+      .size_full()
+      .flex()
+      .overflow_hidden()
+      .child(
+        div()
+          .when(has_selection, |el| {
+            el.w(px(320.)).border_r_1().border_color(colors.border)
+          })
+          .when(!has_selection, gpui::Styled::flex_1)
+          .h_full()
+          .flex_shrink_0()
+          .overflow_hidden()
+          .child(self.list.clone()),
+      )
+      .when(has_selection, |el| {
+        el.child(div().flex_1().h_full().overflow_hidden().child(self.detail.clone()))
+      })
   }
 }

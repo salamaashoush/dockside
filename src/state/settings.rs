@@ -235,6 +235,7 @@ pub enum FavoriteRef {
   Job { name: String, namespace: String },
   CronJob { name: String, namespace: String },
   Ingress { name: String, namespace: String },
+  Pvc { name: String, namespace: String },
   Machine { id: String, label: String },
 }
 
@@ -252,7 +253,8 @@ impl FavoriteRef {
       | Self::DaemonSet { name, .. }
       | Self::Job { name, .. }
       | Self::CronJob { name, .. }
-      | Self::Ingress { name, .. } => name,
+      | Self::Ingress { name, .. }
+      | Self::Pvc { name, .. } => name,
       Self::Machine { label, .. } => label,
     }
   }
@@ -271,6 +273,7 @@ impl FavoriteRef {
       Self::Job { .. } => "Job",
       Self::CronJob { .. } => "CronJob",
       Self::Ingress { .. } => "Ingress",
+      Self::Pvc { .. } => "PVC",
       Self::Machine { .. } => "Machine",
     }
   }
