@@ -167,6 +167,10 @@ pub struct ContainerInfo {
   /// the Networks view can cross-reference without inspecting each
   /// container.
   pub networks_used: Vec<String>,
+  /// First non-empty bridge IP from `NetworkSettings.Networks`. On Linux
+  /// native Docker this is host-routable via `docker0`; on Docker Desktop
+  /// / Colima it is not.
+  pub bridge_ip: Option<std::net::IpAddr>,
 }
 
 impl ContainerInfo {
@@ -281,12 +285,20 @@ impl DockerClient {
         })
         .collect();
 
-      let networks_used: Vec<String> = container
-        .network_settings
-        .clone()
-        .and_then(|ns| ns.networks)
-        .map(|m| m.into_keys().collect())
+      let networks = container.network_settings.clone().and_then(|ns| ns.networks);
+      let networks_used: Vec<String> = networks
+        .as_ref()
+        .map(|m| m.keys().cloned().collect())
         .unwrap_or_default();
+
+      let bridge_ip: Option<std::net::IpAddr> = networks.as_ref().and_then(|m| {
+        m.values().find_map(|n| {
+          n.ip_address
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse().ok())
+        })
+      });
 
       result.push(ContainerInfo {
         id,
@@ -303,6 +315,7 @@ impl DockerClient {
         size_root_fs: container.size_root_fs,
         volumes_used,
         networks_used,
+        bridge_ip,
       });
     }
 
@@ -1237,6 +1250,7 @@ mod tests {
       size_root_fs: None,
       volumes_used: vec![],
       networks_used: vec![],
+      bridge_ip: None,
     };
     assert_eq!(container.short_id(), "abc123def456");
 
@@ -1355,6 +1369,7 @@ mod tests {
       size_root_fs: None,
       volumes_used: vec![],
       networks_used: vec![],
+      bridge_ip: None,
     };
     assert_eq!(container.short_id(), "123456789012");
   }

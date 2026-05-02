@@ -154,6 +154,7 @@ mod tests {
       size_root_fs: None,
       volumes_used: vec![],
       networks_used: vec![],
+      bridge_ip: None,
     }
   }
 

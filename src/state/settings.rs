@@ -353,6 +353,24 @@ pub struct AppSettings {
   /// Favorites pinned to the Dashboard.
   #[serde(default)]
   pub favorites: Vec<FavoriteRef>,
+  /// Whether the local DNS resolver + reverse proxy stack is enabled.
+  #[serde(default)]
+  pub dns_enabled: bool,
+  /// Auto-start the resolver + proxy on app launch once `dns_enabled` is on.
+  #[serde(default = "default_true")]
+  pub dns_autostart: bool,
+  /// Suffix served by the resolver. Defaults to `dockside.test` (RFC 6761).
+  #[serde(default = "default_dns_suffix")]
+  pub dns_suffix: String,
+  /// UDP+TCP port for the local DNS server.
+  #[serde(default = "default_dns_port")]
+  pub dns_port: u16,
+  /// Plain HTTP listen port for the reverse proxy.
+  #[serde(default = "default_proxy_http_port")]
+  pub proxy_http_port: u16,
+  /// HTTPS listen port for the reverse proxy.
+  #[serde(default = "default_proxy_https_port")]
+  pub proxy_https_port: u16,
 }
 
 fn default_true() -> bool {
@@ -385,6 +403,19 @@ fn default_kubernetes_enabled() -> bool {
   false
 }
 
+fn default_dns_suffix() -> String {
+  "dockside.test".to_string()
+}
+fn default_dns_port() -> u16 {
+  15353
+}
+fn default_proxy_http_port() -> u16 {
+  80
+}
+fn default_proxy_https_port() -> u16 {
+  443
+}
+
 impl Default for AppSettings {
   fn default() -> Self {
     Self {
@@ -413,6 +444,12 @@ impl Default for AppSettings {
       colima_default_memory_gb: 4,
       colima_default_disk_gb: 60,
       favorites: Vec::new(),
+      dns_enabled: false,
+      dns_autostart: true,
+      dns_suffix: default_dns_suffix(),
+      dns_port: default_dns_port(),
+      proxy_http_port: default_proxy_http_port(),
+      proxy_https_port: default_proxy_https_port(),
     }
   }
 }
@@ -601,6 +638,12 @@ mod tests {
       colima_default_memory_gb: 4,
       colima_default_disk_gb: 60,
       favorites: Vec::new(),
+      dns_enabled: false,
+      dns_autostart: true,
+      dns_suffix: "dockside.test".to_string(),
+      dns_port: 15353,
+      proxy_http_port: 80,
+      proxy_https_port: 443,
     };
 
     assert_eq!(settings.theme, ThemeName::GruvboxDark);
