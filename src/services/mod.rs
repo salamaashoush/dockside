@@ -238,7 +238,12 @@ pub fn bootstrap(suffix: &str, dns_port: u16) -> anyhow::Result<()> {
     .to_str()
     .ok_or_else(|| anyhow::anyhow!("CA PEM path is not valid UTF-8"))?;
   let port_str = dns_port.to_string();
-  helper::run_privileged(&["bootstrap", suffix, &port_str, pem_str])?;
+  // Bootstrap = upgrade path. Always pkexec the *fresh* in-tree helper,
+  // never the system one. Otherwise the stale system helper would copy
+  // itself over itself, leaving the on-disk helper outdated forever and
+  // future privileged calls stuck on the old subcommands.
+  let fresh_helper = helper::sibling_helper_path()?;
+  helper::run_privileged_with(&fresh_helper, &["bootstrap", suffix, &port_str, pem_str])?;
   if let Err(e) = install_ca_in_user_nss(&pem) {
     tracing::warn!("dns: NSS user-store install partial failure: {e}");
   }
@@ -269,33 +274,15 @@ pub fn revoke_low_ports() -> anyhow::Result<()> {
   helper::run_privileged(&["revoke-low-ports", exe_str]).map(|_| ())
 }
 
-/// True when the running binary already has `CAP_NET_BIND_SERVICE` (Linux)
-/// or the macOS pf anchor file is present.
+/// True when the host has been configured to redirect 80/443 to the
+/// proxy's bind ports. On Linux that means the persisted `nftables`
+/// systemd unit is in place; on macOS the pf anchor file. Both survive
+/// `cargo build` rebuilds and app restarts — unlike the old setcap
+/// approach, which the linker silently wiped on every rebuild.
 pub fn has_low_ports_grant() -> bool {
   #[cfg(target_os = "linux")]
   {
-    let Ok(exe) = std::env::current_exe() else {
-      return false;
-    };
-    let Some(getcap) = (|| -> Option<std::path::PathBuf> {
-      for p in ["/usr/sbin/getcap", "/usr/bin/getcap", "/sbin/getcap"] {
-        let path = std::path::Path::new(p);
-        if path.is_file() {
-          return Some(path.to_path_buf());
-        }
-      }
-      None
-    })() else {
-      return false;
-    };
-    let out = std::process::Command::new(getcap).arg(&exe).output();
-    if let Ok(o) = out
-      && o.status.success()
-    {
-      let s = String::from_utf8_lossy(&o.stdout);
-      return s.contains("cap_net_bind_service");
-    }
-    false
+    std::path::Path::new("/etc/systemd/system/dockside-port-redirect.service").is_file()
   }
   #[cfg(target_os = "macos")]
   {
@@ -307,13 +294,27 @@ pub fn has_low_ports_grant() -> bool {
   }
 }
 
-/// Did the user already run the bootstrap step? Probes the polkit policy
-/// file presence — cheap and matches what `bootstrap_linux` writes.
+/// Did the user already run the bootstrap step? Returns true when the
+/// polkit policy is registered AND a helper binary exists at any of the
+/// canonical install locations. Distro packages (`.deb`, `.pacman`) drop
+/// the policy + helper at install time, so packaged users see this as
+/// already-bootstrapped and skip the `Set up Local DNS` button entirely.
 pub fn is_bootstrapped() -> bool {
   #[cfg(target_os = "linux")]
   {
-    std::path::Path::new("/usr/share/polkit-1/actions/dev.dockside.helper.policy").is_file()
-      && std::path::Path::new("/usr/local/libexec/dockside-helper").is_file()
+    if !std::path::Path::new("/usr/share/polkit-1/actions/dev.dockside.helper.policy").is_file() {
+      return false;
+    }
+    for p in [
+      "/usr/local/libexec/dockside-helper",
+      "/usr/libexec/dockside-helper",
+      "/usr/bin/dockside-helper",
+    ] {
+      if std::path::Path::new(p).is_file() {
+        return true;
+      }
+    }
+    false
   }
   #[cfg(not(target_os = "linux"))]
   {
@@ -394,11 +395,21 @@ pub fn container_url(cx: &App, container_id: &str) -> Option<String> {
   let map = dns::manager(cx).route_map()?;
   let host = map.read().primary_for_container(container_id)?;
   let suffix = settings.dns_suffix.trim_matches('.');
-  let port = settings.proxy_http_port;
-  let url = if port == 80 {
+  // When the host-side redirect is installed, the kernel rewrites :80 to
+  // the proxy's actual bind port — so we can omit the port from URLs.
+  // Otherwise, point at the actually-bound port (which may differ from
+  // the configured one if a privileged-bind fallback kicked in).
+  let url = if has_low_ports_grant() {
     format!("http://{host}.{suffix}/")
   } else {
-    format!("http://{host}.{suffix}:{port}/")
+    let port = proxy::manager(cx)
+      .bound_ports()
+      .map_or(settings.proxy_http_port, |(http, _)| http);
+    if port == 80 {
+      format!("http://{host}.{suffix}/")
+    } else {
+      format!("http://{host}.{suffix}:{port}/")
+    }
   };
   Some(url)
 }

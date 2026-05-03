@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a365d"/>
+      <stop offset="100%" style="stop-color:#0d1b2a"/>
+    </linearGradient>
+    <linearGradient id="wheelGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa"/>
+      <stop offset="100%" style="stop-color:#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="anchorGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8fafc"/>
+      <stop offset="100%" style="stop-color:#cbd5e1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="32" y="32" width="960" height="960" rx="220" ry="220" fill="url(#bgGrad)"/>
+
+  <!-- Ship wheel (outer ring) -->
+  <circle cx="512" cy="512" r="320" fill="none" stroke="url(#wheelGrad)" stroke-width="48"/>
+
+  <!-- Ship wheel spokes -->
+  <g stroke="url(#wheelGrad)" stroke-width="40" stroke-linecap="round">
+    <line x1="512" y1="152" x2="512" y2="280"/>
+    <line x1="512" y1="744" x2="512" y2="872"/>
+    <line x1="152" y1="512" x2="280" y2="512"/>
+    <line x1="744" y1="512" x2="872" y2="512"/>
+    <line x1="257" y1="257" x2="347" y2="347"/>
+    <line x1="677" y1="677" x2="767" y2="767"/>
+    <line x1="767" y1="257" x2="677" y2="347"/>
+    <line x1="347" y1="677" x2="257" y2="767"/>
+  </g>
+
+  <!-- Ship wheel handles (outer knobs) -->
+  <g fill="url(#wheelGrad)">
+    <circle cx="512" cy="132" r="36"/>
+    <circle cx="512" cy="892" r="36"/>
+    <circle cx="132" cy="512" r="36"/>
+    <circle cx="892" cy="512" r="36"/>
+    <circle cx="243" cy="243" r="36"/>
+    <circle cx="781" cy="781" r="36"/>
+    <circle cx="781" cy="243" r="36"/>
+    <circle cx="243" cy="781" r="36"/>
+  </g>
+
+  <!-- Center hub -->
+  <circle cx="512" cy="512" r="100" fill="url(#wheelGrad)"/>
+  <circle cx="512" cy="512" r="60" fill="url(#bgGrad)"/>
+
+  <!-- Container stack (3 containers in center) -->
+  <g fill="url(#anchorGrad)">
+    <!-- Top container -->
+    <rect x="472" y="432" width="80" height="36" rx="4"/>
+    <!-- Middle container -->
+    <rect x="472" y="476" width="80" height="36" rx="4"/>
+    <!-- Bottom container -->
+    <rect x="472" y="520" width="80" height="36" rx="4"/>
+  </g>
+
+  <!-- Container detail lines -->
+  <g stroke="#1a365d" stroke-width="3">
+    <line x1="492" y1="440" x2="492" y2="460"/>
+    <line x1="532" y1="440" x2="532" y2="460"/>
+    <line x1="492" y1="484" x2="492" y2="504"/>
+    <line x1="532" y1="484" x2="532" y2="504"/>
+    <line x1="492" y1="528" x2="492" y2="548"/>
+    <line x1="532" y1="528" x2="532" y2="548"/>
+  </g>
+</svg>

@@ -127,19 +127,31 @@ icon SOURCE:
 icon-placeholder:
     ./scripts/generate-placeholder-icon.sh
 
-# Create macOS app bundle
-bundle: build-release
-    @echo "Creating Dockside.app bundle..."
-    @mkdir -p target/release/Dockside.app/Contents/MacOS
-    @mkdir -p target/release/Dockside.app/Contents/Resources
-    @cp target/release/dockside target/release/Dockside.app/Contents/MacOS/
-    @cp assets/Info.plist target/release/Dockside.app/Contents/
-    @cp assets/AppIcon.icns target/release/Dockside.app/Contents/Resources/ 2>/dev/null || echo "No icon found - run 'just icon-placeholder' first"
-    @cp -R themes target/release/Dockside.app/Contents/Resources/
-    @echo "Bundle created at target/release/Dockside.app"
+# Stage the helper binary with a target-triple suffix where
+# cargo-packager's `external_binaries` config expects to find it.
+_stage-helper:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    triple="$(rustc -vV | sed -n 's/host: //p')"
+    src="target/release/dockside-helper"
+    [[ -f "$src" ]] || { echo "missing $src — run 'just build-release' first" >&2; exit 1; }
+    ln -sf "$PWD/$src" "$PWD/target/dockside-helper-$triple"
 
-# Install app to /Applications
-install-app: bundle
+# Run cargo-packager for the host platform. Override FORMATS to pick a
+# subset (e.g. `FORMATS=dmg just package`).
+package: build-release _stage-helper
+    cargo packager --release --formats ${FORMATS:-app dmg deb appimage} --verbose
+
+# macOS-only: app bundle + DMG.
+package-macos: build-release _stage-helper
+    cargo packager --release --formats app dmg --verbose
+
+# Linux-only: .deb + AppImage + pacman (PKGBUILD + source tarball).
+package-linux: build-release _stage-helper
+    cargo packager --release --formats deb appimage pacman --verbose
+
+# Install the freshly-built .app into /Applications (macOS).
+install-app: package-macos
     @echo "Installing Dockside.app to /Applications..."
     @rm -rf /Applications/Dockside.app
     @cp -R target/release/Dockside.app /Applications/

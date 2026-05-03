@@ -9,16 +9,23 @@ mod platform;
 mod services;
 mod state;
 mod terminal;
+// Tray icon is implemented for macOS only. gpui 0.2 has no Linux
+// `Window::hide()` and shuts the run loop down on the last window
+// close, so a tray-resident app is not viable without a fork.
+#[cfg(not(target_os = "linux"))]
 mod tray;
 mod ui;
 mod utils;
 
 use std::path::PathBuf;
 use std::rc::Rc;
+#[cfg(not(target_os = "linux"))]
 use std::time::Duration;
 
+#[cfg(not(target_os = "linux"))]
+use gpui::Timer;
 use gpui::{
-  App, AppContext, Bounds, SharedString, Timer, TitlebarOptions, WindowBounds, WindowHandle, WindowOptions, px, size,
+  App, AppContext, Bounds, SharedString, TitlebarOptions, WindowBounds, WindowHandle, WindowOptions, px, size,
 };
 use gpui_component::{
   Root,
@@ -27,7 +34,10 @@ use gpui_component::{
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use platform::Platform;
-use state::{AppSettings, CurrentView};
+use state::AppSettings;
+#[cfg(not(target_os = "linux"))]
+use state::CurrentView;
+#[cfg(not(target_os = "linux"))]
 use tray::{AppTray, menu_ids};
 
 pub use assets::Assets;
@@ -75,27 +85,56 @@ fn open_main_window(cx: &mut App) -> WindowHandle<Root> {
   handle
 }
 
-/// Get the themes directory path, checking multiple locations:
-/// 1. Bundle Resources/themes (for .app bundle)
-/// 2. ./themes (for development)
+/// Get the themes directory path. Probes (in priority order):
+///
+/// 1. `$DOCKSIDE_THEMES_DIR` — explicit override.
+/// 2. `<exe-parent>/../Resources/themes` — macOS `.app` bundle.
+/// 3. `<exe-parent>/../lib/dockside/themes` — Linux `.deb` / `.pacman` /
+///    `AppImage` layout where cargo-packager places `resources`.
+/// 4. `<exe-parent>/themes` — portable tarball / dev `target/release` /
+///    sibling-of-binary case.
+/// 5. `/usr/lib/dockside/themes` — absolute fallback when the package
+///    binary somehow lacks a usable parent (e.g. symlinked into
+///    `~/.local/bin`).
+/// 6. `/usr/share/dockside/themes` — alternate FHS share path.
+/// 7. `./themes` — dev `cargo run` from the repo root.
 fn get_themes_dir() -> Option<PathBuf> {
-  // Try to find themes relative to executable (for .app bundle)
-  if let Ok(exe_path) = std::env::current_exe() {
-    // In a .app bundle: Contents/MacOS/dockside -> Contents/Resources/themes
-    if let Some(macos_dir) = exe_path.parent() {
-      let resources_themes = macos_dir
-                .parent() // Contents
-                .map(|p| p.join("Resources").join("themes"));
-
-      if let Some(path) = resources_themes
-        && path.exists()
-      {
-        return Some(path);
-      }
+  if let Ok(env_dir) = std::env::var("DOCKSIDE_THEMES_DIR") {
+    let path = PathBuf::from(env_dir);
+    if path.exists() {
+      return Some(path);
     }
   }
 
-  // Fallback to ./themes for development
+  if let Ok(exe_path) = std::env::current_exe()
+    && let Some(parent) = exe_path.parent()
+  {
+    // macOS .app bundle: Contents/MacOS/dockside -> Contents/Resources/themes.
+    if let Some(grand) = parent.parent() {
+      let resources = grand.join("Resources").join("themes");
+      if resources.exists() {
+        return Some(resources);
+      }
+      // Linux package layout: /usr/bin/dockside -> /usr/lib/dockside/themes.
+      let lib = grand.join("lib").join("dockside").join("themes");
+      if lib.exists() {
+        return Some(lib);
+      }
+    }
+    // Sibling: /tarball/dockside -> /tarball/themes.
+    let sibling = parent.join("themes");
+    if sibling.exists() {
+      return Some(sibling);
+    }
+  }
+
+  for absolute in ["/usr/lib/dockside/themes", "/usr/share/dockside/themes"] {
+    let path = PathBuf::from(absolute);
+    if path.exists() {
+      return Some(path);
+    }
+  }
+
   let dev_themes = PathBuf::from("./themes");
   if dev_themes.exists() {
     return Some(dev_themes);
@@ -238,30 +277,29 @@ fn main() {
     // Open the main window
     open_main_window(cx);
 
-    // Create tray icon after window is opened (deferred to ensure main thread is ready)
+    // Tray icon is disabled on Linux for now: gpui 0.2 stops the
+    // calloop event loop the moment `state.windows.is_empty()`
+    // (`gpui-0.2.2/src/platform/linux/wayland/client.rs:387-389`),
+    // and there is no `Window::hide()` on Linux, so a tray-resident
+    // app is impossible without forking gpui. Revisit once gpui
+    // exposes hide/show or a "keep-alive" run-loop knob.
+    #[cfg(not(target_os = "linux"))]
     cx.spawn(async move |cx| {
-      // Small delay to ensure the app is fully initialized
       Timer::after(Duration::from_millis(500)).await;
-
-      // Create tray on main thread via update
       let _ = cx.update(|_cx| {
-        // Create the system tray icon
-        // Note: We leak the tray to keep it alive for the app's lifetime
         let tray = Box::new(AppTray::new());
         Box::leak(tray);
       });
 
-      // Then start polling for menu events
+      // Pump muda menu events back into the gpui main thread.
       let menu_receiver = muda::MenuEvent::receiver();
       loop {
-        // Check for menu events
         if let Ok(event) = menu_receiver.try_recv() {
           let id = event.id.0.as_str();
           let _ = cx.update(|cx| {
             handle_tray_menu_event(id, cx);
           });
         }
-        // Small delay to prevent busy-waiting
         Timer::after(Duration::from_millis(100)).await;
       }
     })
@@ -270,6 +308,7 @@ fn main() {
 }
 
 /// Ensure window exists and activate it
+#[cfg(not(target_os = "linux"))]
 fn ensure_window_and_activate(cx: &mut App) {
   if cx.windows().is_empty() {
     open_main_window(cx);
@@ -278,6 +317,7 @@ fn ensure_window_and_activate(cx: &mut App) {
 }
 
 /// Handle tray menu events
+#[cfg(not(target_os = "linux"))]
 fn handle_tray_menu_event(id: &str, cx: &mut App) {
   match id {
     menu_ids::SHOW_APP => {

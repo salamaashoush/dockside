@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Polkit policy shipped with the Dockside .deb / .pacman package. The
+  app's runtime bootstrap writes a near-identical file at install time
+  for AppImage / tarball installs, but distro packages can drop straight
+  in here so the user never sees the bootstrap-copy prompt.
+
+  exec.path matches where cargo-packager places external_binaries inside
+  a .deb (= /usr/bin/dockside-helper). If a future package layout changes
+  the helper location, update this file in lockstep.
+-->
+<policyconfig>
+  <action id="dev.dockside.helper">
+    <description>Manage the local *.dockside.test resolver, root CA, and 80/443 port redirect</description>
+    <message>Dockside needs to register the local DNS resolver, trust its root CA, or install the kernel-level port redirect.</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/dockside-helper</annotate>
+  </action>
+</policyconfig>

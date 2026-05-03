@@ -195,16 +195,8 @@ fn grant_low_ports(args: &[String]) -> anyhow::Result<()> {
 
   #[cfg(target_os = "linux")]
   {
-    let setcap = find_tool(&["/usr/sbin/setcap", "/usr/bin/setcap", "/sbin/setcap"])
-      .ok_or_else(|| anyhow::anyhow!("`setcap` not found — install the libcap package"))?;
-    let status = std::process::Command::new(&setcap)
-      .args(["cap_net_bind_service=+ep", binary])
-      .status()?;
-    if !status.success() {
-      anyhow::bail!("setcap exited with {status}");
-    }
-    println!("granted cap_net_bind_service on {binary}");
-    Ok(())
+    let _ = binary;
+    install_redirect_linux()
   }
   #[cfg(target_os = "macos")]
   {
@@ -235,17 +227,8 @@ fn grant_low_ports(args: &[String]) -> anyhow::Result<()> {
 fn revoke_low_ports(args: &[String]) -> anyhow::Result<()> {
   #[cfg(target_os = "linux")]
   {
-    let binary = args
-      .first()
-      .ok_or_else(|| anyhow::anyhow!("missing <binary-path> arg"))?;
-    if !std::path::Path::new(binary).is_file() {
-      return Ok(());
-    }
-    if let Some(setcap) = find_tool(&["/usr/sbin/setcap", "/usr/bin/setcap", "/sbin/setcap"]) {
-      let _ = std::process::Command::new(setcap).args(["-r", binary]).status();
-    }
-    println!("revoked cap_net_bind_service on {binary}");
-    Ok(())
+    let _ = args;
+    uninstall_redirect_linux()
   }
   #[cfg(target_os = "macos")]
   {
@@ -261,6 +244,123 @@ fn revoke_low_ports(args: &[String]) -> anyhow::Result<()> {
     let _ = args;
     Ok(())
   }
+}
+
+#[cfg(target_os = "linux")]
+const REDIRECT_NFT_PATH: &str = "/usr/local/lib/dockside/redirect.nft";
+#[cfg(target_os = "linux")]
+const REDIRECT_UNIT_PATH: &str = "/etc/systemd/system/dockside-port-redirect.service";
+#[cfg(target_os = "linux")]
+const REDIRECT_UNIT_NAME: &str = "dockside-port-redirect.service";
+
+/// Install an `nftables` `nat` table that redirects loopback connections
+/// to 80/443 to the unprivileged ports the dockside proxy actually binds
+/// (47080/47443). Persisted via a `oneshot` systemd unit so it survives
+/// reboot. Survives `cargo build` rebuilds — unlike file capabilities,
+/// the redirect lives in the kernel's netfilter state, independent of
+/// the binary on disk.
+#[cfg(target_os = "linux")]
+fn install_redirect_linux() -> anyhow::Result<()> {
+  let nft = find_tool(&["/usr/sbin/nft", "/usr/bin/nft", "/sbin/nft"])
+    .ok_or_else(|| anyhow::anyhow!("`nft` not found — install the `nftables` package"))?;
+
+  // Atomic ruleset: declare the table first to make `delete` safe even on
+  // a fresh system, then redeclare with the actual rules. The whole file
+  // is loaded as a single transaction by `nft -f` so no half-state.
+  // Restricted to `daddr 127.0.0.1` so external traffic is untouched.
+  let ruleset = "table ip dockside_nat {\n\
+                 \tchain output { type nat hook output priority -100; }\n\
+                 }\n\
+                 delete table ip dockside_nat\n\
+                 table ip dockside_nat {\n\
+                 \tchain output {\n\
+                 \t\ttype nat hook output priority -100;\n\
+                 \t\tip daddr 127.0.0.1 tcp dport 80 redirect to :47080\n\
+                 \t\tip daddr 127.0.0.1 tcp dport 443 redirect to :47443\n\
+                 \t}\n\
+                 }\n";
+  write_root_file(std::path::Path::new(REDIRECT_NFT_PATH), ruleset.as_bytes(), 0o644)?;
+  println!("wrote {REDIRECT_NFT_PATH}");
+
+  // Apply now.
+  let status = std::process::Command::new(&nft)
+    .args(["-f", REDIRECT_NFT_PATH])
+    .status()?;
+  if !status.success() {
+    anyhow::bail!("`nft -f {REDIRECT_NFT_PATH}` exited with {status}");
+  }
+  println!("loaded nftables table dockside_nat (80/443 → 47080/47443 on lo)");
+
+  // Persist via systemd so the rules come back after reboot.
+  let unit = format!(
+    "[Unit]\n\
+     Description=Dockside port redirect (80/443 -> 47080/47443 on loopback)\n\
+     After=network-pre.target\n\
+     \n\
+     [Service]\n\
+     Type=oneshot\n\
+     RemainAfterExit=yes\n\
+     ExecStart={} -f {REDIRECT_NFT_PATH}\n\
+     ExecStop={} delete table ip dockside_nat\n\
+     \n\
+     [Install]\n\
+     WantedBy=multi-user.target\n",
+    nft.display(),
+    nft.display()
+  );
+  write_root_file(std::path::Path::new(REDIRECT_UNIT_PATH), unit.as_bytes(), 0o644)?;
+  println!("wrote {REDIRECT_UNIT_PATH}");
+
+  if let Some(systemctl) = find_tool(&["/usr/bin/systemctl", "/bin/systemctl"]) {
+    let _ = std::process::Command::new(&systemctl).arg("daemon-reload").status();
+    let status = std::process::Command::new(&systemctl)
+      .args(["enable", "--now", REDIRECT_UNIT_NAME])
+      .status()?;
+    if !status.success() {
+      anyhow::bail!("`systemctl enable --now {REDIRECT_UNIT_NAME}` exited with {status}");
+    }
+    println!("enabled and started {REDIRECT_UNIT_NAME}");
+  } else {
+    eprintln!(
+      "warning: systemctl not found — port redirect is active for this session \
+       but will not survive reboot"
+    );
+  }
+
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn uninstall_redirect_linux() -> anyhow::Result<()> {
+  if let Some(systemctl) = find_tool(&["/usr/bin/systemctl", "/bin/systemctl"]) {
+    let _ = std::process::Command::new(&systemctl)
+      .args(["disable", "--now", REDIRECT_UNIT_NAME])
+      .status();
+  }
+  if let Some(nft) = find_tool(&["/usr/sbin/nft", "/usr/bin/nft", "/sbin/nft"]) {
+    // Best-effort flush; `delete` errors if the table is already gone.
+    let _ = std::process::Command::new(nft)
+      .args(["delete", "table", "ip", "dockside_nat"])
+      .status();
+  }
+  for path in [REDIRECT_UNIT_PATH, REDIRECT_NFT_PATH] {
+    if std::path::Path::new(path).exists() {
+      std::fs::remove_file(path)?;
+      println!("removed {path}");
+    }
+  }
+  // Best-effort: also revoke any leftover file capability from prior
+  // versions of this helper that used `setcap`. Keeps `getcap` clean
+  // for users who upgrade.
+  if let Some(setcap) = find_tool(&["/usr/sbin/setcap", "/usr/bin/setcap", "/sbin/setcap"])
+    && let Ok(exe) = std::env::current_exe()
+  {
+    let _ = std::process::Command::new(&setcap).args(["-r"]).arg(&exe).status();
+  }
+  if let Some(systemctl) = find_tool(&["/usr/bin/systemctl", "/bin/systemctl"]) {
+    let _ = std::process::Command::new(systemctl).arg("daemon-reload").status();
+  }
+  Ok(())
 }
 
 fn install_resolver(args: &[String]) -> anyhow::Result<()> {

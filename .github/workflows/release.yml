@@ -7,11 +7,16 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pin cargo-packager so a new minor release doesn't silently change
+  # the artifact layout for users.
+  CARGO_PACKAGER_VERSION: '0.11.5'
 
 jobs:
   build-macos:
     name: Build macOS App
     runs-on: macos-latest
+    env:
+      TARGET: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +35,7 @@ jobs:
       - name: Install macOS dependencies
         run: |
           brew update
-          brew install pkg-config cmake
+          brew install pkg-config cmake create-dmg
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -45,8 +50,8 @@ jobs:
           restore-keys: |
             macos-aarch64-cargo-
 
-      - name: Build
-        run: cargo build --release --target aarch64-apple-darwin
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version ${{ env.CARGO_PACKAGER_VERSION }}
 
       - name: Generate icon if missing
         run: |
@@ -55,42 +60,54 @@ jobs:
             ./scripts/generate-placeholder-icon.sh
           fi
 
-      - name: Create app bundle
+      - name: Build
+        run: cargo build --release --target $TARGET
+
+      - name: Stage helper for cargo-packager
+        # external_binaries expects `<name>-<target-triple>` next to the
+        # main binary. Symlink rather than copy to keep build artifacts
+        # in a single canonical location.
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          ln -sf "$PWD/target/$TARGET/release/dockside-helper" \
+                 "$PWD/target/dockside-helper-$TARGET"
 
-          # Create bundle structure
-          mkdir -p Dockside.app/Contents/MacOS
-          mkdir -p Dockside.app/Contents/Resources
+      - name: Package
+        run: cargo packager --release --target $TARGET --formats app dmg --verbose
 
-          # Copy binary
-          cp target/aarch64-apple-darwin/release/dockside Dockside.app/Contents/MacOS/
-
-          # Copy Info.plist and update version
-          cp assets/Info.plist Dockside.app/Contents/
-          VERSION_NUM=${VERSION#v}
-          sed -i '' "s/0.1.0/$VERSION_NUM/g" Dockside.app/Contents/Info.plist
-
-          # Copy icon if exists
-          if [[ -f "assets/AppIcon.icns" ]]; then
-            cp assets/AppIcon.icns Dockside.app/Contents/Resources/
+      - name: Stamp version into Info.plist
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          PLIST="target/$TARGET/release/Dockside.app/Contents/Info.plist"
+          if [[ -f "$PLIST" ]]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST" || true
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST" || true
           fi
 
-          # Copy themes
-          cp -R themes Dockside.app/Contents/Resources/
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          # cargo-packager drops outputs in target/<triple>/release/
+          find target/$TARGET/release -maxdepth 1 \
+            \( -name '*.dmg' -o -name 'Dockside.app' \) \
+            -exec cp -R {} out/ \;
+          # Zip the .app for Releases (DMG already a single file).
+          if [[ -d "out/Dockside.app" ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            (cd out && zip -ry "Dockside-$VERSION-macos-arm64.zip" Dockside.app && rm -rf Dockside.app)
+          fi
+          ls -la out
 
-          # Package
-          zip -r Dockside-$VERSION-macos-arm64.zip Dockside.app
-
-      - name: Upload app bundle
+      - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Dockside-macos-arm64
-          path: Dockside-*.zip
+          path: out/*
 
   build-linux:
     name: Build Linux App
     runs-on: ubuntu-latest
+    env:
+      TARGET: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
 
@@ -116,7 +133,10 @@ jobs:
             libxkbcommon-x11-dev \
             libssl-dev \
             libvulkan-dev \
-            libasound2-dev
+            libasound2-dev \
+            file \
+            libfuse2 \
+            librsvg2-dev
 
       # libghostty-vt-sys vendors Ghostty's C core; Zig is required to
       # build it on every platform.
@@ -138,62 +158,38 @@ jobs:
           restore-keys: |
             linux-x86_64-cargo-
 
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version ${{ env.CARGO_PACKAGER_VERSION }}
+
       - name: Build
-        run: cargo build --release --target x86_64-unknown-linux-gnu
+        run: cargo build --release --target $TARGET
 
-      - name: Create Linux package
+      - name: Stage helper for cargo-packager
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          ln -sf "$PWD/target/$TARGET/release/dockside-helper" \
+                 "$PWD/target/dockside-helper-$TARGET"
 
-          # Create package directory
-          mkdir -p dockside-$VERSION-linux-x86_64
+      - name: Package
+        # `pacman` emits a source tarball + PKGBUILD that downstream
+        # consumers (Arch / CachyOS / Manjaro / AUR maintainers) feed
+        # into `makepkg -si`. We don't run makepkg in CI — that would
+        # need an Arch container — but we still publish the tarball so
+        # users have a one-step source for an AUR-style PKGBUILD.
+        run: cargo packager --release --target $TARGET --formats deb appimage pacman --verbose
 
-          # Copy binary
-          cp target/x86_64-unknown-linux-gnu/release/dockside dockside-$VERSION-linux-x86_64/
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          find target/$TARGET/release -maxdepth 1 \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name 'PKGBUILD' \) \
+            -exec cp {} out/ \;
+          ls -la out
 
-          # Copy themes
-          cp -R themes dockside-$VERSION-linux-x86_64/
-
-          # Copy assets
-          mkdir -p dockside-$VERSION-linux-x86_64/assets
-          cp assets/icon.png dockside-$VERSION-linux-x86_64/assets/
-
-          # Create desktop entry
-          cat > dockside-$VERSION-linux-x86_64/dockside.desktop << EOF
-          [Desktop Entry]
-          Name=Dockside
-          Comment=Docker Management Desktop App
-          Exec=dockside
-          Icon=dockside
-          Type=Application
-          Categories=Development;Utility;
-          EOF
-
-          # Create README
-          cat > dockside-$VERSION-linux-x86_64/README.md << EOF
-          # Dockside for Linux
-
-          ## Installation
-
-          1. Extract this archive
-          2. Copy the \`dockside\` binary to /usr/local/bin or ~/.local/bin
-          3. Copy the \`themes\` directory to ~/.config/dockside/themes
-          4. (Optional) Copy dockside.desktop to ~/.local/share/applications/
-
-          ## Requirements
-
-          - Docker installed and running
-          - Or Colima for VM-based Docker
-          EOF
-
-          # Package
-          tar -czvf Dockside-$VERSION-linux-x86_64.tar.gz dockside-$VERSION-linux-x86_64
-
-      - name: Upload Linux package
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Dockside-linux-x86_64
-          path: Dockside-*.tar.gz
+          path: out/*
 
   release:
     name: Create Release
@@ -227,13 +223,23 @@ jobs:
                 echo ""
                 echo "## Installation"
                 echo ""
+                echo "### One-liner (recommended)"
+                echo ""
+                echo '```bash'
+                echo "curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/scripts/install.sh | bash"
+                echo '```'
+                echo ""
                 echo "### macOS (Apple Silicon)"
                 echo ""
-                echo "Download \`Dockside-vX.X.X-macos-arm64.zip\`, extract, and move \`Dockside.app\` to \`/Applications\`."
+                echo "Download the \`.dmg\`, open it, drag \`Dockside.app\` to \`Applications\`. The privileged \`dockside-helper\` lives inside \`Contents/MacOS/\` next to the main app — do not separate them."
                 echo ""
                 echo "### Linux (x86_64)"
                 echo ""
-                echo "Download \`Dockside-vX.X.X-linux-x86_64.tar.gz\`, extract, and run \`./dockside\`."
+                echo "* **AppImage** (universal): download, \`chmod +x\`, run."
+                echo "* **Debian / Ubuntu**: \`sudo dpkg -i Dockside_*_amd64.deb\` (auto-installs polkit policy + nftables dependency)."
+                echo "* **Arch / CachyOS / Manjaro**: download \`PKGBUILD\` + the matching source tarball into the same dir, then \`makepkg -si\` (auto-installs polkit policy + nftables dependency). AUR mirror coming."
+                echo ""
+                echo "After first launch, open **Settings → Local DNS → Set up Local DNS** to register the system resolver and trust the local CA. \`.deb\` users skip the helper-copy prompt because the package already drops the polkit policy."
                 echo ""
                 echo "### Build from Source"
                 echo ""
@@ -241,6 +247,9 @@ jobs:
                 echo "git clone https://github.com/salamaashoush/dockside"
                 echo "cd dockside"
                 echo "cargo build --release"
+                echo "cargo install cargo-packager --locked"
+                echo "cargo packager --release --formats app dmg     # macOS"
+                echo "cargo packager --release --formats deb appimage pacman  # Linux"
                 echo '```'
               } >> changelog.md
             else
@@ -263,6 +272,10 @@ jobs:
           body_path: changelog.md
           files: |
             artifacts/**/*.zip
+            artifacts/**/*.dmg
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
             artifacts/**/*.tar.gz
+            artifacts/**/PKGBUILD
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}

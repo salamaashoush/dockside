@@ -1157,7 +1157,7 @@ impl SettingsView {
 
     let pretty_url_row = Self::render_row(
       "Drop port from URL",
-      "Bind 80/443 directly so URLs are http://name.dockside.test/ (no port). Linux: setcap cap_net_bind_service. macOS: pf redirect rule.",
+      "Redirect host 80/443 to the proxy so URLs drop the port suffix (http://name.dockside.test/). Linux: nftables nat hook with a systemd unit. macOS: pf redirect rule. Both persist across reboots and rebuilds.",
       h_flex()
         .gap(px(8.))
         .items_center()
@@ -1172,15 +1172,10 @@ impl SettingsView {
                 tracing::warn!("dns: grant_low_ports failed: {e}");
                 return;
               }
-              // Auto-update settings to use 80/443 for URLs without ports.
-              let st = settings_state(cx);
-              st.update(cx, |state, cx| {
-                state.settings.proxy_http_port = 80;
-                state.settings.proxy_https_port = 443;
-                let _ = state.settings.save();
-                cx.emit(SettingsChanged::SettingsUpdated);
-              });
-              crate::services::apply_dns_settings(cx);
+              // The redirect is installed at the kernel/host level. The
+              // proxy keeps binding its own (unprivileged) port; URLs
+              // drop the port suffix because `container_url()` now sees
+              // `has_low_ports_grant() == true`.
               cx.notify();
             })),
         )
@@ -1195,14 +1190,6 @@ impl SettingsView {
                   tracing::warn!("dns: revoke_low_ports failed: {e}");
                   return;
                 }
-                let st = settings_state(cx);
-                st.update(cx, |state, cx| {
-                  state.settings.proxy_http_port = 47080;
-                  state.settings.proxy_https_port = 47443;
-                  let _ = state.settings.save();
-                  cx.emit(SettingsChanged::SettingsUpdated);
-                });
-                crate::services::apply_dns_settings(cx);
                 cx.notify();
               })),
           )
@@ -1321,9 +1308,33 @@ impl SettingsView {
       block
     };
 
+    let restart_required = proxy_mgr.restart_required();
+    let restart_banner = v_flex()
+      .w_full()
+      .gap(px(4.))
+      .p(px(12.))
+      .my(px(8.))
+      .rounded(px(8.))
+      .bg(colors.danger.opacity(0.1))
+      .border_1()
+      .border_color(colors.danger.opacity(0.4))
+      .child(
+        div()
+          .text_sm()
+          .font_weight(gpui::FontWeight::SEMIBOLD)
+          .text_color(colors.danger)
+          .child("Restart Dockside to bind 80/443"),
+      )
+      .child(div().text_xs().text_color(colors.muted_foreground).child(
+        "The capability grant only takes effect for processes started after the grant. \
+         Until you quit and reopen the app, the proxy is running on its fallback ports \
+         (47080 / 47443). Container links use those fallback ports automatically.",
+      ));
+
     v_flex()
       .w_full()
       .child(Self::render_section("Resolver", cx))
+      .when(restart_required, |el| el.child(restart_banner))
       .child(setup_row)
       .child(toggle_row)
       .child(suffix_row)

@@ -35,17 +35,24 @@ Built with [GPUI](https://gpui.rs) for a fast, native experience on **macOS (App
 curl -fsSL https://raw.githubusercontent.com/salamaashoush/dockside/main/scripts/install.sh | bash
 ```
 
-- macOS arm64 → `/Applications/Dockside.app` (quarantine xattr stripped)
-- Linux x86_64 → `~/.local/bin/dockside` + themes in `~/.local/share/dockside` + `.desktop` entry + icon
+- macOS arm64 → `/Applications/Dockside.app` (quarantine xattr stripped). The privileged `dockside-helper` lives inside `Contents/MacOS/` next to the main app — keep them together.
+- Linux x86_64 → `~/.local/bin/dockside` (an AppImage with the helper bundled inside).
 
-Pin a version: `./scripts/install.sh v0.2.0`.
+Pin a version: `./scripts/install.sh v0.3.1`.
 
 ### Manual install
 
-Download the latest archive from the [Releases page](https://github.com/salamaashoush/dockside/releases):
+All artifacts on the [Releases page](https://github.com/salamaashoush/dockside/releases) are produced by [`cargo-packager`](https://github.com/crabnebula-dev/cargo-packager):
 
-- **macOS arm64**: `Dockside-vX.Y.Z-macos-arm64.zip` → unzip and move `Dockside.app` to `/Applications`
-- **Linux x86_64**: `Dockside-vX.Y.Z-linux-x86_64.tar.gz` → extract, copy `dockside` to a directory on PATH, copy `themes/` next to it (or set `DOCKSIDE_THEMES_DIR`)
+- **macOS (Apple Silicon)** — `Dockside_X.Y.Z_aarch64.dmg` (drag to `/Applications`) or `Dockside-vX.Y.Z-macos-arm64.zip` (zipped `.app`).
+- **Linux (x86_64) AppImage** — `Dockside_X.Y.Z_x86_64.AppImage`. `chmod +x`, run anywhere.
+- **Linux (Debian / Ubuntu)** — `Dockside_X.Y.Z_amd64.deb`. `sudo dpkg -i …` auto-installs the polkit policy at `/usr/share/polkit-1/actions/dev.dockside.helper.policy`, so the in-app **Set up Local DNS** step is skipped.
+- **Linux (Arch / CachyOS / Manjaro)** — `PKGBUILD` + matching `Dockside-X.Y.Z.tar.gz`. Drop both into the same directory and run `makepkg -si`. Same polkit policy install as `.deb`.
+
+### First-time DNS setup
+
+1. **Settings → Local DNS → Set up Local DNS** — one polkit / Touch ID prompt. Installs the helper to `/usr/local/libexec/dockside-helper` (AppImage / tarball) or recognises the package-installed copy at `/usr/bin/dockside-helper` (`.deb`), registers the system resolver for `*.dockside.test`, trusts the local root CA.
+2. **Settings → Local DNS → Drop port from URL** *(optional)* — Linux installs an `nftables` NAT redirect plus a `dockside-port-redirect.service` systemd unit so `http://name.dockside.test/` works without a `:47080` suffix. macOS installs an equivalent `pf` redirect rule. Both persist across reboots and rebuilds.
 
 ## Build from source
 
@@ -59,7 +66,10 @@ just install-build-deps     # or: bash scripts/install-deps.sh
 # Run / build
 just run                    # debug
 just build-release          # release binary
-just bundle                 # macOS .app bundle
+
+# Native installers (cargo-packager). Install once: cargo install cargo-packager --locked
+just package-macos          # Dockside.app + .dmg
+just package-linux          # .deb + .AppImage
 ```
 
 `scripts/install-deps.sh` auto-detects:

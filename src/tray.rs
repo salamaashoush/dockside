@@ -1,26 +1,10 @@
 use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use rust_embed::RustEmbed;
-use tray_icon::{TrayIcon, TrayIconBuilder};
+#[cfg(not(target_os = "linux"))]
+use tray_icon::TrayIcon;
+use tray_icon::TrayIconBuilder;
 
 use crate::platform::Platform;
-
-/// Initialize GTK on Linux (required for tray icon menus)
-#[cfg(target_os = "linux")]
-fn init_gtk() {
-  // Initialize GTK if not already done
-  // This is required for tray-icon and muda to work on Linux
-  if gtk::is_initialized() {
-    return;
-  }
-  if let Err(e) = gtk::init() {
-    tracing::warn!("Failed to initialize GTK for tray icon: {}", e);
-  }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn init_gtk() {
-  // No-op on non-Linux platforms
-}
 
 /// Menu item IDs for handling events
 pub mod menu_ids {
@@ -142,32 +126,54 @@ fn load_tray_icon() -> tray_icon::Icon {
   tray_icon::Icon::from_rgba(rgba, size, size).expect("Failed to create tray icon from RGBA data")
 }
 
-/// The tray icon manager
+/// The tray icon manager. macOS only — gpui 0.2's Linux backend has
+/// no `Window::hide()` and stops the run loop on the last window
+/// close, so a tray-resident app is not viable there without forking
+/// gpui. The whole `tray` module is `#[cfg(not(target_os = "linux"))]`
+/// in `main.rs`.
+#[cfg(not(target_os = "linux"))]
 pub struct AppTray {
   _tray_icon: TrayIcon,
 }
 
+#[cfg(not(target_os = "linux"))]
 impl AppTray {
   /// Create and initialize the system tray icon
   pub fn new() -> Self {
-    // Initialize GTK on Linux (required for menus)
-    init_gtk();
+    tracing::info!("tray: AppTray::new() entered");
 
     let menu = create_tray_menu();
+    tracing::info!("tray: menu built");
     let icon = load_tray_icon();
+    tracing::info!("tray: icon loaded");
 
-    let tray_icon = TrayIconBuilder::new()
+    // Stable SNI id so KDE Plasma / GNOME-AppIndicator can persist the
+    // user's "Shown / Hidden" preference across app restarts. Without
+    // this the tray-icon crate autogenerates a fresh UUID each launch,
+    // so the panel forgets the chosen visibility every time.
+    let build_result = TrayIconBuilder::new()
+      .with_id("dev.dockside.app")
       .with_menu(Box::new(menu))
       .with_tooltip("Dockside - Docker Management")
       .with_icon(icon)
       .with_menu_on_left_click(true)
-      .build()
-      .expect("Failed to create tray icon");
+      .build();
+    let tray_icon = match build_result {
+      Ok(t) => {
+        tracing::info!("tray: TrayIconBuilder::build succeeded");
+        t
+      }
+      Err(e) => {
+        tracing::error!("tray: TrayIconBuilder::build failed: {e}");
+        panic!("Failed to create tray icon: {e}");
+      }
+    };
 
     Self { _tray_icon: tray_icon }
   }
 }
 
+#[cfg(not(target_os = "linux"))]
 impl Default for AppTray {
   fn default() -> Self {
     Self::new()

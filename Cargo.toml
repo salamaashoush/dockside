@@ -1,6 +1,6 @@
 [package]
 name = "dockside"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.93"
 description = "A native desktop application for managing Docker containers, images, volumes, networks, and Kubernetes resources via Colima"
@@ -88,6 +88,88 @@ criterion = "0.8"
 gpui = { version = "0.2", features = ["test-support"] }
 
 [build-dependencies]
+
+# ==================== cargo-packager ====================
+#
+# Used by `just package` and the release CI to produce native installers:
+# macOS .app + .dmg, Linux .deb + .AppImage. Run with `cargo packager
+# --release` after `cargo build --release` (the helper binary needs a
+# `<name>-<target-triple>` symlink/copy next to the main binary so the
+# packager can find it via `external_binaries`; the CI workflow
+# generates that copy in a pre-package step).
+
+[package.metadata.packager]
+product-name = "Dockside"
+identifier = "dev.dockside.app"
+description = "Docker management desktop app"
+long-description = """
+Native desktop manager for Docker containers, images, volumes, networks,
+compose projects, and Kubernetes resources. Includes embedded terminal,
+live stats, image vulnerability scanning, and an optional local DNS +
+HTTPS reverse proxy for accessing containers via *.dockside.test URLs.
+"""
+homepage = "https://github.com/salamaashoush/dockside"
+authors = ["Salama Ashoush <salamaashoush@gmail.com>"]
+copyright = "Copyright (c) 2025-2026 Salama Ashoush"
+category = "DeveloperTool"
+# Multi-size raster icons + SVG. cargo-packager keys hicolor install
+# paths off each PNG's pixel dimensions, so giving it 16/32/48/.../1024
+# produces a full hicolor tree — without those, GTK / Qt menus that
+# look up at typical 48 / 64 / 128 sizes find no icon and fall back to
+# the generic-app placeholder.
+icons = [
+  "assets/app-icons/icon-16.png",
+  "assets/app-icons/icon-32.png",
+  "assets/app-icons/icon-48.png",
+  "assets/app-icons/icon-64.png",
+  "assets/app-icons/icon-128.png",
+  "assets/app-icons/icon-256.png",
+  "assets/app-icons/icon-512.png",
+  "assets/app-icons/icon-1024.png",
+  "assets/app-icons/icon.svg",
+]
+# Bundle the privileged helper next to the main binary. The app's
+# `helper_path()` walks well-known locations (sibling of current_exe is
+# the package case) and falls back to `/usr/local/libexec` for the
+# bootstrap-copy install.
+external-binaries = ["target/dockside-helper"]
+resources = [
+  { src = "themes/**/*", target = "themes" },
+]
+
+[package.metadata.packager.deb]
+section = "devel"
+priority = "optional"
+depends = ["nftables", "policykit-1", "ca-certificates", "libssl3"]
+# Ship the polkit policy at install time so .deb users skip the
+# bootstrap-copy prompt entirely. exec.path inside the policy must
+# match where the binary lands inside the .deb (= /usr/bin/).
+files = { "packaging/dev.dockside.helper.policy" = "/usr/share/polkit-1/actions/dev.dockside.helper.policy" }
+
+[package.metadata.packager.appimage]
+# Pull in the system libraries the app links against. linuxdeploy
+# auto-detects most; list any extras it misses here.
+libs = []
+
+[package.metadata.packager.pacman]
+# Arch / CachyOS / EndeavourOS / Manjaro. Same polkit-policy install as
+# the .deb so users skip the bootstrap-copy prompt. cargo-packager
+# generates a PKGBUILD next to a source tarball; build with `makepkg
+# -si` (or upload to the AUR).
+depends = ["nftables", "polkit", "ca-certificates"]
+files = { "packaging/dev.dockside.helper.policy" = "/usr/share/polkit-1/actions/dev.dockside.helper.policy" }
+
+[package.metadata.packager.macos]
+minimum-system-version = "13.0"
+# Codesigning identity (set DOCKSIDE_SIGNING_IDENTITY in the runner
+# env to override). Unsigned builds still install via xattr unquarantine.
+# signing-identity = "Developer ID Application: ..."
+info-plist-path = "assets/Info.plist"
+
+[package.metadata.packager.dmg]
+# Default DMG layout is fine. Override window size / icon positions
+# here if a fancier installer is wanted later.
+
 
 # ==================== Build Profiles ====================
 

@@ -3,10 +3,11 @@
 //! the matching container's `Backend`. WebSocket upgrades pass through.
 
 use std::convert::Infallible;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1;
@@ -58,19 +59,58 @@ pub enum ProxyMode {
   Https,
 }
 
-pub async fn spawn(addr: SocketAddr, config: ProxyConfig) -> Result<ProxyHandle> {
+/// `bind()` outcome. Caller distinguishes `PermissionDenied` so it can
+/// fall back to an unprivileged port and surface a "restart required"
+/// hint — Linux file capabilities only take effect for processes started
+/// after the grant, so the running app cannot bind 80/443 even after
+/// `setcap` succeeds on the binary.
+#[derive(Debug)]
+pub enum BindError {
+  PermissionDenied(SocketAddr),
+  Other(anyhow::Error),
+}
+
+impl std::fmt::Display for BindError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::PermissionDenied(addr) => write!(f, "permission denied binding {addr}"),
+      Self::Other(e) => write!(f, "{e}"),
+    }
+  }
+}
+
+impl std::error::Error for BindError {}
+
+pub async fn spawn(addr: SocketAddr, config: ProxyConfig) -> Result<ProxyHandle, BindError> {
   spawn_inner(addr, config, None).await
 }
 
-pub async fn spawn_https(addr: SocketAddr, config: ProxyConfig, server_cfg: Arc<ServerConfig>) -> Result<ProxyHandle> {
+pub async fn spawn_https(
+  addr: SocketAddr,
+  config: ProxyConfig,
+  server_cfg: Arc<ServerConfig>,
+) -> Result<ProxyHandle, BindError> {
   spawn_inner(addr, config, Some(server_cfg)).await
 }
 
-async fn spawn_inner(addr: SocketAddr, config: ProxyConfig, tls: Option<Arc<ServerConfig>>) -> Result<ProxyHandle> {
-  let listener = TcpListener::bind(addr)
-    .await
-    .with_context(|| format!("bind reverse proxy {addr}"))?;
-  let bound_port = listener.local_addr()?.port();
+async fn spawn_inner(
+  addr: SocketAddr,
+  config: ProxyConfig,
+  tls: Option<Arc<ServerConfig>>,
+) -> Result<ProxyHandle, BindError> {
+  let listener = match TcpListener::bind(addr).await {
+    Ok(l) => l,
+    Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return Err(BindError::PermissionDenied(addr)),
+    Err(e) => {
+      return Err(BindError::Other(
+        anyhow::Error::new(e).context(format!("bind reverse proxy {addr}")),
+      ));
+    }
+  };
+  let bound_port = listener
+    .local_addr()
+    .map_err(|e| BindError::Other(anyhow::Error::new(e).context("query local_addr")))?
+    .port();
 
   let mut connector = HttpConnector::new();
   connector.set_nodelay(true);
