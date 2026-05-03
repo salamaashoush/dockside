@@ -105,6 +105,7 @@ impl ListDelegate for ContainerListDelegate {
       name: container.name.clone(),
     };
     let pinned = services::is_favorite(&pin_favorite, cx);
+    let domain_url = services::container_url(cx, &container_id);
 
     let menu_button = Button::new(("menu", row))
       .icon(IconName::Ellipsis)
@@ -114,6 +115,16 @@ impl ListDelegate for ContainerListDelegate {
         let mut menu = menu;
         let id = id.clone();
         let name = container_name.clone();
+
+        if let Some(url) = domain_url.clone() {
+          menu = menu.item(
+            PopupMenuItem::new("Open in browser")
+              .icon(IconName::ExternalLink)
+              .on_click(move |_, _, cx| {
+                cx.open_url(&url);
+              }),
+          );
+        }
 
         if running {
           // Running container actions

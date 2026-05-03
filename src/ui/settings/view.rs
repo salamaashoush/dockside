@@ -14,7 +14,10 @@ use gpui_component::{
 
 use crate::assets::AppIcon;
 use crate::colima::ColimaClient;
-use crate::state::{ExternalEditor, SettingsChanged, SettingsState, TerminalCursorStyle, ThemeName, settings_state};
+use crate::state::{
+  ExternalEditor, SettingsChanged, SettingsState, StateChanged, TerminalCursorStyle, ThemeName, docker_state,
+  settings_state,
+};
 
 // ============================================================================
 // Select item wrappers
@@ -194,6 +197,15 @@ impl SettingsView {
   pub fn new(cx: &mut Context<'_, Self>) -> Self {
     let settings_state = settings_state(cx);
     let cache_size = ColimaClient::cache_size().unwrap_or_else(|_| "Unknown".to_string());
+
+    // Re-render when containers change so the DNS Routes / Status panels
+    // reflect the current `RouteMap` snapshot live.
+    cx.subscribe(&docker_state(cx), |_this, _state, event: &StateChanged, cx| {
+      if matches!(event, StateChanged::ContainersUpdated) {
+        cx.notify();
+      }
+    })
+    .detach();
 
     Self {
       settings_state,
