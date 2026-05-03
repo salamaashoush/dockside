@@ -51,7 +51,10 @@ jobs:
             macos-aarch64-cargo-
 
       - name: Install cargo-packager
-        run: cargo install cargo-packager --locked --version ${{ env.CARGO_PACKAGER_VERSION }}
+        # `cargo install` errors out when the binary already exists in
+        # `~/.cargo/bin/` from a cached previous run. Force the install
+        # to reuse the cache without conflict.
+        run: cargo install cargo-packager --locked --force --version ${{ env.CARGO_PACKAGER_VERSION }}
 
       - name: Generate icon if missing
         run: |
@@ -159,7 +162,10 @@ jobs:
             linux-x86_64-cargo-
 
       - name: Install cargo-packager
-        run: cargo install cargo-packager --locked --version ${{ env.CARGO_PACKAGER_VERSION }}
+        # `cargo install` errors out when the binary already exists in
+        # `~/.cargo/bin/` from a cached previous run. Force the install
+        # to reuse the cache without conflict.
+        run: cargo install cargo-packager --locked --force --version ${{ env.CARGO_PACKAGER_VERSION }}
 
       - name: Build
         run: cargo build --release --target $TARGET
