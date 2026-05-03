@@ -22,12 +22,17 @@ fn main() -> ExitCode {
     "uninstall-resolver" => uninstall_resolver(args.get(2..).unwrap_or(&[])),
     "install-ca" => install_ca(args.get(2..).unwrap_or(&[])),
     "uninstall-ca" => uninstall_ca(args.get(2..).unwrap_or(&[])),
+    "bootstrap" => bootstrap(args.get(2..).unwrap_or(&[])),
+    "uninstall-bootstrap" => uninstall_bootstrap(),
     "version" => {
       println!("dockside-helper {}", env!("CARGO_PKG_VERSION"));
       Ok(())
     }
     other => {
-      eprintln!("usage: dockside-helper <install-resolver|uninstall-resolver|install-ca|uninstall-ca|version> ...");
+      eprintln!(
+        "usage: dockside-helper \
+         <install-resolver|uninstall-resolver|install-ca|uninstall-ca|bootstrap|uninstall-bootstrap|version> ..."
+      );
       eprintln!("got: {other:?}");
       return ExitCode::from(64);
     }
@@ -43,6 +48,137 @@ fn main() -> ExitCode {
 
 /// `install-resolver <suffix> <port>` — register a per-domain DNS resolver
 /// pointing at `127.0.0.1:<port>` for `<suffix>` only.
+/// One-time setup: copy the helper to a stable system location, write a
+/// `PolicyKit` policy that lets the user invoke it via pkexec without a
+/// password each time, and (optionally) install the local CA + register
+/// the resolver in one go. Runs as root via pkexec; subsequent ops use the
+/// cached admin auth so the user only sees the prompt once per session.
+///
+/// Args: `bootstrap <suffix> <port> [<ca-pem-path>]`
+fn bootstrap(args: &[String]) -> anyhow::Result<()> {
+  let suffix = args.first().ok_or_else(|| anyhow::anyhow!("missing <suffix> arg"))?;
+  let port: u16 = args
+    .get(1)
+    .ok_or_else(|| anyhow::anyhow!("missing <port> arg"))?
+    .parse()
+    .map_err(|e| anyhow::anyhow!("invalid port: {e}"))?;
+  validate_suffix(suffix)?;
+  let ca_pem = args.get(2).map(PathBuf::from);
+
+  #[cfg(target_os = "linux")]
+  {
+    bootstrap_linux(suffix, port, ca_pem.as_deref())
+  }
+  #[cfg(target_os = "macos")]
+  {
+    bootstrap_macos(suffix, port, ca_pem.as_deref())
+  }
+  #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+  {
+    let _ = (suffix, port, ca_pem);
+    anyhow::bail!("bootstrap not implemented for this OS");
+  }
+}
+
+fn uninstall_bootstrap() -> anyhow::Result<()> {
+  #[cfg(target_os = "linux")]
+  {
+    uninstall_bootstrap_linux()
+  }
+  #[cfg(target_os = "macos")]
+  {
+    Ok(())
+  }
+  #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+  {
+    Ok(())
+  }
+}
+
+#[cfg(target_os = "linux")]
+fn bootstrap_linux(suffix: &str, port: u16, ca_pem: Option<&std::path::Path>) -> anyhow::Result<()> {
+  use std::os::unix::fs::PermissionsExt;
+  use std::path::Path;
+
+  // 1. Copy the running helper to a stable system path so the polkit
+  //    policy can reference it without depending on the user's source tree.
+  let self_exe = std::env::current_exe()?;
+  let target = Path::new("/usr/local/libexec/dockside-helper");
+  std::fs::create_dir_all("/usr/local/libexec")?;
+  std::fs::copy(&self_exe, target)?;
+  let mut perms = std::fs::metadata(target)?.permissions();
+  perms.set_mode(0o755);
+  std::fs::set_permissions(target, perms)?;
+  println!("installed helper at {}", target.display());
+
+  // 2. Drop a PolicyKit rule allowing pkexec to run the helper after a
+  //    single admin authentication that lasts the rest of the user's
+  //    session (`auth_admin_keep`).
+  let policy_dir = Path::new("/usr/share/polkit-1/actions");
+  std::fs::create_dir_all(policy_dir)?;
+  let policy_path = policy_dir.join("dev.dockside.helper.policy");
+  let policy = format!(
+    r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <action id="dev.dockside.helper">
+    <description>Manage the local *.{suffix} resolver and HTTPS root CA</description>
+    <message>Dockside needs to register the local DNS resolver and trust its root CA.</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">{}</annotate>
+  </action>
+</policyconfig>
+"#,
+    target.display()
+  );
+  write_root_file(&policy_path, policy.as_bytes(), 0o644)?;
+  println!("installed polkit policy at {}", policy_path.display());
+
+  // 3. Install resolver + CA in the same privileged pass.
+  install_resolver_linux(suffix, port)?;
+  if let Some(pem) = ca_pem
+    && pem.is_file()
+  {
+    install_ca_linux(pem)?;
+  }
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn uninstall_bootstrap_linux() -> anyhow::Result<()> {
+  use std::path::Path;
+  for path in [
+    Path::new("/usr/share/polkit-1/actions/dev.dockside.helper.policy"),
+    Path::new("/usr/local/libexec/dockside-helper"),
+  ] {
+    if path.exists() {
+      std::fs::remove_file(path)?;
+      println!("removed {}", path.display());
+    }
+  }
+  Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn bootstrap_macos(suffix: &str, port: u16, ca_pem: Option<&std::path::Path>) -> anyhow::Result<()> {
+  // macOS does not need a polkit-equivalent rule; `osascript ... with
+  // administrator privileges` already caches sudo for ~5 min by default.
+  // Just install resolver + CA in one privileged pass.
+  install_resolver_macos(suffix, port)?;
+  if let Some(pem) = ca_pem
+    && pem.is_file()
+  {
+    install_ca_macos(pem)?;
+  }
+  Ok(())
+}
+
 fn install_resolver(args: &[String]) -> anyhow::Result<()> {
   let suffix = args.first().ok_or_else(|| anyhow::anyhow!("missing <suffix> arg"))?;
   let port: u16 = args
@@ -213,35 +349,78 @@ fn uninstall_ca_macos() -> anyhow::Result<()> {
 #[cfg(target_os = "linux")]
 fn install_resolver_linux(suffix: &str, port: u16) -> anyhow::Result<()> {
   use std::path::{Path, PathBuf};
-  // Prefer NetworkManager dnsmasq plugin (per-domain forwarding with
-  // explicit port) when present; fall back to systemd-resolved drop-in.
-  if Path::new("/etc/NetworkManager/dnsmasq.d").is_dir() {
+  // Detect the *active* resolver — not just "is the config dir there".
+  // Most Arch/Fedora/Ubuntu desktops use systemd-resolved (resolv.conf
+  // points at 127.0.0.53); NetworkManager's dnsmasq plugin is opt-in and
+  // signaled by `dns=dnsmasq` in NetworkManager.conf.
+  if uses_nm_dnsmasq() {
     let path = PathBuf::from(format!("/etc/NetworkManager/dnsmasq.d/dockside-{suffix}.conf"));
     let body = format!("server=/{suffix}/127.0.0.1#{port}\n");
     write_root_file(&path, body.as_bytes(), 0o644)?;
     if let Some(nmcli) = find_tool(&["/usr/bin/nmcli", "/bin/nmcli"]) {
       let _ = std::process::Command::new(nmcli).args(["general", "reload"]).status();
     }
-    println!("installed {}", path.display());
+    println!("installed {} (NetworkManager dnsmasq)", path.display());
     return Ok(());
   }
 
-  // systemd-resolved fallback. Requires a custom .network drop-in tied to
-  // the loopback interface so the routing-only domain `~suffix` points at
-  // the local resolver. systemd-resolved supports `port` syntax via
-  // `DNS=127.0.0.1:port` in v247+ — caller must have a recent distro.
-  let dir = Path::new("/etc/systemd/resolved.conf.d");
-  std::fs::create_dir_all(dir)?;
-  let path = dir.join(format!("dockside-{suffix}.conf"));
-  let body = format!("[Resolve]\nDNS=127.0.0.1:{port}\nDomains=~{suffix}\n");
-  write_root_file(&path, body.as_bytes(), 0o644)?;
-  if let Some(systemctl) = find_tool(&["/usr/bin/systemctl", "/bin/systemctl"]) {
-    let _ = std::process::Command::new(systemctl)
-      .args(["restart", "systemd-resolved"])
-      .status();
+  if uses_systemd_resolved() {
+    let dir = Path::new("/etc/systemd/resolved.conf.d");
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(format!("dockside-{suffix}.conf"));
+    let body = format!("[Resolve]\nDNS=127.0.0.1:{port}\nDomains=~{suffix}\n");
+    write_root_file(&path, body.as_bytes(), 0o644)?;
+    if let Some(systemctl) = find_tool(&["/usr/bin/systemctl", "/bin/systemctl"]) {
+      let _ = std::process::Command::new(systemctl)
+        .args(["restart", "systemd-resolved"])
+        .status();
+    }
+    println!("installed {} (systemd-resolved)", path.display());
+    return Ok(());
   }
-  println!("installed {}", path.display());
-  Ok(())
+
+  anyhow::bail!(
+    "no recognised system resolver — need systemd-resolved (active) or \
+     NetworkManager with `dns=dnsmasq`. Configure one and re-run, or add \
+     a manual resolver entry pointing at 127.0.0.1:{port} for {suffix}."
+  );
+}
+
+#[cfg(target_os = "linux")]
+fn uses_systemd_resolved() -> bool {
+  // /etc/resolv.conf points at the systemd-resolved stub (127.0.0.53) when
+  // the service is the active resolver. Symlink target is also an
+  // acceptable signal (`/run/systemd/resolve/stub-resolv.conf`).
+  if let Ok(meta) = std::fs::symlink_metadata("/etc/resolv.conf")
+    && meta.file_type().is_symlink()
+    && let Ok(target) = std::fs::read_link("/etc/resolv.conf")
+  {
+    let s = target.to_string_lossy();
+    if s.contains("systemd") || s.contains("stub-resolv.conf") {
+      return true;
+    }
+  }
+  if let Ok(content) = std::fs::read_to_string("/etc/resolv.conf")
+    && content.lines().any(|l| l.trim().starts_with("nameserver 127.0.0.53"))
+  {
+    return true;
+  }
+  false
+}
+
+#[cfg(target_os = "linux")]
+fn uses_nm_dnsmasq() -> bool {
+  for path in [
+    "/etc/NetworkManager/NetworkManager.conf",
+    "/etc/NetworkManager/conf.d/dnsmasq.conf",
+  ] {
+    if let Ok(content) = std::fs::read_to_string(path)
+      && content.lines().any(|l| l.trim() == "dns=dnsmasq")
+    {
+      return true;
+    }
+  }
+  false
 }
 
 #[cfg(target_os = "linux")]

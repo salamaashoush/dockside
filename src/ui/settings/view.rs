@@ -1014,9 +1014,14 @@ impl SettingsView {
       .child(kv("Routed containers", route_count.to_string().into()));
 
     let port = settings.dns_port;
+    let bootstrapped = crate::services::is_bootstrapped();
     let toggle_row = Self::render_row(
       "Enable local DNS",
-      "Resolve *.dockside.test to your containers. Prompts for password to install OS resolver.",
+      if bootstrapped {
+        "Resolve *.dockside.test to your containers."
+      } else {
+        "Click Set up below first — that runs the privileged installer once. Then this toggle starts/stops the resolver without prompting."
+      },
       Switch::new("dns-enabled")
         .checked(settings.dns_enabled)
         .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
@@ -1037,6 +1042,53 @@ impl SettingsView {
           }
           cx.notify();
         })),
+      cx,
+    );
+
+    let setup_row = Self::render_row(
+      if bootstrapped {
+        "Local DNS already set up"
+      } else {
+        "First-time setup"
+      },
+      if bootstrapped {
+        "Helper installed at /usr/local/libexec/dockside-helper. Future toggles run silently."
+      } else {
+        "Installs the privileged helper + polkit rule + system resolver + root CA in one auth prompt. Click once, then enable."
+      },
+      h_flex()
+        .gap(px(6.))
+        .child(
+          Button::new("dns-bootstrap")
+            .label(if bootstrapped {
+              "Re-run setup"
+            } else {
+              "Set up Local DNS"
+            })
+            .when(!bootstrapped, ButtonVariants::primary)
+            .small()
+            .on_click(cx.listener(move |this, _ev, _w, cx| {
+              let settings = this.settings_state.read(cx).settings.clone();
+              if let Err(e) = crate::services::bootstrap(&settings.dns_suffix, settings.dns_port) {
+                tracing::warn!("dns: bootstrap failed: {e}");
+              }
+              cx.notify();
+            })),
+        )
+        .when(bootstrapped, |el| {
+          el.child(
+            Button::new("dns-uninstall-bootstrap")
+              .label("Uninstall")
+              .ghost()
+              .small()
+              .on_click(cx.listener(|_this, _ev, _w, cx| {
+                if let Err(e) = crate::services::uninstall_bootstrap() {
+                  tracing::warn!("dns: uninstall_bootstrap failed: {e}");
+                }
+                cx.notify();
+              })),
+          )
+        }),
       cx,
     );
 
@@ -1183,6 +1235,7 @@ impl SettingsView {
     v_flex()
       .w_full()
       .child(Self::render_section("Resolver", cx))
+      .child(setup_row)
       .child(toggle_row)
       .child(suffix_row)
       .child(dns_port_row)

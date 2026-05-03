@@ -15,9 +15,19 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
-/// Locate the `dockside-helper` binary. Looks first next to the running
-/// `dockside` executable, then on `PATH`.
+/// Locate the `dockside-helper` binary. Prefers the system-installed copy
+/// at `/usr/local/libexec/dockside-helper` (the polkit rule annotates
+/// that path so future pkexec calls reuse the cached admin auth), then
+/// falls back to a copy next to the running `dockside` executable
+/// (dev/portable case), then `PATH`.
 pub fn helper_path() -> Result<PathBuf> {
+  #[cfg(unix)]
+  {
+    let system = PathBuf::from("/usr/local/libexec/dockside-helper");
+    if system.is_file() {
+      return Ok(system);
+    }
+  }
   let exe = std::env::current_exe().context("locate current_exe")?;
   if let Some(parent) = exe.parent() {
     let candidate = parent.join(if cfg!(windows) {

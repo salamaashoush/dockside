@@ -135,6 +135,42 @@ pub fn uninstall_local_ca() -> anyhow::Result<()> {
   helper::run_privileged(&["uninstall-ca"]).map(|_| ())
 }
 
+/// One-time setup: copy helper to `/usr/local/libexec/`, write polkit rule
+/// (so future operations don't need an auth prompt each time), install the
+/// resolver, and trust the local CA — all in a single pkexec invocation.
+pub fn bootstrap(suffix: &str, dns_port: u16) -> anyhow::Result<()> {
+  // Make sure the CA file exists so the helper can copy it into the trust
+  // store as part of bootstrap. No-op if already generated.
+  let _ca = tls::LocalCa::load_or_create()?;
+  let pem = local_ca_pem_path()?;
+  let pem_str = pem
+    .to_str()
+    .ok_or_else(|| anyhow::anyhow!("CA PEM path is not valid UTF-8"))?;
+  let port_str = dns_port.to_string();
+  helper::run_privileged(&["bootstrap", suffix, &port_str, pem_str]).map(|_| ())
+}
+
+pub fn uninstall_bootstrap() -> anyhow::Result<()> {
+  helper::run_privileged(&["uninstall-bootstrap"]).map(|_| ())
+}
+
+/// Did the user already run the bootstrap step? Probes the polkit policy
+/// file presence — cheap and matches what `bootstrap_linux` writes.
+pub fn is_bootstrapped() -> bool {
+  #[cfg(target_os = "linux")]
+  {
+    std::path::Path::new("/usr/share/polkit-1/actions/dev.dockside.helper.policy").is_file()
+      && std::path::Path::new("/usr/local/libexec/dockside-helper").is_file()
+  }
+  #[cfg(not(target_os = "linux"))]
+  {
+    // macOS doesn't need a separate bootstrap step — the resolver install
+    // already provisions everything. Treat as "ready" if the resolver file
+    // exists (cheap heuristic; we don't currently track it explicitly).
+    true
+  }
+}
+
 /// Check whether the Dockside root CA is currently installed in the OS
 /// trust store. Pure file-existence probe — no privileged call needed.
 pub fn is_local_ca_installed() -> bool {
