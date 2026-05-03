@@ -140,15 +140,15 @@ _stage-helper:
 # Run cargo-packager for the host platform. Override FORMATS to pick a
 # subset (e.g. `FORMATS=dmg just package`).
 package: build-release _stage-helper
-    cargo packager --release --formats ${FORMATS:-app dmg deb appimage} --verbose
+    cargo packager --release --formats=${FORMATS:-app,dmg,deb,appimage} --verbose
 
 # macOS-only: app bundle + DMG.
 package-macos: build-release _stage-helper
-    cargo packager --release --formats app dmg --verbose
+    cargo packager --release --formats=app,dmg --verbose
 
 # Linux-only: .deb + AppImage + pacman (PKGBUILD + source tarball).
 package-linux: build-release _stage-helper
-    cargo packager --release --formats deb appimage pacman --verbose
+    cargo packager --release --formats=deb,appimage,pacman --verbose
 
 # Install the freshly-built .app into /Applications (macOS).
 install-app: package-macos

@@ -72,7 +72,7 @@ jobs:
                  "$PWD/target/dockside-helper-$TARGET"
 
       - name: Package
-        run: cargo packager --release --target $TARGET --formats app dmg --verbose
+        run: cargo packager --release --target $TARGET --formats=app,dmg --verbose
 
       - name: Stamp version into Info.plist
         run: |
@@ -175,7 +175,7 @@ jobs:
         # into `makepkg -si`. We don't run makepkg in CI — that would
         # need an Arch container — but we still publish the tarball so
         # users have a one-step source for an AUR-style PKGBUILD.
-        run: cargo packager --release --target $TARGET --formats deb appimage pacman --verbose
+        run: cargo packager --release --target $TARGET --formats=deb,appimage,pacman --verbose
 
       - name: Collect artifacts
         run: |
