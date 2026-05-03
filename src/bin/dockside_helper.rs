@@ -460,6 +460,7 @@ fn install_ca_linux(pem_path: &std::path::Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(dest_dir)?;
     let dest = dest_dir.join("dockside.crt");
     std::fs::copy(pem_path, &dest)?;
+    set_world_readable(&dest)?;
     let status = std::process::Command::new(&tool).arg("extract").status()?;
     if !status.success() {
       anyhow::bail!("`{} extract` exited with {status}", tool.display());
@@ -477,6 +478,7 @@ fn install_ca_linux(pem_path: &std::path::Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(dest_dir)?;
     let dest = dest_dir.join("dockside.crt");
     std::fs::copy(pem_path, &dest)?;
+    set_world_readable(&dest)?;
     let status = std::process::Command::new(&tool).status()?;
     if !status.success() {
       anyhow::bail!("`{}` exited with {status}", tool.display());
@@ -523,6 +525,13 @@ fn uninstall_ca_linux() -> anyhow::Result<()> {
       let _ = std::process::Command::new(&tool).status();
     }
   }
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn set_world_readable(path: &std::path::Path) -> anyhow::Result<()> {
+  use std::os::unix::fs::PermissionsExt;
+  std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))?;
   Ok(())
 }
 
