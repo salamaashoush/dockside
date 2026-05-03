@@ -24,14 +24,17 @@ fn main() -> ExitCode {
     "uninstall-ca" => uninstall_ca(args.get(2..).unwrap_or(&[])),
     "bootstrap" => bootstrap(args.get(2..).unwrap_or(&[])),
     "uninstall-bootstrap" => uninstall_bootstrap(),
+    "grant-low-ports" => grant_low_ports(args.get(2..).unwrap_or(&[])),
+    "revoke-low-ports" => revoke_low_ports(args.get(2..).unwrap_or(&[])),
     "version" => {
       println!("dockside-helper {}", env!("CARGO_PKG_VERSION"));
       Ok(())
     }
     other => {
       eprintln!(
-        "usage: dockside-helper \
-         <install-resolver|uninstall-resolver|install-ca|uninstall-ca|bootstrap|uninstall-bootstrap|version> ..."
+        "usage: dockside-helper <subcommand> ...\n\
+         subcommands: install-resolver, uninstall-resolver, install-ca, uninstall-ca,\n\
+                      bootstrap, uninstall-bootstrap, grant-low-ports, revoke-low-ports, version"
       );
       eprintln!("got: {other:?}");
       return ExitCode::from(64);
@@ -177,6 +180,87 @@ fn bootstrap_macos(suffix: &str, port: u16, ca_pem: Option<&std::path::Path>) ->
     install_ca_macos(pem)?;
   }
   Ok(())
+}
+
+/// `grant-low-ports <binary-path>` — grant `cap_net_bind_service` on the
+/// given executable so it can bind ports below 1024 without root. Lets
+/// users drop the `:47080`/`:47443` from their dev URLs.
+fn grant_low_ports(args: &[String]) -> anyhow::Result<()> {
+  let binary = args
+    .first()
+    .ok_or_else(|| anyhow::anyhow!("missing <binary-path> arg"))?;
+  if !std::path::Path::new(binary).is_file() {
+    anyhow::bail!("binary does not exist: {binary}");
+  }
+
+  #[cfg(target_os = "linux")]
+  {
+    let setcap = find_tool(&["/usr/sbin/setcap", "/usr/bin/setcap", "/sbin/setcap"])
+      .ok_or_else(|| anyhow::anyhow!("`setcap` not found — install the libcap package"))?;
+    let status = std::process::Command::new(&setcap)
+      .args(["cap_net_bind_service=+ep", binary])
+      .status()?;
+    if !status.success() {
+      anyhow::bail!("setcap exited with {status}");
+    }
+    println!("granted cap_net_bind_service on {binary}");
+    Ok(())
+  }
+  #[cfg(target_os = "macos")]
+  {
+    // macOS does not expose Linux-style file capabilities. The standard
+    // alternative is a pf redirect; install one that maps 80/443 → 47080/47443
+    // for loopback traffic only.
+    let pf_anchor = "/etc/pf.anchors/dockside";
+    let body = "rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 80 -> 127.0.0.1 port 47080\n\
+                rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 443 -> 127.0.0.1 port 47443\n";
+    write_root_file(std::path::Path::new(pf_anchor), body.as_bytes(), 0o644)?;
+    let status = std::process::Command::new("/sbin/pfctl")
+      .args(["-a", "dockside", "-f", pf_anchor])
+      .status()?;
+    if !status.success() {
+      anyhow::bail!("pfctl load exited with {status}");
+    }
+    let _ = binary; // unused on macOS path
+    println!("loaded pf anchor {pf_anchor} mapping 80/443 → 47080/47443");
+    Ok(())
+  }
+  #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+  {
+    let _ = binary;
+    anyhow::bail!("grant-low-ports not implemented for this OS");
+  }
+}
+
+fn revoke_low_ports(args: &[String]) -> anyhow::Result<()> {
+  #[cfg(target_os = "linux")]
+  {
+    let binary = args
+      .first()
+      .ok_or_else(|| anyhow::anyhow!("missing <binary-path> arg"))?;
+    if !std::path::Path::new(binary).is_file() {
+      return Ok(());
+    }
+    if let Some(setcap) = find_tool(&["/usr/sbin/setcap", "/usr/bin/setcap", "/sbin/setcap"]) {
+      let _ = std::process::Command::new(setcap).args(["-r", binary]).status();
+    }
+    println!("revoked cap_net_bind_service on {binary}");
+    Ok(())
+  }
+  #[cfg(target_os = "macos")]
+  {
+    let _ = args;
+    let _ = std::process::Command::new("/sbin/pfctl")
+      .args(["-a", "dockside", "-F", "all"])
+      .status();
+    let _ = std::fs::remove_file("/etc/pf.anchors/dockside");
+    Ok(())
+  }
+  #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+  {
+    let _ = args;
+    Ok(())
+  }
 }
 
 fn install_resolver(args: &[String]) -> anyhow::Result<()> {

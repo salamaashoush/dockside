@@ -249,6 +249,64 @@ pub fn uninstall_bootstrap() -> anyhow::Result<()> {
   helper::run_privileged(&["uninstall-bootstrap"]).map(|_| ())
 }
 
+/// Grant the running `dockside` binary permission to bind ports < 1024 so
+/// the proxy can serve `http://name.dockside.test/` (no port suffix).
+/// On Linux this is `setcap cap_net_bind_service=+ep`; on macOS it is a
+/// `pfctl` redirect rule that maps 80/443 to the unprivileged ports.
+pub fn grant_low_ports() -> anyhow::Result<()> {
+  let exe = std::env::current_exe()?;
+  let exe_str = exe
+    .to_str()
+    .ok_or_else(|| anyhow::anyhow!("current_exe path is not valid UTF-8"))?;
+  helper::run_privileged(&["grant-low-ports", exe_str]).map(|_| ())
+}
+
+pub fn revoke_low_ports() -> anyhow::Result<()> {
+  let exe = std::env::current_exe()?;
+  let exe_str = exe
+    .to_str()
+    .ok_or_else(|| anyhow::anyhow!("current_exe path is not valid UTF-8"))?;
+  helper::run_privileged(&["revoke-low-ports", exe_str]).map(|_| ())
+}
+
+/// True when the running binary already has `CAP_NET_BIND_SERVICE` (Linux)
+/// or the macOS pf anchor file is present.
+pub fn has_low_ports_grant() -> bool {
+  #[cfg(target_os = "linux")]
+  {
+    let Ok(exe) = std::env::current_exe() else {
+      return false;
+    };
+    let Some(getcap) = (|| -> Option<std::path::PathBuf> {
+      for p in ["/usr/sbin/getcap", "/usr/bin/getcap", "/sbin/getcap"] {
+        let path = std::path::Path::new(p);
+        if path.is_file() {
+          return Some(path.to_path_buf());
+        }
+      }
+      None
+    })() else {
+      return false;
+    };
+    let out = std::process::Command::new(getcap).arg(&exe).output();
+    if let Ok(o) = out
+      && o.status.success()
+    {
+      let s = String::from_utf8_lossy(&o.stdout);
+      return s.contains("cap_net_bind_service");
+    }
+    false
+  }
+  #[cfg(target_os = "macos")]
+  {
+    std::path::Path::new("/etc/pf.anchors/dockside").is_file()
+  }
+  #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+  {
+    false
+  }
+}
+
 /// Did the user already run the bootstrap step? Probes the polkit policy
 /// file presence — cheap and matches what `bootstrap_linux` writes.
 pub fn is_bootstrapped() -> bool {

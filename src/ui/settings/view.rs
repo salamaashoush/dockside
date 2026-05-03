@@ -1121,6 +1121,95 @@ impl SettingsView {
       cx,
     );
 
+    let low_ports_granted = crate::services::has_low_ports_grant();
+    let pretty_url_chip = h_flex()
+      .gap(px(6.))
+      .items_center()
+      .px(px(8.))
+      .py(px(2.))
+      .rounded(px(4.))
+      .bg(if low_ports_granted {
+        colors.success.opacity(0.15)
+      } else {
+        colors.muted.opacity(0.4)
+      })
+      .child(
+        div()
+          .size(px(6.))
+          .rounded_full()
+          .bg(if low_ports_granted {
+            colors.success
+          } else {
+            colors.muted_foreground
+          })
+          .flex_shrink_0(),
+      )
+      .child(
+        div()
+          .text_xs()
+          .text_color(if low_ports_granted {
+            colors.success
+          } else {
+            colors.muted_foreground
+          })
+          .child(if low_ports_granted { "Granted" } else { "Not granted" }),
+      );
+
+    let pretty_url_row = Self::render_row(
+      "Drop port from URL",
+      "Bind 80/443 directly so URLs are http://name.dockside.test/ (no port). Linux: setcap cap_net_bind_service. macOS: pf redirect rule.",
+      h_flex()
+        .gap(px(8.))
+        .items_center()
+        .child(pretty_url_chip)
+        .child(
+          Button::new("dns-low-ports-grant")
+            .label(if low_ports_granted { "Re-apply" } else { "Grant" })
+            .when(!low_ports_granted, ButtonVariants::primary)
+            .small()
+            .on_click(cx.listener(|_this, _ev, _w, cx| {
+              if let Err(e) = crate::services::grant_low_ports() {
+                tracing::warn!("dns: grant_low_ports failed: {e}");
+                return;
+              }
+              // Auto-update settings to use 80/443 for URLs without ports.
+              let st = settings_state(cx);
+              st.update(cx, |state, cx| {
+                state.settings.proxy_http_port = 80;
+                state.settings.proxy_https_port = 443;
+                let _ = state.settings.save();
+                cx.emit(SettingsChanged::SettingsUpdated);
+              });
+              crate::services::apply_dns_settings(cx);
+              cx.notify();
+            })),
+        )
+        .when(low_ports_granted, |el| {
+          el.child(
+            Button::new("dns-low-ports-revoke")
+              .label("Revoke")
+              .ghost()
+              .small()
+              .on_click(cx.listener(|_this, _ev, _w, cx| {
+                if let Err(e) = crate::services::revoke_low_ports() {
+                  tracing::warn!("dns: revoke_low_ports failed: {e}");
+                  return;
+                }
+                let st = settings_state(cx);
+                st.update(cx, |state, cx| {
+                  state.settings.proxy_http_port = 47080;
+                  state.settings.proxy_https_port = 47443;
+                  let _ = state.settings.save();
+                  cx.emit(SettingsChanged::SettingsUpdated);
+                });
+                crate::services::apply_dns_settings(cx);
+                cx.notify();
+              })),
+          )
+        }),
+      cx,
+    );
+
     let ca_installed = crate::services::is_local_ca_installed();
     let ca_status_chip = h_flex()
       .gap(px(6.))
@@ -1241,6 +1330,7 @@ impl SettingsView {
       .child(dns_port_row)
       .child(plain_port_row)
       .child(secure_port_row)
+      .child(pretty_url_row)
       .child(Self::render_section("Status", cx))
       .child(status_card)
       .child(Self::render_section("HTTPS", cx))
