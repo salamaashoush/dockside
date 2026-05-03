@@ -15,6 +15,36 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
+/// Probe the helper version (no privilege required). Bails when the
+/// system-installed helper is older than the running app, which happens
+/// during iterative development after every `cargo build` of new helper
+/// subcommands.
+fn require_matching_helper_version(helper: &std::path::Path) -> Result<()> {
+  let app_version = env!("CARGO_PKG_VERSION");
+  let output = Command::new(helper)
+    .arg("version")
+    .output()
+    .with_context(|| format!("run {} version", helper.display()))?;
+  if !output.status.success() {
+    // Old helpers without a `version` subcommand exit with usage code 64.
+    // Treat that as "stale" so we surface a refresh hint.
+    anyhow::bail!(
+      "helper at {} does not understand `version` (likely older than this app)",
+      helper.display()
+    );
+  }
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  // Format: "dockside-helper <version>"
+  let helper_version = stdout.split_whitespace().nth(1).map_or("", str::trim);
+  if helper_version != app_version {
+    anyhow::bail!(
+      "helper at {} reports version {helper_version:?}; app is {app_version}",
+      helper.display()
+    );
+  }
+  Ok(())
+}
+
 /// Locate the `dockside-helper` binary. Prefers the system-installed copy
 /// at `/usr/local/libexec/dockside-helper` (the polkit rule annotates
 /// that path so future pkexec calls reuse the cached admin auth), then
@@ -50,6 +80,14 @@ pub fn run_privileged(args: &[&str]) -> Result<String> {
   let helper_str = helper
     .to_str()
     .ok_or_else(|| anyhow::anyhow!("helper path is not valid UTF-8"))?;
+  // System helper at /usr/local/libexec is installed by `bootstrap` and
+  // can drift from the in-tree binary as you iterate. Refuse to invoke a
+  // helper older than the running app — surface a clear message so the
+  // user knows to re-run setup, instead of getting cryptic "unknown
+  // subcommand" errors from pkexec.
+  if let Err(e) = require_matching_helper_version(&helper) {
+    anyhow::bail!("{e} — click \"Re-run setup\" in Settings → Local DNS to refresh.");
+  }
   tracing::info!("dns helper: invoking {helper_str:?} {args:?}");
 
   #[cfg(target_os = "macos")]
