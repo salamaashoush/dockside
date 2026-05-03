@@ -157,6 +157,10 @@ files = { "packaging/dev.dockside.helper.policy" = "/usr/share/polkit-1/actions/
 # Pull in the system libraries the app links against. linuxdeploy
 # auto-detects most; list any extras it misses here.
 libs = []
+# AppImage uses its own `files` map (not `deb.files`) when assembling
+# `appimage_deb/`. Same lib placement as `[deb] files`, otherwise
+# linuxdeploy errors with "Could not find dependency: libghostty-vt.so.0".
+files = { "target/lib/libghostty-vt.so.0" = "/usr/lib/dockside/libghostty-vt.so.0" }
 
 [package.metadata.packager.pacman]
 # Arch / CachyOS / EndeavourOS / Manjaro. Same polkit-policy install as
