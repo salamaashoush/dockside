@@ -2,6 +2,61 @@
 
 All notable changes to Dockside will be documented in this file.
 
+## [0.3.1] - 2026-05-03
+
+### Packaging
+
+- Switch the release pipeline to `cargo-packager`. Linux now ships
+  `.deb` (Debian/Ubuntu), `.AppImage` (universal), and a pacman
+  `PKGBUILD` + source tarball (Arch/CachyOS/Manjaro). macOS still
+  ships `.app` (zipped) plus a `.dmg`.
+- The privileged `dockside-helper` ships next to the main binary
+  in every artifact. `.deb` / pacman drop a polkit policy at
+  `/usr/share/polkit-1/actions/dev.dockside.helper.policy` so
+  packaged users skip the bootstrap-copy prompt entirely.
+- Multi-size hicolor app icons (16 / 32 / 48 / 64 / 128 / 256 /
+  512 / 1024 + svg) so KDE and GNOME menus render the icon at
+  every size.
+
+### Linux DNS / port redirect
+
+- Replace `setcap cap_net_bind_service` on the binary with an
+  `nftables` `ip nat output` redirect on loopback :80 / :443 →
+  :47080 / :47443. Persisted via a `dockside-port-redirect`
+  oneshot systemd unit so the redirect comes back after reboot.
+  setcap was wiped on every `cargo build` because file caps live
+  on the inode, not the path.
+- Proxy listener now degrades gracefully on `EACCES`: drops the
+  previous runtime, falls back to the unprivileged port, and
+  surfaces a "Restart Dockside to bind 80/443" banner in the
+  Settings panel.
+
+### Helper / app
+
+- Bump helper version 0.3.0 → 0.3.1 so the in-app version check
+  surfaces a clear "Re-run setup" hint when the on-disk helper
+  is older than the running app.
+- `helper_path()` is now polkit-policy-driven: parse the policy's
+  `exec.path` annotation and call exactly that binary so pkexec
+  hits the cached `auth_admin_keep` path.
+- `bootstrap()` always pkexecs the in-tree helper instead of the
+  stale system copy — otherwise the upgrade path was broken on
+  every iterative build.
+- `is_bootstrapped()` recognises packaged installs by checking
+  every canonical helper location, not just `/usr/local/libexec`.
+- `get_themes_dir()` learns the package layout
+  (`/usr/lib/dockside/themes`, `/usr/share/dockside/themes`,
+  `<exe>/../lib/dockside/themes`). Without this, `.deb` /
+  pacman / AppImage installs silently fell back to the default
+  theme.
+
+### Tray
+
+- Drop the system tray on Linux for now. gpui 0.2's Linux backend
+  has no `Window::hide()` and stops the run loop on the last
+  window close, so a tray-resident app needs a gpui fork. macOS
+  keeps the tray with a stable SNI id `dev.dockside.app`.
+
 ## [0.3.0] - 2026-05-02
 
 ### Bug Fixes
