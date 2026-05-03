@@ -2,6 +2,87 @@
 
 All notable changes to Dockside will be documented in this file.
 
+## [0.4.0] - 2026-05-03
+
+### Bug Fixes
+
+- **clippy**: Satisfy newer pedantic lints (rust 1.95) by @salamaashoush
+- **k8s**: Make resource list bodies scrollable by @salamaashoush
+- **ui**: Unify detail-view tab bar — drop redundant padding and borders by @salamaashoush
+- **ui**: No-op re-select + inline menu buttons by @salamaashoush
+- **tables**: Keep column widths consistent across rows by @salamaashoush
+- **tables**: Responsive — min total width + horizontal scroll by @salamaashoush
+- **tables**: Sticky header + responsive scrolling by @salamaashoush
+- **settings**: DNS panel layout — sectioned, status card, route list, test guide by @salamaashoush
+- **tls**: Install rustls ring provider at startup before any TLS code by @salamaashoush
+- **proxy**: Default ports 8080/8443 (unprivileged) instead of 80/443 by @salamaashoush
+- **helper**: Arch/Fedora trust store via update-ca-trust; dashboard DNS tile in System by @salamaashoush
+- **helper**: Use absolute paths under pkexec sanitised PATH; log invocations by @salamaashoush
+- **proxy**: Default ports 47080/47443 (avoid common 8080/8443 collisions) by @salamaashoush
+- **proxy**: Only auto-redirect HTTP→HTTPS when local CA is trusted by @salamaashoush
+- **helper**: Chmod 0644 on CA file before update-ca-trust extract by @salamaashoush
+- **helper**: Refuse stale system helper; surface clear refresh hint by @salamaashoush
+
+### Documentation
+
+- K8s roadmap — multi-context, cluster CRUD, node detail, add-node flows by @salamaashoush
+- Design for *.dockside.test wildcard DNS + reverse proxy by @salamaashoush
+- **dns**: Lock decisions — .test TLD, bundled proxy, helper binary by @salamaashoush
+- **changelog**: Add v0.3.1 entry by @salamaashoush
+
+### Features
+
+- **containers**: Clickable port chips open in browser by @salamaashoush
+- **networks**: Connect/disconnect container at runtime by @salamaashoush
+- **containers**: Multi-select with bulk start/stop/restart/delete by @salamaashoush
+- **machines**: Krunkit VM type for GPU-accelerated AI workloads by @salamaashoush
+- **models**: AI Models view wrapping `colima model` (macOS aarch64) by @salamaashoush
+- **k8s**: Secrets + ConfigMaps views + native k3s/kubeadm detection by @salamaashoush
+- **k8s**: StatefulSets + DaemonSets views with rolling restart by @salamaashoush
+- **k8s**: Jobs + CronJobs views, sidebar grouping, default ns 'all' by @salamaashoush
+- **k8s**: Ingress + PVC views, Networking/Storage sidebar groups by @salamaashoush
+- **k8s**: YAML edit + apply + rollback + reload toolbar by @salamaashoush
+- **k8s**: Cluster overview (Nodes/Events/Namespaces) + YAML actions dropdown by @salamaashoush
+- **dashboard**: Top-level dashboard with counts, system, favorites, activity by @salamaashoush
+- **k8s**: StatefulSet list+detail split with Info/Pods/YAML tabs by @salamaashoush
+- **dashboard**: Unified card layout — fixed-size tiles, single grid by @salamaashoush
+- **k8s**: DaemonSet list+detail split with Info/Pods/YAML tabs by @salamaashoush
+- **k8s**: Job list+detail split with Info/Pods/YAML tabs by @salamaashoush
+- **k8s**: CronJob list+detail split with Info/Recent Jobs/YAML tabs by @salamaashoush
+- **k8s**: Storage parent group view, consistent with other groups by @salamaashoush
+- **k8s**: Ingress list+detail split with Info/YAML tabs by @salamaashoush
+- **k8s**: PVC list+detail split with Info/YAML tabs by @salamaashoush
+- **k8s**: Secret + ConfigMap list+detail split with Info/Data/YAML/Events by @salamaashoush
+- **k8s**: Node cordon/uncordon/drain + Secret/ConfigMap create forms by @salamaashoush
+- **volumes**: Backup, restore, and clone via throw-away alpine container by @salamaashoush
+- **containers**: Docker cp upload/download via row menu prompts by @salamaashoush
+- **dns**: Foundation — bridge_ip on ContainerInfo, AppSettings DNS fields by @salamaashoush
+- **dns**: *.dockside.test resolver + reverse proxy + local CA + helper + Settings UI by @salamaashoush
+- **dns**: Port inputs in Settings, container Domain row, Dashboard route card; fix CA install before HTTPS spin-up by @salamaashoush
+- **dns**: One-click bootstrap — copies helper to /usr/local/libexec, writes polkit rule, installs resolver+CA in one auth prompt; smarter resolver detection (systemd-resolved vs NM dnsmasq) by @salamaashoush
+- **tls**: Also install CA into per-user NSS dbs (Chromium / Firefox) by @salamaashoush
+- **dns**: "Drop port from URL" — setcap on Linux, pf redirect on macOS, switches settings to 80/443 by @salamaashoush
+- **packaging**: Cargo-packager pipeline + nftables redirect + Linux helper UX by @salamaashoush
+
+### Miscellaneous Tasks
+
+- **logging**: Silence noisy third-party trace events by default by @salamaashoush
+
+### Styling
+
+- Cargo fmt + fix typo (unparseable→unparsable) by @salamaashoush
+
+### Ui
+
+- Consolidate namespace dropdown + bulk-actions dropdown by @salamaashoush
+- Remove redundant detail-view action dropdowns by @salamaashoush
+- Namespace dropdown — outlined trigger, right-aligned by @salamaashoush
+- Tint group-view header with tab_bar bg by @salamaashoush
+- **dashboard**: Drop redundant Local DNS routes card; tile in System covers it by @salamaashoush
+- **settings**: Drop How-to-test panel from DNS section by @salamaashoush
+- **settings**: Show CA install status chip; hide Remove unless installed by @salamaashoush
+- Container row Open-in-browser action; Settings DNS panel auto-refresh on container events by @salamaashoush
+
 ## [0.3.0] - 2026-05-02
 
 ### Bug Fixes
