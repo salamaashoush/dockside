@@ -44,14 +44,15 @@ impl Drop for ProxyHandle {
 pub struct ProxyConfig {
   pub suffix: Arc<str>,
   pub routes: SharedRouteMap,
+  /// HTTPS listen port. The HTTP listener uses this to build redirect URLs
+  /// when the local CA is trusted; otherwise plain HTTP is served as-is.
   pub https_port: u16,
   pub mode: ProxyMode,
 }
 
 #[derive(Clone, Copy)]
 pub enum ProxyMode {
-  /// Plain HTTP listener. Will redirect to HTTPS for routes that have not
-  /// opted into `dockside.http_only=true`.
+  /// Plain HTTP listener.
   Http,
   /// TLS-terminating listener using the local CA's cert resolver.
   Https,
@@ -154,17 +155,19 @@ async fn handle_request(
     return error_page(StatusCode::NOT_FOUND, &format!("No container named '{label}'"));
   };
 
-  // HTTPS redirect when backend isn't opt-out and we're on HTTP.
-  if matches!(cfg.mode, ProxyMode::Http) && !route.http_only {
-    return redirect_to_https(&req, &host, cfg.https_port);
-  }
-
-  // Reject HTTP if the route is HTTPS-only (and we're on HTTP).
+  // HTTPS-only routes refuse plain HTTP outright.
   if matches!(cfg.mode, ProxyMode::Http) && route.https_only {
     return error_page(
       StatusCode::UPGRADE_REQUIRED,
       "This service is HTTPS-only. Reload over https://.",
     );
+  }
+
+  // Auto-redirect HTTP → HTTPS only when the local CA is in the trust
+  // store. Before that, the redirect lands on a cert error and breaks the
+  // user. Per-container `dockside.http_only=true` opts out entirely.
+  if matches!(cfg.mode, ProxyMode::Http) && !route.http_only && crate::services::is_local_ca_installed() {
+    return redirect_to_https(&req, &host, cfg.https_port);
   }
 
   let upstream = match upstream_authority(&route.backend) {

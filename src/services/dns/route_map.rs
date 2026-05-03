@@ -33,7 +33,7 @@ pub struct Route {
   pub backend: Backend,
   /// `dockside.https=true` label — proxy refuses plain HTTP.
   pub https_only: bool,
-  /// `dockside.http_only=true` — opt out of HTTPS redirect.
+  /// `dockside.http_only=true` label — proxy never redirects to HTTPS.
   pub http_only: bool,
 }
 
