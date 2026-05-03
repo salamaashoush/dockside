@@ -177,8 +177,7 @@ pub fn is_homebrew_installed() -> bool {
       return Command::new(brew_path)
         .arg("--version")
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|o| o.status.success());
     }
   }
   false

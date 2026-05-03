@@ -83,6 +83,9 @@ fn bootstrap(args: &[String]) -> anyhow::Result<()> {
   }
 }
 
+// Linux branch does real work; macOS branch is a no-op. The unified
+// signature exists because `main()` dispatches generically.
+#[allow(clippy::unnecessary_wraps)]
 fn uninstall_bootstrap() -> anyhow::Result<()> {
   #[cfg(target_os = "linux")]
   {
@@ -224,6 +227,9 @@ fn grant_low_ports(args: &[String]) -> anyhow::Result<()> {
   }
 }
 
+// Linux branch does real work; macOS branch is a no-op. The unified
+// signature exists because `main()` dispatches generically.
+#[allow(clippy::unnecessary_wraps)]
 fn revoke_low_ports(args: &[String]) -> anyhow::Result<()> {
   #[cfg(target_os = "linux")]
   {
@@ -470,7 +476,7 @@ fn validate_suffix(suffix: &str) -> anyhow::Result<()> {
 fn install_resolver_macos(suffix: &str, port: u16) -> anyhow::Result<()> {
   use std::fs::OpenOptions;
   use std::os::unix::fs::PermissionsExt;
-  let path = std::path::PathBuf::from(format!("/etc/resolver/{suffix}"));
+  let path = PathBuf::from(format!("/etc/resolver/{suffix}"));
   std::fs::create_dir_all("/etc/resolver")?;
   let body = format!("nameserver 127.0.0.1\nport {port}\nsearch_order 1\n");
   let mut f = OpenOptions::new().create(true).write(true).truncate(true).open(&path)?;
@@ -482,7 +488,7 @@ fn install_resolver_macos(suffix: &str, port: u16) -> anyhow::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn uninstall_resolver_macos(suffix: &str) -> anyhow::Result<()> {
-  let path = std::path::PathBuf::from(format!("/etc/resolver/{suffix}"));
+  let path = PathBuf::from(format!("/etc/resolver/{suffix}"));
   if path.exists() {
     std::fs::remove_file(&path)?;
     println!("removed {}", path.display());

@@ -356,8 +356,7 @@ fn is_local_ca_installed_system() -> bool {
         "/Library/Keychains/System.keychain",
       ])
       .output()
-      .map(|o| o.status.success())
-      .unwrap_or(false)
+      .is_ok_and(|o| o.status.success())
   }
   #[cfg(not(any(target_os = "linux", target_os = "macos")))]
   {

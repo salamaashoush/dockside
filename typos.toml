@@ -28,6 +28,12 @@ tty = "tty"
 dockside = "dockside"
 colima = "colima"
 kubectl = "kubectl"
+# Acronyms typos misreads as misspellings.
+AKS = "AKS"
+EKS = "EKS"
+GKE = "GKE"
+# Historical CHANGELOG line refers to a past commit's exact wording.
+unparseable = "unparseable"
 
 [type.rust]
 extend-ignore-identifiers-re = [

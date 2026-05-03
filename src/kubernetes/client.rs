@@ -1082,7 +1082,7 @@ impl KubeClient {
         (i, when)
       })
       .collect();
-    indexed.sort_by(|a, b| b.1.cmp(&a.1));
+    indexed.sort_by_key(|b| std::cmp::Reverse(b.1));
     events = indexed.into_iter().map(|(i, _)| events[i].clone()).collect();
     Ok(events)
   }
