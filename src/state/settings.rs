@@ -592,7 +592,7 @@ mod tests {
     assert_eq!(settings.max_log_lines, 1000);
     assert!((settings.terminal_font_size - 14.0).abs() < 0.01);
     assert!((settings.terminal_line_height - 1.4).abs() < 0.01);
-    assert_eq!(settings.terminal_cursor_style, TerminalCursorStyle::Block);
+    assert_eq!(settings.terminal_cursor_style, TerminalCursorStyle::Bar);
     assert!(settings.terminal_cursor_blink);
     assert_eq!(settings.terminal_scrollback_lines, 10000);
   }

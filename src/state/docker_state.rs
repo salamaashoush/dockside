@@ -1029,8 +1029,10 @@ mod tests {
   fn test_docker_state_namespaces() {
     let mut state = DockerState::new();
 
-    // Default namespace should be "default"
-    assert_eq!(state.selected_namespace, "default");
+    // Default selection is "all" — broad view across every namespace
+    // including kube-system. The "Show only default namespace" toggle
+    // narrows it. Same default that ships in `AppSettings`.
+    assert_eq!(state.selected_namespace, "all");
     assert_eq!(state.namespaces, vec!["default".to_string()]);
 
     // Set namespaces
@@ -1076,8 +1078,9 @@ mod tests {
 
   #[test]
   fn test_container_detail_tab() {
-    assert_eq!(ContainerDetailTab::ALL.len(), 6);
+    assert_eq!(ContainerDetailTab::ALL.len(), 7);
     assert_eq!(ContainerDetailTab::Info.label(), "Info");
+    assert_eq!(ContainerDetailTab::Stats.label(), "Stats");
     assert_eq!(ContainerDetailTab::Logs.label(), "Logs");
     assert_eq!(ContainerDetailTab::Processes.label(), "Processes");
     assert_eq!(ContainerDetailTab::Terminal.label(), "Terminal");

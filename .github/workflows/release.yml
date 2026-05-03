@@ -169,6 +169,26 @@ jobs:
           ln -sf "$PWD/target/$TARGET/release/dockside-helper" \
                  "$PWD/target/dockside-helper-$TARGET"
 
+      - name: Stage libghostty-vt for the Linux package
+        # libghostty-vt-sys builds a shared library inside its `OUT_DIR`
+        # and links the dockside binary against it. The build-time path
+        # doesn't exist on the user's machine, so we ship the .so
+        # alongside the binary at `/usr/lib/dockside/libghostty-vt.so.0`
+        # and patch the binary's RPATH to `$ORIGIN/../lib/dockside`.
+        # Without this linuxdeploy fails with "Could not find
+        # dependency: libghostty-vt.so.0".
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y patchelf
+          mkdir -p target/lib
+          LIB=$(find target/$TARGET/release/build -name 'libghostty-vt.so.0' \
+                  -not -path '*ghostty-src*' | head -n1)
+          test -f "$LIB" || { echo "libghostty-vt.so.0 not found"; exit 1; }
+          cp "$LIB" target/lib/libghostty-vt.so.0
+          patchelf --set-rpath '$ORIGIN/../lib/dockside' \
+                   target/$TARGET/release/dockside
+          patchelf --print-rpath target/$TARGET/release/dockside
+
       - name: Package
         # `pacman` emits a source tarball + PKGBUILD that downstream
         # consumers (Arch / CachyOS / Manjaro / AUR maintainers) feed

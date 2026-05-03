@@ -64,7 +64,14 @@ impl PruneDialog {
   }
 
   fn refresh_disk_usage(cx: &mut Context<'_, Self>) {
-    let tokio_handle = crate::services::Tokio::runtime_handle();
+    // Skip when the global Tokio runtime hasn't been initialised yet.
+    // Happens in `gpui::test` cases that build the dialog without
+    // standing up the full service layer; in production
+    // `init_services` runs before any UI is constructed.
+    let Some(tokio_handle) = crate::services::Tokio::try_runtime_handle() else {
+      tracing::debug!("prune_dialog: skipping disk-usage refresh — Tokio not initialised");
+      return;
+    };
     let client = crate::services::docker_client();
     cx.spawn(async move |this, cx| {
       let usage = cx

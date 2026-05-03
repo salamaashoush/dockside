@@ -127,6 +127,9 @@ icons = [
   "assets/app-icons/icon-512.png",
   "assets/app-icons/icon-1024.png",
   "assets/app-icons/icon.svg",
+  # macOS .app expects an .icns; without it cargo-packager errors out
+  # with "No matching IconType" on the `app` format.
+  "assets/AppIcon.icns",
 ]
 # Bundle the privileged helper next to the main binary. The app's
 # `helper_path()` walks well-known locations (sibling of current_exe is
@@ -144,7 +147,11 @@ depends = ["nftables", "policykit-1", "ca-certificates", "libssl3"]
 # Ship the polkit policy at install time so .deb users skip the
 # bootstrap-copy prompt entirely. exec.path inside the policy must
 # match where the binary lands inside the .deb (= /usr/bin/).
-files = { "packaging/dev.dockside.helper.policy" = "/usr/share/polkit-1/actions/dev.dockside.helper.policy" }
+# libghostty-vt is built per-package by libghostty-vt-sys and shipped
+# as a shared object next to the binary; the release CI stages it at
+# `target/lib/libghostty-vt.so.0` and patches the binary's RPATH to
+# `$ORIGIN/../lib/dockside`.
+files = { "packaging/dev.dockside.helper.policy" = "/usr/share/polkit-1/actions/dev.dockside.helper.policy", "target/lib/libghostty-vt.so.0" = "/usr/lib/dockside/libghostty-vt.so.0" }
 
 [package.metadata.packager.appimage]
 # Pull in the system libraries the app links against. linuxdeploy
@@ -157,7 +164,7 @@ libs = []
 # generates a PKGBUILD next to a source tarball; build with `makepkg
 # -si` (or upload to the AUR).
 depends = ["nftables", "polkit", "ca-certificates"]
-files = { "packaging/dev.dockside.helper.policy" = "/usr/share/polkit-1/actions/dev.dockside.helper.policy" }
+files = { "packaging/dev.dockside.helper.policy" = "/usr/share/polkit-1/actions/dev.dockside.helper.policy", "target/lib/libghostty-vt.so.0" = "/usr/lib/dockside/libghostty-vt.so.0" }
 
 [package.metadata.packager.macos]
 minimum-system-version = "13.0"

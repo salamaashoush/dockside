@@ -78,6 +78,12 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Run tests
+        # Use Apple's classic linker on macOS to dodge a known
+        # `___dso_handle does not have address` fixup error from
+        # aws-lc-sys 0.40 + the Xcode 15+ default linker. ld_classic
+        # also avoids the same fixup on the host's default toolchain.
+        env:
+          RUSTFLAGS: ${{ matrix.os == 'macos-latest' && '-C link-arg=-Wl,-ld_classic' || '' }}
         run: cargo test --all-features
 
   typos:

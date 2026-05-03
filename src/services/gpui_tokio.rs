@@ -63,4 +63,13 @@ impl Tokio {
       .expect("Tokio runtime not initialized. Call gpui_tokio::init() first.")
       .clone()
   }
+
+  /// Like `runtime_handle` but returns `None` instead of panicking when
+  /// the runtime hasn't been initialised. Use this from constructors
+  /// that may run before `init_services`, including unit tests that
+  /// build entities under `gpui::test` without standing up the full
+  /// service layer.
+  pub fn try_runtime_handle() -> Option<tokio::runtime::Handle> {
+    TOKIO_HANDLE.get().cloned()
+  }
 }

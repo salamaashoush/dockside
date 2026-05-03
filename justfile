@@ -127,8 +127,10 @@ icon SOURCE:
 icon-placeholder:
     ./scripts/generate-placeholder-icon.sh
 
-# Stage the helper binary with a target-triple suffix where
-# cargo-packager's `external_binaries` config expects to find it.
+# Stage the helper binary + libghostty-vt.so where cargo-packager's
+# config expects them. Linux packaging needs the .so shipped next to
+# the binary because libghostty-vt-sys builds it inside `OUT_DIR` and
+# the user's machine has no copy.
 _stage-helper:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -136,6 +138,14 @@ _stage-helper:
     src="target/release/dockside-helper"
     [[ -f "$src" ]] || { echo "missing $src — run 'just build-release' first" >&2; exit 1; }
     ln -sf "$PWD/$src" "$PWD/target/dockside-helper-$triple"
+    if [[ "$triple" == *linux* ]]; then
+      mkdir -p target/lib
+      lib=$(find target/release/build -name 'libghostty-vt.so.0' -not -path '*ghostty-src*' | head -n1)
+      [[ -f "$lib" ]] || { echo "libghostty-vt.so.0 not found in build/" >&2; exit 1; }
+      cp "$lib" target/lib/libghostty-vt.so.0
+      command -v patchelf >/dev/null || { echo "patchelf required — install via your package manager" >&2; exit 1; }
+      patchelf --set-rpath '$ORIGIN/../lib/dockside' target/release/dockside
+    fi
 
 # Run cargo-packager for the host platform. Override FORMATS to pick a
 # subset (e.g. `FORMATS=dmg just package`).
