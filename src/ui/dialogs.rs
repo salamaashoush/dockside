@@ -15,6 +15,7 @@ use gpui_component::{
 
 use crate::docker::LintReport;
 use crate::services;
+use crate::ui::components::{KvCreateDialog, KvResourceKind};
 use crate::ui::containers::CreateContainerDialog;
 use crate::ui::deployments::create_dialog::CreateDeploymentDialog;
 use crate::ui::images::LintReportDialog;
@@ -642,6 +643,51 @@ pub fn open_create_service_dialog(window: &mut Window, cx: &mut App) {
                   services::create_service(options, cx);
                   window.close_dialog(cx);
                 }
+              }
+            })
+            .into_any_element(),
+        ]
+      })
+  });
+}
+
+/// Opens the Create Secret (Kubernetes) dialog.
+pub fn open_create_secret_dialog(window: &mut Window, cx: &mut App) {
+  open_kv_create_dialog(KvResourceKind::Secret, "Create Secret", window, cx);
+}
+
+/// Opens the Create `ConfigMap` (Kubernetes) dialog.
+pub fn open_create_configmap_dialog(window: &mut Window, cx: &mut App) {
+  open_kv_create_dialog(KvResourceKind::ConfigMap, "Create ConfigMap", window, cx);
+}
+
+fn open_kv_create_dialog(kind: KvResourceKind, title: &'static str, window: &mut Window, cx: &mut App) {
+  let ns = crate::state::docker_state(cx).read(cx).selected_namespace.clone();
+  let dialog_entity = cx.new(|cx| KvCreateDialog::new(kind, ns, cx));
+
+  window.open_dialog(cx, move |dialog, _window, _cx| {
+    let dialog_clone = dialog_entity.clone();
+    dialog
+      .title(title)
+      .min_w(px(560.))
+      .child(dialog_entity.clone())
+      .footer(move |_dialog_state, _, _window, _cx| {
+        let dialog_for_create = dialog_clone.clone();
+        vec![
+          Button::new("kv-create")
+            .label("Create")
+            .primary()
+            .on_click({
+              let dialog = dialog_for_create.clone();
+              move |_ev, window, cx| {
+                let Some((kind, name, namespace, entries)) = dialog.read(cx).values(cx) else {
+                  return;
+                };
+                match kind {
+                  KvResourceKind::Secret => services::create_secret(name, namespace, entries, cx),
+                  KvResourceKind::ConfigMap => services::create_configmap(name, namespace, entries, cx),
+                }
+                window.close_dialog(cx);
               }
             })
             .into_any_element(),

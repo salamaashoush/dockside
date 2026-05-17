@@ -13,7 +13,7 @@ pub use context_selector::render_context_selector;
 pub use file_explorer::{FileExplorer, FileExplorerConfig, FileExplorerState, detect_language_from_path};
 pub use install_hint::{render_error_panel, render_install_hint};
 pub use k8s_header::{k8s_header_title, render_k8s_header};
-pub use kv_create_form::{KvFormState, render_kv_create_form};
+pub use kv_create_form::{KvCreateDialog, KvResourceKind};
 pub use loading::{render_error, render_k8s_error, render_loading};
 pub use namespace_selector::render_namespace_selector;
 pub use process_view::ProcessView;

@@ -1,13 +1,12 @@
 //! Reusable inline create-form for resources that take a `name`, optional
 //! `namespace`, and a list of `(key, value)` entries (Secrets, `ConfigMaps`).
 
-use gpui::{App, Context, Entity, Render, SharedString, Styled, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, FocusHandle, Focusable, Render, SharedString, Styled, Window, div, prelude::*, px};
 use gpui_component::{
   Icon, IconName, Sizable,
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
-  theme::ActiveTheme,
   v_flex,
 };
 
@@ -98,52 +97,18 @@ impl KvFormState {
   }
 }
 
-/// Render the form. `on_save` receives the collected entries and is called
-/// when the user clicks Create. `on_cancel` is invoked from the Cancel button.
-pub fn render_kv_create_form<P>(
+/// Render just the form fields (name/namespace + key/value rows + an
+/// "Add entry" button). No header or Create/Cancel — those belong to the
+/// surrounding modal dialog frame.
+fn render_kv_fields<P>(
   state: &KvFormState,
-  title: &str,
   on_add_row: impl Fn(&mut P, &mut Window, &mut Context<'_, P>) + 'static,
   on_remove_row: impl Fn(&mut P, usize, &mut Context<'_, P>) + 'static + Clone,
-  on_save: impl Fn(&mut P, &mut Window, &mut Context<'_, P>) + 'static,
-  on_cancel: impl Fn(&mut P, &mut Window, &mut Context<'_, P>) + 'static,
   cx: &mut Context<'_, P>,
 ) -> gpui::Div
 where
   P: Render,
 {
-  let colors = &cx.theme().colors;
-
-  let header = h_flex()
-    .w_full()
-    .items_center()
-    .justify_between()
-    .child(
-      div()
-        .text_sm()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(colors.foreground)
-        .child(title.to_string()),
-    )
-    .child(
-      h_flex()
-        .gap(px(6.))
-        .child(
-          Button::new("kv-form-save")
-            .label("Create")
-            .primary()
-            .small()
-            .on_click(cx.listener(move |this, _ev, w, cx| on_save(this, w, cx))),
-        )
-        .child(
-          Button::new("kv-form-cancel")
-            .label("Cancel")
-            .ghost()
-            .small()
-            .on_click(cx.listener(move |this, _ev, w, cx| on_cancel(this, w, cx))),
-        ),
-    );
-
   let identity = h_flex()
     .w_full()
     .gap(px(8.))
@@ -175,7 +140,7 @@ where
     );
   }
 
-  let footer = h_flex().w_full().child(
+  let add = h_flex().w_full().child(
     Button::new("kv-add-row")
       .label("Add entry")
       .icon(IconName::Plus)
@@ -186,13 +151,96 @@ where
 
   v_flex()
     .w_full()
-    .p(px(12.))
-    .gap(px(8.))
-    .bg(colors.sidebar)
-    .border_b_1()
-    .border_color(colors.border)
-    .child(header)
+    .p(px(16.))
+    .gap(px(10.))
     .child(identity)
     .child(entries_block)
-    .child(footer)
+    .child(add)
+}
+
+/// Which resource the KV create dialog builds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum KvResourceKind {
+  Secret,
+  ConfigMap,
+}
+
+/// `(kind, name, namespace, entries)` collected from the create form.
+pub type KvCreateValues = (KvResourceKind, String, String, Vec<(String, String)>);
+
+/// Modal dialog body for creating a Secret / `ConfigMap`. The Create /
+/// Cancel buttons live in the dialog footer (see `dialogs::open_*`); this
+/// renders only the scrollable field area, matching every other create
+/// dialog in the app.
+pub struct KvCreateDialog {
+  focus_handle: FocusHandle,
+  kind: KvResourceKind,
+  default_ns: String,
+  form: Option<KvFormState>,
+}
+
+impl KvCreateDialog {
+  pub fn new(kind: KvResourceKind, default_ns: String, cx: &mut Context<'_, Self>) -> Self {
+    Self {
+      focus_handle: cx.focus_handle(),
+      kind,
+      default_ns,
+      form: None,
+    }
+  }
+
+  fn ensure(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    if self.form.is_none() {
+      // Secrets often hold multi-line PEM/cert blobs — give them a
+      // multi-line value editor; ConfigMaps stay single-line.
+      let multiline = self.kind == KvResourceKind::Secret;
+      self.form = Some(KvFormState::new(&self.default_ns, multiline, window, cx));
+    }
+  }
+
+  /// Collected form values, or `None` when the name is empty (keep the
+  /// dialog open so the user can fix it). Returns owned data so the
+  /// `cx` read-borrow is released before the caller invokes a service.
+  pub fn values(&self, cx: &App) -> Option<KvCreateValues> {
+    let form = self.form.as_ref()?;
+    let name = form.name_value(cx);
+    if name.is_empty() {
+      return None;
+    }
+    Some((self.kind, name, form.namespace_value(cx), form.collect(cx)))
+  }
+}
+
+impl Focusable for KvCreateDialog {
+  fn focus_handle(&self, _cx: &App) -> FocusHandle {
+    self.focus_handle.clone()
+  }
+}
+
+impl Render for KvCreateDialog {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+    self.ensure(window, cx);
+    let Some(form) = self.form.as_ref() else {
+      return div();
+    };
+    // SAFETY of borrow: render_kv_fields only reads `form`'s input
+    // entities; the listeners re-borrow `self.form` mutably at click time.
+    let fields = render_kv_fields(
+      form,
+      |this: &mut Self, w, cx| {
+        if let Some(f) = this.form.as_mut() {
+          f.add_row(w, cx);
+          cx.notify();
+        }
+      },
+      |this: &mut Self, idx, cx| {
+        if let Some(f) = this.form.as_mut() {
+          f.remove_row(idx);
+          cx.notify();
+        }
+      },
+      cx,
+    );
+    div().w_full().child(fields)
+  }
 }
