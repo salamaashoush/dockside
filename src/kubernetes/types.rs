@@ -54,8 +54,12 @@ pub struct KubeContextInfo {
   pub user: String,
   /// Default namespace declared on the context, if any.
   pub namespace: Option<String>,
+  /// API server URL resolved from the referenced cluster.
+  pub server: String,
   /// True for the kubeconfig's `current-context`.
   pub is_current: bool,
+  /// Absolute path of the kubeconfig file defining this context.
+  pub origin: String,
 }
 
 /// Container info within a pod

@@ -146,6 +146,17 @@ impl KubeClient {
     Ok(())
   }
 
+  /// `gitVersion` of the API server (e.g. `v1.32.1`). Used by the
+  /// Clusters view's "Test connection" affordance.
+  pub async fn server_version(&self) -> Result<String> {
+    let info = self
+      .client
+      .apiserver_version()
+      .await
+      .context("Cannot reach K8s API server")?;
+    Ok(info.git_version)
+  }
+
   /// List all namespaces
   pub async fn list_namespaces(&self) -> Result<Vec<NamespaceInfo>> {
     let api: Api<Namespace> = Api::all(self.client.clone());
@@ -1648,27 +1659,24 @@ fn resolve_kubeconfig() -> Result<Kubeconfig> {
   }
 }
 
-/// List every context in the resolved kubeconfig, sorted by name, with the
-/// `current-context` flagged. Mirrors `kubectl config get-contexts`.
-pub fn list_kube_contexts() -> Result<Vec<KubeContextInfo>> {
-  let kc = resolve_kubeconfig()?;
-  let current = kc.current_context.clone();
-  let mut out: Vec<KubeContextInfo> = kc
-    .contexts
-    .iter()
-    .map(|nc| {
-      let ctx = nc.context.clone().unwrap_or_default();
-      KubeContextInfo {
-        name: nc.name.clone(),
-        cluster: ctx.cluster,
-        user: ctx.user.unwrap_or_default(),
-        namespace: ctx.namespace,
-        is_current: current.as_deref() == Some(nc.name.as_str()),
-      }
+/// List every context across the full kubeconfig file set, with origin
+/// file + resolved server. Mirrors `kubectl config get-contexts` but
+/// keeps per-file provenance for the Clusters editor.
+#[must_use]
+pub fn list_kube_contexts() -> Vec<KubeContextInfo> {
+  let (entries, _current) = super::kubeconfig::Kubeconfigs::discover().list();
+  entries
+    .into_iter()
+    .map(|e| KubeContextInfo {
+      name: e.name,
+      cluster: e.cluster,
+      user: e.user,
+      namespace: e.namespace,
+      server: e.server,
+      is_current: e.is_current,
+      origin: e.origin,
     })
-    .collect();
-  out.sort_by(|a, b| a.name.cmp(&b.name));
-  Ok(out)
+    .collect()
 }
 
 // ============================================================================

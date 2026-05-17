@@ -83,6 +83,29 @@ original plan, all intentional:
 
 ### Phase 2 — Cluster CRUD (kubeconfig editor)
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). Open question
+resolved per user: support **all** kubeconfig setups like kubectl/Lens,
+not single-file. Notes:
+
+- New `src/kubernetes/kubeconfig.rs` `Kubeconfigs` store: discovers the
+  full file set (`settings.kubeconfig_path` → `$KUBECONFIG` list →
+  `~/.kube/config` → known distro paths). `list()` merges all with
+  per-context **origin file** + resolved server (first file wins, like
+  kubectl). Writes are per-origin, atomic (temp in same dir + rename),
+  with a one-time `<file>.dockside.bak`, and **preserve unknown YAML
+  keys** by mutating a `serde_yaml::Value` tree. Unit-tested
+  (list/edit/remove/add/import + unknown-key preservation).
+- Operations: add (manual: token / exec / client-cert / insecure / CA),
+  import-file (merge, overwrite same-named), remove, rename + re-namespace,
+  set-current (writes kubeconfig `current-context` *and* switches the app
+  like `kubectl config use-context`), test-connection (server version
+  toast via `KubeClient::server_version`).
+- New top-level **Clusters** view (`CurrentView::Clusters`, sidebar entry
+  above Cluster) — `src/ui/clusters/{view,dialog}.rs`: context list with
+  origin/server/current badge + row menu, Add/Import dialogs.
+- `KubeContextInfo` gained `server` + `origin`; `list_kube_contexts` now
+  flows through the new store so the Phase 1 switcher benefits too.
+
 **Goal**: add and remove cluster contexts from inside the app, write kubeconfig back atomically.
 
 **Scope**:

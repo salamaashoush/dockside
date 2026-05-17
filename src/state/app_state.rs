@@ -10,6 +10,7 @@ pub enum CurrentView {
   Images,
   Networks,
   Cluster,
+  Clusters,
   Workloads,
   Pods,
   Networking,

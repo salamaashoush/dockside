@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod cluster;
+pub mod clusters;
 pub mod command_palette;
 pub mod components;
 pub mod compose;

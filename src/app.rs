@@ -25,6 +25,7 @@ use crate::services::{DispatcherEvent, dispatcher, task_manager};
 use crate::state::{CurrentView, DockerState, Selection, StateChanged, docker_state};
 use crate::ui::activity::ActivityMonitorView;
 use crate::ui::cluster::ClusterView;
+use crate::ui::clusters::ClustersView;
 use crate::ui::command_palette::{CommandPalette, CommandPaletteEvent, PaletteAction};
 use crate::ui::compose::ComposeView;
 use crate::ui::config_resources::ConfigResourcesView;
@@ -83,6 +84,7 @@ pub struct DocksideApp {
   pvcs_view: Entity<PvcsView>,
   networking_view: Entity<NetworkingView>,
   cluster_view: Entity<ClusterView>,
+  clusters_view: Entity<ClustersView>,
   storage_view: Entity<StorageView>,
   dashboard_view: Entity<DashboardView>,
   // Centralized notification handling - prevents duplicate notifications on view switch
@@ -189,6 +191,7 @@ impl DocksideApp {
       move |_| NetworkingView::new(svcs, ing)
     });
     let cluster_view = cx.new(|cx| ClusterView::new(window, cx));
+    let clusters_view = cx.new(|cx| ClustersView::new(window, cx));
     let storage_view = cx.new({
       let pvcs = pvcs_view.clone();
       move |_| StorageView::new(pvcs)
@@ -266,6 +269,7 @@ impl DocksideApp {
       pvcs_view,
       networking_view,
       cluster_view,
+      clusters_view,
       storage_view,
       dashboard_view,
       pending_notifications: Vec::new(),
@@ -687,6 +691,14 @@ impl DocksideApp {
                     SidebarGroup::new("Kubernetes").child(
                         SidebarMenu::new()
                             .child(
+                                SidebarMenuItem::new("Clusters")
+                                    .icon(IconName::Globe)
+                                    .active(current_view == CurrentView::Clusters)
+                                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                        crate::services::set_view(CurrentView::Clusters, cx);
+                                    })),
+                            )
+                            .child(
                                 SidebarMenuItem::new("Cluster")
                                     .icon(IconName::LayoutDashboard)
                                     .active(current_view == CurrentView::Cluster)
@@ -813,6 +825,7 @@ impl DocksideApp {
       CurrentView::Ingresses => div().size_full().child(self.ingresses_view.clone()),
       CurrentView::Pvcs => div().size_full().child(self.pvcs_view.clone()),
       CurrentView::Cluster => div().size_full().child(self.cluster_view.clone()),
+      CurrentView::Clusters => div().size_full().child(self.clusters_view.clone()),
       CurrentView::Storage => div().size_full().child(self.storage_view.clone()),
       CurrentView::Dashboard => div().size_full().child(self.dashboard_view.clone()),
     }
