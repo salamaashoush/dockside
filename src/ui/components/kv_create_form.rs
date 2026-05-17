@@ -1,4 +1,4 @@
-//! Reusable inline create-form for resources that take a `name`, optional
+//! Modal create-form for resources that take a `name`, optional
 //! `namespace`, and a list of `(key, value)` entries (Secrets, `ConfigMaps`).
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, Render, SharedString, Styled, Window, div, prelude::*, px};
@@ -7,10 +7,12 @@ use gpui_component::{
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
+  theme::ActiveTheme,
   v_flex,
 };
 
 use crate::assets::AppIcon;
+use crate::ui::components::{form_field, form_section};
 
 /// Per-entry input pair (key + value editor). Held in the parent so the form
 /// remains stateful across re-renders.
@@ -109,33 +111,71 @@ fn render_kv_fields<P>(
 where
   P: Render,
 {
+  let colors = cx.theme().colors;
+
   let identity = h_flex()
     .w_full()
-    .gap(px(8.))
-    .child(div().flex_1().child(Input::new(&state.name).w_full().small()))
-    .child(div().w(px(180.)).child(Input::new(&state.namespace).w_full().small()));
+    .gap(px(12.))
+    .items_start()
+    .child(
+      div()
+        .flex_1()
+        .child(form_field("Name", Input::new(&state.name).w_full().small(), None, cx)),
+    )
+    .child(div().w(px(200.)).child(form_field(
+      "Namespace",
+      Input::new(&state.namespace).w_full().small(),
+      None,
+      cx,
+    )));
 
-  let mut entries_block = v_flex().w_full().gap(px(6.));
+  // One header row of column labels rather than repeating a label on
+  // every entry — reads as a proper key/value table.
+  let col_headers = h_flex()
+    .w_full()
+    .gap(px(8.))
+    .child(
+      div()
+        .w(px(220.))
+        .flex_shrink_0()
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(colors.muted_foreground)
+        .child("Key"),
+    )
+    .child(
+      div()
+        .flex_1()
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(colors.muted_foreground)
+        .child("Value"),
+    )
+    .child(div().w(px(28.)).flex_shrink_0());
+
+  let mut rows = v_flex().w_full().gap(px(6.)).child(col_headers);
   for (idx, entry) in state.entries.iter().enumerate() {
     let remove = on_remove_row.clone();
-    entries_block = entries_block.child(
+    rows = rows.child(
       h_flex()
         .w_full()
-        .gap(px(6.))
-        .items_start()
+        .gap(px(8.))
+        .items_center()
         .child(
           div()
-            .w(px(180.))
+            .w(px(220.))
             .flex_shrink_0()
             .child(Input::new(&entry.key).w_full().small()),
         )
         .child(div().flex_1().child(Input::new(&entry.value).w_full().small()))
         .child(
-          Button::new(SharedString::from(format!("kv-remove-{idx}")))
-            .icon(Icon::new(AppIcon::Trash))
-            .ghost()
-            .xsmall()
-            .on_click(cx.listener(move |this, _ev, _w, cx| remove(this, idx, cx))),
+          div().w(px(28.)).flex_shrink_0().child(
+            Button::new(SharedString::from(format!("kv-remove-{idx}")))
+              .icon(Icon::new(AppIcon::Trash))
+              .ghost()
+              .xsmall()
+              .on_click(cx.listener(move |this, _ev, _w, cx| remove(this, idx, cx))),
+          ),
         ),
     );
   }
@@ -152,9 +192,10 @@ where
   v_flex()
     .w_full()
     .p(px(16.))
-    .gap(px(10.))
+    .gap(px(14.))
     .child(identity)
-    .child(entries_block)
+    .child(form_section("Data", cx))
+    .child(rows)
     .child(add)
 }
 
