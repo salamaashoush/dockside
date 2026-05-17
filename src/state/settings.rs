@@ -338,6 +338,10 @@ pub struct AppSettings {
   /// Override path for `kubeconfig` (empty = standard discovery).
   #[serde(default)]
   pub kubeconfig_path: String,
+  /// Active kubeconfig context (empty = kubeconfig `current-context`).
+  /// Lets the app switch clusters without rewriting `~/.kube/config`.
+  #[serde(default)]
+  pub kube_context: String,
   /// Default Kubernetes namespace selected on first load.
   #[serde(default = "default_namespace")]
   pub default_namespace: String,
@@ -442,6 +446,7 @@ impl Default for AppSettings {
       show_notifications: true,
       default_pull_platform: String::new(),
       kubeconfig_path: String::new(),
+      kube_context: String::new(),
       default_namespace: "default".to_string(),
       colima_default_cpus: 2,
       colima_default_memory_gb: 4,
@@ -636,6 +641,7 @@ mod tests {
       show_notifications: true,
       default_pull_platform: String::new(),
       kubeconfig_path: String::new(),
+      kube_context: String::new(),
       default_namespace: "default".to_string(),
       colima_default_cpus: 2,
       colima_default_memory_gb: 4,

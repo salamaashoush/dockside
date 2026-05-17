@@ -19,7 +19,7 @@ use gpui_component::{
 use crate::assets::AppIcon;
 use crate::services;
 use crate::state::{DockerState, LoadState, StateChanged, docker_state, settings_state};
-use crate::ui::components::{render_k8s_error, render_loading};
+use crate::ui::components::{render_context_selector, render_k8s_error, render_loading};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ClusterTab {
@@ -678,15 +678,21 @@ impl Render for ClusterView {
       .justify_between()
       .child(Label::new("Cluster"))
       .child(
-        Button::new("refresh")
-          .icon(Icon::new(AppIcon::Refresh))
-          .ghost()
-          .compact()
-          .on_click(cx.listener(|_this, _ev, _w, cx| {
-            services::refresh_nodes(cx);
-            services::refresh_events(cx);
-            services::refresh_namespaces(cx);
-          })),
+        h_flex()
+          .gap(px(8.))
+          .items_center()
+          .child(render_context_selector(cx))
+          .child(
+            Button::new("refresh")
+              .icon(Icon::new(AppIcon::Refresh))
+              .ghost()
+              .compact()
+              .on_click(cx.listener(|_this, _ev, _w, cx| {
+                services::refresh_nodes(cx);
+                services::refresh_events(cx);
+                services::refresh_namespaces(cx);
+              })),
+          ),
       );
 
     let body = match self.active_tab {

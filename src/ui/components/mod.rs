@@ -1,3 +1,4 @@
+mod context_selector;
 mod file_explorer;
 mod install_hint;
 mod kv_create_form;
@@ -7,6 +8,7 @@ mod process_view;
 mod sparkline;
 mod spinning_icon;
 
+pub use context_selector::render_context_selector;
 pub use file_explorer::{FileExplorer, FileExplorerConfig, FileExplorerState, detect_language_from_path};
 pub use install_hint::{render_error_panel, render_install_hint};
 pub use kv_create_form::{KvFormState, render_kv_create_form};

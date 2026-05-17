@@ -46,6 +46,18 @@ impl std::fmt::Display for PodPhase {
   }
 }
 
+/// A single kubeconfig context entry. Mirrors `kubectl config get-contexts`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KubeContextInfo {
+  pub name: String,
+  pub cluster: String,
+  pub user: String,
+  /// Default namespace declared on the context, if any.
+  pub namespace: Option<String>,
+  /// True for the kubeconfig's `current-context`.
+  pub is_current: bool,
+}
+
 /// Container info within a pod
 #[derive(Debug, Clone)]
 pub struct PodContainer {

@@ -13,6 +13,7 @@ pub fn refresh_nodes(cx: &mut App) {
   if is_initial {
     state.update(cx, |s, _| s.nodes_state = LoadState::Loading);
   }
+  let ctx_gen = state.read(cx).kube_context_generation;
   let tokio_task = Tokio::spawn(cx, async move {
     let client = crate::kubernetes::KubeClient::new().await?;
     client.list_nodes().await
@@ -20,6 +21,9 @@ pub fn refresh_nodes(cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
       state.update(cx, |s, cx| match result {
         Ok(Ok(items)) => {
           s.nodes = items;
@@ -43,6 +47,7 @@ pub fn refresh_events(cx: &mut App) {
   let selected_ns = state.read(cx).selected_namespace.clone();
   let namespace = if selected_ns == "all" { None } else { Some(selected_ns) };
 
+  let ctx_gen = state.read(cx).kube_context_generation;
   let tokio_task = Tokio::spawn(cx, async move {
     let client = crate::kubernetes::KubeClient::new().await?;
     client.list_events(namespace.as_deref()).await
@@ -50,6 +55,9 @@ pub fn refresh_events(cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
       state.update(cx, |s, cx| match result {
         Ok(Ok(items)) => {
           s.events = items;

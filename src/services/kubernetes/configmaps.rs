@@ -19,6 +19,7 @@ pub fn refresh_configmaps(cx: &mut App) {
   let selected_ns = state.read(cx).selected_namespace.clone();
   let namespace = if selected_ns == "all" { None } else { Some(selected_ns) };
 
+  let ctx_gen = state.read(cx).kube_context_generation;
   let tokio_task = Tokio::spawn(cx, async move {
     let client = crate::kubernetes::KubeClient::new().await?;
     client.list_configmaps(namespace.as_deref()).await
@@ -27,6 +28,9 @@ pub fn refresh_configmaps(cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
       state.update(cx, |s, cx| match result {
         Ok(Ok(items)) => {
           s.configmaps = items;

@@ -44,6 +44,25 @@ Plan for evolving Dockside's Kubernetes capabilities from a single-context viewe
 
 ### Phase 1 — Multi-context foundation
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). Deviations from the
+original plan, all intentional:
+
+- Active context persists to `settings.kube_context` (empty = kubeconfig
+  `current-context`) instead of a separate `default_context`. `KubeClient`
+  already loads settings inside `new()`, so every one of the ~20 service
+  callsites picks up the switch with zero refactor — `KubeClient::new()`
+  now delegates to `KubeClient::for_context(Option<&str>)`.
+- Per-context `ClusterState` map deferred. Instead a monotonic
+  `kube_context_generation` is captured before each list refresh and
+  re-checked before the write; stale results from the previous context
+  are dropped. `clear_k8s_data()` wipes every collection + `LoadState`
+  and any k8s `Selection` on switch, so no cross-cluster bleed.
+- Context switcher is a shared `render_context_selector` mounted next to
+  the namespace selector in every k8s group view (Workloads, Networking,
+  Config, Storage) and the Cluster toolbar. Hidden when <2 contexts.
+- `KubeContextInfo` parsed via `kube::config::Kubeconfig` (honors
+  `kubeconfig_path`, `$KUBECONFIG` merge, then known distro paths).
+
 **Goal**: switch between kubeconfig contexts inside the app; refresh all k8s state on switch.
 
 **Scope**:

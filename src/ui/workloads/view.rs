@@ -9,7 +9,7 @@ use gpui_component::{
   v_flex,
 };
 
-use crate::ui::components::render_namespace_selector;
+use crate::ui::components::{render_context_selector, render_namespace_selector};
 use crate::ui::cronjobs::CronJobsView;
 use crate::ui::daemonsets::DaemonSetsView;
 use crate::ui::deployments::DeploymentsView;
@@ -105,7 +105,10 @@ impl Render for WorkloadsView {
           .child(
             h_flex()
               .px(px(12.))
+              .gap(px(8.))
+              .items_center()
               .flex_shrink_0()
+              .child(render_context_selector(cx))
               .child(render_namespace_selector(cx)),
           ),
       )
