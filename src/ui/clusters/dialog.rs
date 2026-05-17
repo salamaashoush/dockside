@@ -2,6 +2,7 @@
 
 use gpui::{App, Context, Entity, FocusHandle, Focusable, Render, Styled, Window, div, prelude::*, px};
 use gpui_component::{
+  Sizable, h_flex,
   input::{Input, InputState},
   label::Label,
   scroll::ScrollableElement,
@@ -11,6 +12,7 @@ use gpui_component::{
 };
 
 use crate::kubernetes::{AuthMethod, NewCluster};
+use crate::ui::components::form_field;
 
 /// Manual "Add cluster" form (token / insecure / CA). Exec, OIDC and
 /// client-cert configs are richer than a form — import those from a file.
@@ -112,19 +114,6 @@ impl ClusterFormDialog {
       auth,
     }
   }
-
-  fn row(label: &'static str, content: impl IntoElement, cx: &App) -> gpui::Div {
-    let colors = &cx.theme().colors;
-    v_flex()
-      .w_full()
-      .px(px(16.))
-      .py(px(10.))
-      .gap(px(6.))
-      .border_b_1()
-      .border_color(colors.border)
-      .child(Label::new(label).text_color(colors.muted_foreground))
-      .child(content)
-  }
 }
 
 impl Focusable for ClusterFormDialog {
@@ -139,58 +128,78 @@ impl Render for ClusterFormDialog {
     let insecure = self.insecure;
     let form = v_flex()
       .w_full()
-      .child(Self::row(
+      .p(px(16.))
+      .gap(px(14.))
+      .child(form_field(
         "Context name",
-        Input::new(self.name.as_ref().unwrap()).w_full(),
+        Input::new(self.name.as_ref().unwrap()).w_full().small(),
+        None,
         cx,
       ))
-      .child(Self::row(
+      .child(form_field(
         "API server",
-        Input::new(self.server.as_ref().unwrap()).w_full(),
+        Input::new(self.server.as_ref().unwrap()).w_full().small(),
+        None,
         cx,
       ))
-      .child(Self::row(
+      .child(form_field(
         "Namespace",
-        Input::new(self.namespace.as_ref().unwrap()).w_full(),
+        Input::new(self.namespace.as_ref().unwrap()).w_full().small(),
+        Some("Default namespace for this context (optional)."),
         cx,
       ))
-      .child(Self::row(
+      .child(form_field(
         "Token",
-        Input::new(self.token.as_ref().unwrap()).w_full(),
+        Input::new(self.token.as_ref().unwrap()).w_full().small(),
+        Some("Bearer token. Leave blank to use exec or client cert."),
         cx,
       ))
-      .child(Self::row(
+      .child(form_field(
         "Exec plugin",
-        Input::new(self.exec_cmd.as_ref().unwrap()).w_full(),
+        Input::new(self.exec_cmd.as_ref().unwrap()).w_full().small(),
+        Some("e.g. aws eks get-token --cluster-name my-cluster"),
         cx,
       ))
-      .child(Self::row(
+      .child(form_field(
         "Client cert (PEM)",
         div()
-          .h(px(80.))
+          .h(px(70.))
           .child(Input::new(self.client_cert.as_ref().unwrap()).w_full()),
+        None,
         cx,
       ))
-      .child(Self::row(
+      .child(form_field(
         "Client key (PEM)",
         div()
-          .h(px(80.))
+          .h(px(70.))
           .child(Input::new(self.client_key.as_ref().unwrap()).w_full()),
+        None,
         cx,
       ))
-      .child(Self::row(
-        "Skip TLS verify",
-        Switch::new("insecure")
-          .checked(insecure)
-          .on_click(cx.listener(|this, checked: &bool, _w, cx| {
-            this.insecure = *checked;
-            cx.notify();
-          })),
-        cx,
-      ))
-      .child(Self::row(
+      .child(
+        h_flex()
+          .w_full()
+          .gap(px(8.))
+          .items_center()
+          .child(
+            Switch::new("insecure")
+              .checked(insecure)
+              .on_click(cx.listener(|this, checked: &bool, _w, cx| {
+                this.insecure = *checked;
+                cx.notify();
+              })),
+          )
+          .child(
+            div()
+              .text_sm()
+              .text_color(cx.theme().colors.foreground)
+              .child("Skip TLS verify"),
+          ),
+      )
+      .child(form_field(
         "CA certificate (PEM)",
-        div().h(px(120.)).child(Input::new(self.ca.as_ref().unwrap()).w_full()),
+        div().h(px(90.)).child(Input::new(self.ca.as_ref().unwrap()).w_full()),
+        None,
         cx,
       ));
 
