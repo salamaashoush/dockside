@@ -878,6 +878,11 @@ impl SettingsView {
   }
 
   fn render_dns(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    // The DNS screen is a feature control panel, not a flat form:
+    // resolver + reverse proxy + host integration with a one-time
+    // privileged setup gate. Lay it out as status hero → setup gate →
+    // configuration → host integration → live routes so related
+    // controls (and their state) stay together.
     let colors = cx.theme().colors;
     let settings = self.settings_state.read(cx).settings.clone();
     let dns_mgr = crate::services::dns::manager(cx);
@@ -887,62 +892,136 @@ impl SettingsView {
     let proxy_running = proxy_mgr.is_running();
     let proxy_ports = proxy_mgr.bound_ports();
     let route_count = dns_mgr.route_map().map_or(0, |m| m.read().distinct_container_count());
-    let suffix_input = self.dns_suffix_input.clone().unwrap();
-    let suffix_for_status = settings.dns_suffix.clone();
+    let suffix = settings.dns_suffix.clone();
+    let bootstrapped = crate::services::is_bootstrapped();
+    let port = settings.dns_port;
 
-    let dot = |running: bool| {
+    // A status is just a coloured dot now — green = on/installed,
+    // muted = off/missing. No redundant "Running" / "Installed" tag.
+    let dot_el = move |ok: bool| {
       div()
-        .size(px(8.))
+        .size(px(7.))
         .rounded_full()
-        .bg(if running {
-          colors.success
-        } else {
-          colors.muted_foreground
-        })
         .flex_shrink_0()
+        .bg(if ok { colors.success } else { colors.muted_foreground })
     };
-    let kv = |k: &str, v: SharedString| {
+
+    // Label + hint on the left, control on the right. The conventional
+    // toggle/action layout — keeps a switch next to what it controls
+    // instead of stranding it full-width above its own caption.
+    let feature_row = move |label: &'static str, hint: &'static str, control: gpui::AnyElement| {
       h_flex()
         .w_full()
-        .py(px(4.))
+        .py(px(10.))
+        .gap(px(16.))
+        .items_center()
+        .justify_between()
+        .border_b_1()
+        .border_color(colors.border.opacity(0.4))
+        .child(
+          v_flex()
+            .flex_1()
+            .min_w_0()
+            .gap(px(2.))
+            .child(div().text_sm().text_color(colors.foreground).child(label))
+            .child(
+              div()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .whitespace_normal()
+                .child(hint),
+            ),
+        )
+        .child(div().flex_shrink_0().child(control))
+    };
+
+    // ---- Status hero: whole-feature state + ONE master switch ------------
+    // The switch is the only thing the user normally touches. Turning it
+    // on runs the entire privileged setup (helper + polkit + system
+    // resolver + root CA + low-port redirect) in one prompt, then starts
+    // resolving. Off just stops resolving; setup artifacts stay so the
+    // next on is silent. Everything below is read-only status or
+    // power-user knobs.
+    let low_ports_granted = crate::services::has_low_ports_grant();
+    let ca_installed = crate::services::is_local_ca_installed();
+    let restart_required = proxy_mgr.restart_required();
+    let active = dns_running && proxy_running;
+    let partial = !active && (dns_running || proxy_running);
+    let state_color = if active {
+      colors.success
+    } else if partial {
+      colors.warning
+    } else {
+      colors.muted_foreground
+    };
+
+    // A status line: leading dot, then label, value on the right. The
+    // dot column is fixed so every label starts at the same x.
+    let stat = move |ok: bool, label: &'static str, value: gpui::AnyElement| {
+      h_flex()
+        .w_full()
+        .py(px(7.))
         .gap(px(12.))
         .items_center()
         .child(
-          div()
-            .w(px(140.))
-            .flex_shrink_0()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(k.to_string()),
-        )
-        .child(
-          div()
+          h_flex()
             .flex_1()
             .min_w_0()
-            .text_sm()
-            .font_family("monospace")
-            .text_color(colors.foreground)
-            .text_ellipsis()
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .child(v),
+            .gap(px(10.))
+            .items_center()
+            .child(dot_el(ok))
+            .child(div().text_sm().text_color(colors.muted_foreground).child(label)),
         )
+        .child(div().flex_shrink_0().child(value))
+    };
+    // An info line: no dot (it has no on/off state) but a same-width
+    // spacer so its label aligns with the status labels above.
+    let info = move |label: &'static str, value: gpui::AnyElement| {
+      h_flex()
+        .w_full()
+        .py(px(7.))
+        .gap(px(12.))
+        .items_center()
+        .child(
+          h_flex()
+            .flex_1()
+            .min_w_0()
+            .gap(px(10.))
+            .items_center()
+            .child(div().w(px(7.)).flex_shrink_0())
+            .child(div().text_sm().text_color(colors.muted_foreground).child(label)),
+        )
+        .child(div().flex_shrink_0().child(value))
+    };
+    let mono = move |s: SharedString| {
+      div()
+        .text_sm()
+        .font_family("monospace")
+        .text_color(colors.foreground)
+        .child(s)
+    };
+    // Resolver / proxy carry their bound ports as the right-hand value;
+    // their on/off state is the leading dot on the row.
+    let resolver_val = if dns_running {
+      mono(dns_port.map_or_else(String::new, |p| format!(":{p}")).into()).into_any_element()
+    } else {
+      div().into_any_element()
+    };
+    let proxy_val = if proxy_running {
+      let ports = match proxy_ports {
+        Some((h, Some(s))) => format!(":{h}/:{s}"),
+        Some((h, None)) => format!(":{h}"),
+        _ => String::new(),
+      };
+      mono(ports.into()).into_any_element()
+    } else {
+      div().into_any_element()
     };
 
-    let dns_value: SharedString = match (dns_running, dns_port) {
-      (true, Some(p)) => format!("running on :{p}").into(),
-      (true, None) => "running".into(),
-      (false, _) => "stopped".into(),
-    };
-    let proxy_value: SharedString = match (proxy_running, proxy_ports) {
-      (true, Some((http, Some(https)))) => format!("running on :{http} (HTTP) and :{https} (HTTPS)").into(),
-      (true, Some((http, None))) => format!("running on :{http} (HTTP-only — HTTPS failed to bind)").into(),
-      (true, _) => "running".into(),
-      (false, _) => "stopped".into(),
-    };
-    let status_card = v_flex()
+    // ---- The one card: header + master switch + status detail -----------
+    let suffix_for_toggle = suffix.clone();
+    let card = v_flex()
       .w_full()
-      .gap(px(2.))
       .p(px(16.))
       .rounded(px(8.))
       .bg(colors.sidebar)
@@ -951,63 +1030,93 @@ impl SettingsView {
       .child(
         h_flex()
           .w_full()
-          .pb(px(8.))
-          .gap(px(8.))
+          .pb(px(12.))
+          .gap(px(12.))
           .items_center()
-          .child(dot(dns_running && proxy_running))
+          .justify_between()
           .child(
-            div()
-              .text_sm()
-              .font_weight(gpui::FontWeight::SEMIBOLD)
-              .text_color(colors.foreground)
-              .child(if dns_running && proxy_running {
-                "Active"
-              } else if dns_running || proxy_running {
-                "Partial"
-              } else {
-                "Stopped"
-              }),
+            h_flex()
+              .flex_1()
+              .min_w_0()
+              .gap(px(10.))
+              .items_center()
+              .child(div().size(px(10.)).rounded_full().flex_shrink_0().bg(state_color))
+              .child(
+                div()
+                  .text_sm()
+                  .font_weight(gpui::FontWeight::SEMIBOLD)
+                  .text_color(colors.foreground)
+                  .child("Local DNS"),
+              ),
+          )
+          .child(
+            Switch::new("dns-enabled")
+              .checked(settings.dns_enabled)
+              .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
+                let new_state = *checked;
+                // Turning on: make sure the whole stack is installed.
+                // Every step is idempotent and skipped when already
+                // applied, so a warm setup stays prompt-free.
+                if new_state {
+                  if !crate::services::is_bootstrapped()
+                    && let Err(e) = crate::services::bootstrap(&suffix_for_toggle, port)
+                  {
+                    tracing::warn!("dns: bootstrap failed: {e}");
+                  }
+                  if !crate::services::is_local_ca_installed()
+                    && let Err(e) = crate::services::install_local_ca()
+                  {
+                    tracing::warn!("dns: install_local_ca failed: {e}");
+                  }
+                  if !crate::services::has_low_ports_grant()
+                    && let Err(e) = crate::services::grant_low_ports()
+                  {
+                    tracing::warn!("dns: grant_low_ports failed: {e}");
+                  }
+                }
+                this.settings_state.update(cx, |state, cx| {
+                  state.settings.dns_enabled = new_state;
+                  let _ = state.settings.save();
+                  cx.emit(SettingsChanged::SettingsUpdated);
+                });
+                crate::services::apply_dns_settings(cx);
+                if new_state {
+                  if let Err(e) = crate::services::install_dns_resolver(&suffix_for_toggle, port) {
+                    tracing::warn!("dns: install_dns_resolver failed: {e}");
+                  }
+                } else if let Err(e) = crate::services::uninstall_dns_resolver(&suffix_for_toggle) {
+                  tracing::warn!("dns: uninstall_dns_resolver failed: {e}");
+                }
+                cx.notify();
+              })),
           ),
       )
-      .child(kv("DNS resolver", dns_value))
-      .child(kv("Reverse proxy", proxy_value))
-      .child(kv("Suffix", format!("*.{suffix_for_status}").into()))
-      .child(kv("Routed containers", route_count.to_string().into()));
+      .child(div().w_full().h(px(1.)).bg(colors.border.opacity(0.5)).mb(px(4.)))
+      .child(stat(dns_running, "Resolver", resolver_val))
+      .child(stat(proxy_running, "Reverse proxy", proxy_val))
+      .child(stat(bootstrapped, "Privileged helper", div().into_any_element()))
+      .child(stat(ca_installed, "HTTPS certificate", div().into_any_element()))
+      .child(stat(
+        low_ports_granted,
+        "Pretty URLs (no port)",
+        div().into_any_element(),
+      ))
+      .child(info("Suffix", mono(format!("*.{suffix}").into()).into_any_element()))
+      .child(info(
+        "Routed containers",
+        mono(route_count.to_string().into()).into_any_element(),
+      ));
 
-    let port = settings.dns_port;
-    let bootstrapped = crate::services::is_bootstrapped();
-    let toggle_row = form_field(
-      "Enable local DNS",
-      Switch::new("dns-enabled")
-        .checked(settings.dns_enabled)
-        .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
-          let suffix = this.settings_state.read(cx).settings.dns_suffix.clone();
-          let new_state = *checked;
-          this.settings_state.update(cx, |state, cx| {
-            state.settings.dns_enabled = new_state;
-            let _ = state.settings.save();
-            cx.emit(SettingsChanged::SettingsUpdated);
-          });
-          crate::services::apply_dns_settings(cx);
-          if new_state {
-            if let Err(e) = crate::services::install_dns_resolver(&suffix, port) {
-              tracing::warn!("dns: install_dns_resolver failed: {e}");
-            }
-          } else if let Err(e) = crate::services::uninstall_dns_resolver(&suffix) {
-            tracing::warn!("dns: uninstall_dns_resolver failed: {e}");
-          }
-          cx.notify();
-        })),
-      Some(if bootstrapped {
-        "Resolve *.dockside.test to your containers."
-      } else {
-        "Run Set up below first — that runs the privileged installer once. Then this toggle starts/stops the resolver without prompting."
-      }),
-      cx,
-    );
+    // ---- Configuration ---------------------------------------------------
+    let suffix_input = self.dns_suffix_input.clone().unwrap();
+    let dns_port_box = self.dns_port_input.clone().unwrap();
+    let plain_port_box = self.proxy_http_port_input.clone().unwrap();
+    let secure_port_box = self.proxy_https_port_input.clone().unwrap();
+    let grid = || h_flex().w_full().gap(px(16.)).items_start();
 
-    let autostart_row = form_field(
+    let autostart_row = feature_row(
       "Auto-start on launch",
+      "Start the resolver and proxy when Dockside launches (only while Local DNS is enabled).",
       Switch::new("dns-autostart")
         .checked(settings.dns_autostart)
         .on_click(cx.listener(|this, checked: &bool, _window, cx| {
@@ -1017,31 +1126,23 @@ impl SettingsView {
             cx.emit(SettingsChanged::SettingsUpdated);
           });
           cx.notify();
-        })),
-      Some(
-        "Start the resolver and proxy automatically when Dockside launches. Only applies while Local DNS is enabled.",
-      ),
-      cx,
+        }))
+        .into_any_element(),
     );
 
-    let setup_row = form_field(
-      if bootstrapped {
-        "Local DNS already set up"
-      } else {
-        "First-time setup"
-      },
+    // Power-user escape hatch: one row, not a button per component.
+    let maintenance_row = feature_row(
+      "Setup & repair",
+      "Re-run the privileged setup if something broke, or remove Local DNS entirely.",
       h_flex()
-        .gap(px(6.))
+        .gap(px(8.))
+        .items_center()
         .child(
           Button::new("dns-bootstrap")
-            .label(if bootstrapped {
-              "Re-run setup"
-            } else {
-              "Set up Local DNS"
-            })
-            .when(!bootstrapped, ButtonVariants::primary)
+            .label("Re-run setup")
+            .ghost()
             .small()
-            .on_click(cx.listener(move |this, _ev, _w, cx| {
+            .on_click(cx.listener(|this, _ev, _w, cx| {
               let settings = this.settings_state.read(cx).settings.clone();
               if let Err(e) = crate::services::bootstrap(&settings.dns_suffix, settings.dns_port) {
                 tracing::warn!("dns: bootstrap failed: {e}");
@@ -1049,248 +1150,29 @@ impl SettingsView {
               cx.notify();
             })),
         )
-        .when(bootstrapped, |el| {
-          el.child(
-            Button::new("dns-uninstall-bootstrap")
-              .label("Uninstall")
-              .ghost()
-              .small()
-              .on_click(cx.listener(|_this, _ev, _w, cx| {
-                if let Err(e) = crate::services::uninstall_bootstrap() {
-                  tracing::warn!("dns: uninstall_bootstrap failed: {e}");
-                }
-                cx.notify();
-              })),
-          )
-        }),
-      Some(if bootstrapped {
-        "Helper installed at /usr/local/libexec/dockside-helper. Future toggles run silently."
-      } else {
-        "Installs the privileged helper, polkit rule, system resolver and root CA in one auth prompt. Click once, then enable."
-      }),
-      cx,
-    );
-
-    let suffix_row = form_field(
-      "Suffix",
-      Input::new(&suffix_input).small().w_full(),
-      Some("Wildcard host suffix. .test is RFC 6761; avoid .local (mDNS)."),
-      cx,
-    );
-
-    let dns_port_box = self.dns_port_input.clone().unwrap();
-    let plain_port_box = self.proxy_http_port_input.clone().unwrap();
-    let secure_port_box = self.proxy_https_port_input.clone().unwrap();
-    let dns_port_row = form_field(
-      "DNS port",
-      Input::new(&dns_port_box).small().w_full(),
-      Some("UDP+TCP port for the local resolver. 15353 is the convention; 53 needs root."),
-      cx,
-    );
-    let plain_port_row = form_field(
-      "HTTP proxy port",
-      Input::new(&plain_port_box).small().w_full(),
-      Some("Loopback port for plain HTTP. 80 needs root; default 47080 avoids common dev-tool collisions."),
-      cx,
-    );
-    let secure_port_row = form_field(
-      "HTTPS proxy port",
-      Input::new(&secure_port_box).small().w_full(),
-      Some("Loopback port for HTTPS. 443 needs root; default 47443 avoids common dev-tool collisions."),
-      cx,
-    );
-
-    let low_ports_granted = crate::services::has_low_ports_grant();
-    let pretty_url_chip = h_flex()
-      .gap(px(6.))
-      .items_center()
-      .px(px(8.))
-      .py(px(2.))
-      .rounded(px(4.))
-      .bg(if low_ports_granted {
-        colors.success.opacity(0.15)
-      } else {
-        colors.muted.opacity(0.4)
-      })
-      .child(
-        div()
-          .size(px(6.))
-          .rounded_full()
-          .bg(if low_ports_granted {
-            colors.success
-          } else {
-            colors.muted_foreground
-          })
-          .flex_shrink_0(),
-      )
-      .child(
-        div()
-          .text_xs()
-          .text_color(if low_ports_granted {
-            colors.success
-          } else {
-            colors.muted_foreground
-          })
-          .child(if low_ports_granted { "Granted" } else { "Not granted" }),
-      );
-
-    let pretty_url_row = form_field(
-      "Drop port from URL",
-      h_flex()
-        .gap(px(8.))
-        .items_center()
-        .child(pretty_url_chip)
         .child(
-          Button::new("dns-low-ports-grant")
-            .label(if low_ports_granted { "Re-apply" } else { "Grant" })
-            .when(!low_ports_granted, ButtonVariants::primary)
+          Button::new("dns-uninstall-bootstrap")
+            .label("Uninstall")
+            .ghost()
             .small()
             .on_click(cx.listener(|_this, _ev, _w, cx| {
-              if let Err(e) = crate::services::grant_low_ports() {
-                tracing::warn!("dns: grant_low_ports failed: {e}");
-                return;
+              if let Err(e) = crate::services::uninstall_bootstrap() {
+                tracing::warn!("dns: uninstall_bootstrap failed: {e}");
               }
-              // The redirect is installed at the kernel/host level. The
-              // proxy keeps binding its own (unprivileged) port; URLs
-              // drop the port suffix because `container_url()` now sees
-              // `has_low_ports_grant() == true`.
-              cx.notify();
-            })),
-        )
-        .when(low_ports_granted, |el| {
-          el.child(
-            Button::new("dns-low-ports-revoke")
-              .label("Revoke")
-              .ghost()
-              .small()
-              .on_click(cx.listener(|_this, _ev, _w, cx| {
-                if let Err(e) = crate::services::revoke_low_ports() {
-                  tracing::warn!("dns: revoke_low_ports failed: {e}");
-                  return;
-                }
-                cx.notify();
-              })),
-          )
-        }),
-      Some(
-        "Redirect host 80/443 to the proxy so URLs drop the port suffix (http://name.dockside.test/). \
-         Linux uses an nftables nat hook with a systemd unit; macOS a pf redirect rule. Both persist \
-         across reboots and rebuilds.",
-      ),
-      cx,
-    );
-
-    let ca_installed = crate::services::is_local_ca_installed();
-    let ca_status_chip = h_flex()
-      .gap(px(6.))
-      .items_center()
-      .px(px(8.))
-      .py(px(2.))
-      .rounded(px(4.))
-      .bg(if ca_installed {
-        colors.success.opacity(0.15)
-      } else {
-        colors.muted.opacity(0.4)
-      })
-      .child(
-        div()
-          .size(px(6.))
-          .rounded_full()
-          .bg(if ca_installed {
-            colors.success
-          } else {
-            colors.muted_foreground
-          })
-          .flex_shrink_0(),
-      )
-      .child(
-        div()
-          .text_xs()
-          .text_color(if ca_installed {
-            colors.success
-          } else {
-            colors.muted_foreground
-          })
-          .child(if ca_installed { "Installed" } else { "Not installed" }),
-      );
-
-    let ca_row = form_field(
-      "HTTPS root certificate",
-      h_flex()
-        .gap(px(8.))
-        .items_center()
-        .child(ca_status_chip)
-        .child(
-          Button::new("dns-install-ca")
-            .label(if ca_installed { "Reinstall" } else { "Install" })
-            .primary()
-            .small()
-            .on_click(cx.listener(|_this, _ev, _w, cx| {
-              if let Err(e) = crate::services::install_local_ca() {
-                tracing::warn!("dns: install_local_ca failed: {e}");
+              if let Err(e) = crate::services::uninstall_local_ca() {
+                tracing::warn!("dns: uninstall_local_ca failed: {e}");
+              }
+              if crate::services::has_low_ports_grant()
+                && let Err(e) = crate::services::revoke_low_ports()
+              {
+                tracing::warn!("dns: revoke_low_ports failed: {e}");
               }
               cx.notify();
             })),
         )
-        .when(ca_installed, |el| {
-          el.child(
-            Button::new("dns-uninstall-ca")
-              .label("Remove")
-              .ghost()
-              .small()
-              .on_click(cx.listener(|_this, _ev, _w, cx| {
-                if let Err(e) = crate::services::uninstall_local_ca() {
-                  tracing::warn!("dns: uninstall_local_ca failed: {e}");
-                }
-                cx.notify();
-              })),
-          )
-        }),
-      Some("Trust dockside-issued certs so https://*.dockside.test shows a green lock."),
-      cx,
+        .into_any_element(),
     );
 
-    // Live route list — surfaces every <name>.<suffix> currently routed.
-    let routes_panel = {
-      let routes_snapshot: Vec<(String, String)> = dns_mgr
-        .route_map()
-        .map_or_else(Vec::new, |map| map.read().route_summaries());
-      let mut block = v_flex()
-        .w_full()
-        .gap(px(2.))
-        .p(px(16.))
-        .rounded(px(8.))
-        .bg(colors.sidebar)
-        .border_1()
-        .border_color(colors.border.opacity(0.6))
-        .child(
-          div()
-            .pb(px(8.))
-            .text_sm()
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(colors.foreground)
-            .child("Live routes"),
-        );
-      if routes_snapshot.is_empty() {
-        block = block.child(
-          div()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(if dns_running {
-              "No running containers yet."
-            } else {
-              "Enable Local DNS above to start routing containers."
-            }),
-        );
-      } else {
-        for (name, target) in routes_snapshot {
-          block = block.child(kv(&name, target.into()));
-        }
-      }
-      block
-    };
-
-    let restart_required = proxy_mgr.restart_required();
     let restart_banner = v_flex()
       .w_full()
       .gap(px(4.))
@@ -1307,30 +1189,114 @@ impl SettingsView {
           .child("Restart Dockside to bind 80/443"),
       )
       .child(div().text_xs().text_color(colors.muted_foreground).child(
-        "The capability grant only takes effect for processes started after the grant. \
-         Until you quit and reopen the app, the proxy is running on its fallback ports \
-         (47080 / 47443). Container links use those fallback ports automatically.",
+        "The capability grant only applies to processes started after it. Until you quit and \
+         reopen the app the proxy stays on its fallback ports (47080 / 47443); container links \
+         use those automatically.",
       ));
 
+    // ---- Live routes: read-only diagnostics, kept compact ----------------
+    let routes_snapshot: Vec<(String, String)> = dns_mgr
+      .route_map()
+      .map_or_else(Vec::new, |map| map.read().route_summaries());
+    let routes_panel = {
+      let mut list = v_flex().w_full().gap(px(2.));
+      if routes_snapshot.is_empty() {
+        list = list.child(
+          div()
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(if dns_running {
+              "No running containers yet."
+            } else {
+              "Enable Local DNS to start routing containers."
+            }),
+        );
+      } else {
+        for (name, target) in routes_snapshot {
+          list = list.child(
+            h_flex()
+              .w_full()
+              .py(px(4.))
+              .gap(px(12.))
+              .items_center()
+              .child(
+                div()
+                  .flex_1()
+                  .min_w_0()
+                  .text_sm()
+                  .text_color(colors.foreground)
+                  .text_ellipsis()
+                  .overflow_hidden()
+                  .whitespace_nowrap()
+                  .child(name),
+              )
+              .child(
+                div()
+                  .flex_shrink_0()
+                  .text_sm()
+                  .font_family("monospace")
+                  .text_color(colors.muted_foreground)
+                  .child(target),
+              ),
+          );
+        }
+      }
+      v_flex()
+        .w_full()
+        .p(px(16.))
+        .rounded(px(8.))
+        .bg(colors.sidebar)
+        .border_1()
+        .border_color(colors.border.opacity(0.6))
+        .child(
+          div()
+            .id("dns-routes-scroll")
+            .w_full()
+            .max_h(px(220.))
+            .overflow_y_scrollbar()
+            .child(list),
+        )
+    };
+
     Self::body()
-      .child(form_section("Setup", cx))
+      .child(card)
       .when(restart_required, |el| el.child(restart_banner))
-      .child(setup_row)
-      .child(form_section("Resolver", cx))
-      .child(toggle_row)
+      .child(form_section("Configuration", cx))
       .child(autostart_row)
-      .child(suffix_row)
-      .child(form_section("Ports", cx))
-      .child(dns_port_row)
-      .child(plain_port_row)
-      .child(secure_port_row)
-      .child(pretty_url_row)
-      .child(form_section("Status", cx))
-      .child(status_card)
-      .child(form_section("HTTPS", cx))
-      .child(ca_row)
-      .child(form_section("Routes", cx))
+      .child(
+        grid()
+          .child(div().flex_1().min_w_0().child(form_field(
+            "Suffix",
+            Input::new(&suffix_input).small().w_full(),
+            Some("Wildcard host suffix. .test is RFC 6761; avoid .local (mDNS)."),
+            cx,
+          )))
+          .child(div().flex_1().min_w_0().child(form_field(
+            "DNS port",
+            Input::new(&dns_port_box).small().w_full(),
+            Some("UDP+TCP resolver port. 15353 is the convention; 53 needs root."),
+            cx,
+          ))),
+      )
+      .child(
+        grid()
+          .child(div().flex_1().min_w_0().child(form_field(
+            "HTTP proxy port",
+            Input::new(&plain_port_box).small().w_full(),
+            Some("Loopback HTTP port. 80 needs root; 47080 avoids dev-tool collisions."),
+            cx,
+          )))
+          .child(div().flex_1().min_w_0().child(form_field(
+            "HTTPS proxy port",
+            Input::new(&secure_port_box).small().w_full(),
+            Some("Loopback HTTPS port. 443 needs root; 47443 avoids dev-tool collisions."),
+            cx,
+          ))),
+      )
+      .child(form_section("Live routes", cx))
       .child(routes_panel)
+      .child(form_section("Maintenance", cx))
+      .child(maintenance_row)
       .into_any_element()
   }
 
