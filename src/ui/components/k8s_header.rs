@@ -9,6 +9,7 @@ use gpui::{App, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder,
 use gpui_component::{h_flex, theme::ActiveTheme};
 
 use super::{render_context_selector, render_namespace_selector};
+use crate::state::docker_state;
 
 /// Build the shared k8s header bar.
 ///
@@ -24,6 +25,16 @@ pub fn render_k8s_header(
   cx: &App,
 ) -> impl IntoElement {
   let colors = cx.theme().colors;
+  let state = docker_state(cx).read(cx);
+  // Connection health, visible on every k8s view: green = reachable,
+  // red = last call errored, grey = not loaded yet.
+  let status = if state.k8s_error.is_some() {
+    colors.danger
+  } else if state.k8s_available {
+    colors.success
+  } else {
+    colors.muted_foreground
+  };
   h_flex()
     .w_full()
     .min_h(px(48.))
@@ -41,6 +52,7 @@ pub fn render_k8s_header(
         .flex_shrink_0()
         .child(actions)
         .when(show_namespace, |el| el.child(render_namespace_selector(cx)))
+        .child(div().size(px(8.)).rounded_full().bg(status).flex_shrink_0())
         .child(render_context_selector(cx)),
     )
 }

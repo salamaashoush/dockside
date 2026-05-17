@@ -39,6 +39,33 @@ pub fn refresh_nodes(cx: &mut App) {
   .detach();
 }
 
+/// Probe metrics-server and refresh per-node CPU/memory. `Err` (no
+/// metrics.k8s.io) hides the Node Metrics tab; `Ok` shows it.
+pub fn refresh_node_metrics(cx: &mut App) {
+  let state = docker_state(cx);
+  let ctx_gen = state.read(cx).kube_context_generation;
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.node_metrics().await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
+      state.update(cx, |s, cx| {
+        match result {
+          Ok(items) => s.set_node_metrics(items),
+          Err(_) => s.clear_node_metrics(),
+        }
+        cx.emit(StateChanged::NodeMetricsUpdated);
+      });
+    })
+  })
+  .detach();
+}
+
 pub fn refresh_events(cx: &mut App) {
   let state = docker_state(cx);
   let is_initial = matches!(state.read(cx).events_state, LoadState::NotLoaded);

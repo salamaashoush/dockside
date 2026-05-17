@@ -1051,6 +1051,37 @@ impl KubeClient {
     Ok(nodes.items.iter().map(NodeInfo::from_node).collect())
   }
 
+  /// Per-node CPU/memory usage from `metrics.k8s.io/v1beta1/nodes`.
+  /// `Err` means metrics-server is absent (the UI hides the Metrics tab).
+  /// Returns `(node, cpu, memory)` as raw quantity strings.
+  pub async fn node_metrics(&self) -> Result<Vec<(String, String, String)>> {
+    use kube::core::{ApiResource, DynamicObject, GroupVersionKind};
+    let gvk = GroupVersionKind::gvk("metrics.k8s.io", "v1beta1", "NodeMetrics");
+    let ar = ApiResource::from_gvk_with_plural(&gvk, "nodes");
+    let api: Api<DynamicObject> = Api::all_with(self.client.clone(), &ar);
+    let list = api
+      .list(&ListParams::default())
+      .await
+      .context("metrics.k8s.io API not available")?;
+    let mut out = Vec::with_capacity(list.items.len());
+    for item in list.items {
+      let name = item.metadata.name.clone().unwrap_or_default();
+      let usage = item.data.get("usage");
+      let cpu = usage
+        .and_then(|u| u.get("cpu"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+      let mem = usage
+        .and_then(|u| u.get("memory"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+      out.push((name, cpu, mem));
+    }
+    Ok(out)
+  }
+
   /// Set or clear `spec.unschedulable` on a node.
   pub async fn set_node_unschedulable(&self, name: &str, unschedulable: bool) -> Result<()> {
     let api: Api<Node> = Api::all(self.client.clone());

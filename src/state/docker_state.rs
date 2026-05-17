@@ -216,8 +216,9 @@ pub enum NodeDetailTab {
   Conditions = 2,
   Taints = 3,
   Labels = 4,
-  Yaml = 5,
-  Events = 6,
+  Metrics = 5,
+  Yaml = 6,
+  Events = 7,
 }
 
 impl NodeDetailTab {
@@ -228,6 +229,7 @@ impl NodeDetailTab {
       NodeDetailTab::Conditions => "Conditions",
       NodeDetailTab::Taints => "Taints",
       NodeDetailTab::Labels => "Labels",
+      NodeDetailTab::Metrics => "Metrics",
       NodeDetailTab::Yaml => "YAML",
       NodeDetailTab::Events => "Events",
     }
@@ -548,6 +550,7 @@ pub enum StateChanged {
   IngressesUpdated,
   PvcsUpdated,
   NodesUpdated,
+  NodeMetricsUpdated,
   NodeYamlLoaded {
     name: String,
     yaml: String,
@@ -609,6 +612,11 @@ pub struct DockerState {
   pub ingresses: Vec<IngressInfo>,
   pub pvcs: Vec<PvcInfo>,
   pub nodes: Vec<NodeInfo>,
+  /// True when the active cluster has metrics-server (`metrics.k8s.io`).
+  /// Gates the Node detail Metrics tab. Reset on context switch.
+  pub api_metrics_server: bool,
+  /// node name -> (cpu, memory) raw quantity strings from metrics-server.
+  pub node_metrics: std::collections::HashMap<String, (String, String)>,
   pub events: Vec<EventInfo>,
   pub namespaces: Vec<String>,
   pub selected_namespace: String,
@@ -679,6 +687,8 @@ impl DockerState {
       ingresses: Vec::new(),
       pvcs: Vec::new(),
       nodes: Vec::new(),
+      api_metrics_server: false,
+      node_metrics: std::collections::HashMap::new(),
       events: Vec::new(),
       namespaces: vec!["default".to_string()],
       selected_namespace: "all".to_string(),
@@ -902,6 +912,8 @@ impl DockerState {
     self.ingresses.clear();
     self.pvcs.clear();
     self.nodes.clear();
+    self.api_metrics_server = false;
+    self.node_metrics.clear();
     self.events.clear();
     self.namespaces = vec!["default".to_string()];
 
@@ -1034,6 +1046,22 @@ impl DockerState {
 
   pub fn get_node(&self, name: &str) -> Option<&NodeInfo> {
     self.nodes.iter().find(|n| n.name == name)
+  }
+
+  /// Store metrics-server node usage and mark the API present.
+  pub fn set_node_metrics(&mut self, metrics: Vec<(String, String, String)>) {
+    self.api_metrics_server = true;
+    self.node_metrics = metrics.into_iter().map(|(n, cpu, mem)| (n, (cpu, mem))).collect();
+  }
+
+  /// metrics-server absent/unreachable — hide the Metrics tab.
+  pub fn clear_node_metrics(&mut self) {
+    self.api_metrics_server = false;
+    self.node_metrics.clear();
+  }
+
+  pub fn node_usage(&self, name: &str) -> Option<&(String, String)> {
+    self.node_metrics.get(name)
   }
 
   // Navigation

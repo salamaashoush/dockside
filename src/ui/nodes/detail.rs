@@ -66,6 +66,7 @@ impl NodeDetail {
           }
         }
       }
+      StateChanged::NodeMetricsUpdated => cx.notify(),
       _ => {}
     })
     .detach();
@@ -535,6 +536,69 @@ impl NodeDetail {
     )
   }
 
+  fn render_metrics(&self, node: &NodeInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
+    let colors = &cx.theme().colors;
+    let usage = self.docker_state.read(cx).node_usage(&node.name).cloned();
+
+    let Some((cpu, mem)) = usage else {
+      return div().size_full().flex().items_center().justify_center().child(
+        div()
+          .text_sm()
+          .text_color(colors.muted_foreground)
+          .child("Waiting for metrics-server data…"),
+      );
+    };
+
+    let card = |label: &str, used: String, cap: String| {
+      v_flex()
+        .flex_1()
+        .p(px(16.))
+        .gap(px(6.))
+        .rounded(px(8.))
+        .bg(colors.sidebar)
+        .child(
+          div()
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(label.to_string()),
+        )
+        .child(
+          div()
+            .text_2xl()
+            .font_weight(gpui::FontWeight::BOLD)
+            .text_color(colors.foreground)
+            .child(used),
+        )
+        .child(
+          div()
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(format!("of {cap} capacity")),
+        )
+    };
+
+    div().size_full().child(
+      div().w_full().h_full().p(px(16.)).overflow_y_scrollbar().child(
+        v_flex()
+          .w_full()
+          .gap(px(12.))
+          .child(
+            div()
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .child("Live usage from metrics-server (kubectl top node)."),
+          )
+          .child(
+            h_flex()
+              .w_full()
+              .gap(px(12.))
+              .child(card("CPU", cpu, node.cpu_capacity.clone()))
+              .child(card("Memory", mem, node.mem_capacity.clone())),
+          ),
+      ),
+    )
+  }
+
   fn render_events(&self, node: &NodeInfo, cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
     let state = self.docker_state.read(cx);
@@ -768,16 +832,27 @@ impl Render for NodeDetail {
         }))
     };
 
-    let tab_bar = TabBar::new("node-tabs")
-      .flex_1()
-      .py(px(0.))
-      .child(make_tab(NodeDetailTab::Info, cx))
-      .child(make_tab(NodeDetailTab::Pods, cx))
-      .child(make_tab(NodeDetailTab::Conditions, cx))
-      .child(make_tab(NodeDetailTab::Taints, cx))
-      .child(make_tab(NodeDetailTab::Labels, cx))
-      .child(make_tab(NodeDetailTab::Yaml, cx))
-      .child(make_tab(NodeDetailTab::Events, cx));
+    let has_metrics = self.docker_state.read(cx).api_metrics_server;
+    let mut children = vec![
+      make_tab(NodeDetailTab::Info, cx),
+      make_tab(NodeDetailTab::Pods, cx),
+      make_tab(NodeDetailTab::Conditions, cx),
+      make_tab(NodeDetailTab::Taints, cx),
+      make_tab(NodeDetailTab::Labels, cx),
+    ];
+    if has_metrics {
+      children.push(make_tab(NodeDetailTab::Metrics, cx));
+    }
+    children.push(make_tab(NodeDetailTab::Yaml, cx));
+    children.push(make_tab(NodeDetailTab::Events, cx));
+    let tab_bar = TabBar::new("node-tabs").flex_1().py(px(0.)).children(children);
+
+    // Metrics tab can vanish on a context switch — fall back to Info.
+    let active = if active == NodeDetailTab::Metrics && !has_metrics {
+      NodeDetailTab::Info
+    } else {
+      active
+    };
 
     let content = match active {
       NodeDetailTab::Info => Self::render_info(&node, cx),
@@ -785,6 +860,7 @@ impl Render for NodeDetail {
       NodeDetailTab::Conditions => Self::render_conditions(&node, cx),
       NodeDetailTab::Taints => self.render_taints(&node, cx),
       NodeDetailTab::Labels => self.render_labels(&node, cx),
+      NodeDetailTab::Metrics => self.render_metrics(&node, cx),
       NodeDetailTab::Yaml => self.render_yaml(&node, cx),
       NodeDetailTab::Events => self.render_events(&node, cx),
     };

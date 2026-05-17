@@ -232,6 +232,17 @@ get the join command). No remote execution (4b is the SSH slice).
 
 ### Phase 5 — Smart defaults and quality-of-life
 
+**Status: 🟡 In progress** (branch `feat/k8s-roadmap`). Shipped so far:
+- Last-used context restored on launch (done in Phase 1 bootstrap).
+- Connection status dot on every k8s view (shared header): green
+  reachable / red errored / grey not-loaded.
+- API discovery: probe `metrics.k8s.io`; the Node **Metrics** tab
+  (deferred from Phase 3) now appears only when metrics-server is
+  present and shows live CPU/mem from `metrics.k8s.io/v1beta1/nodes`
+  (`kubectl top node`). Reset on context switch.
+Remaining: per-API tab gating beyond metrics (gateway-api), "copy as
+kubectl" buttons, per-context UI prefs.
+
 **Goal**: polish layer that makes the multi-cluster experience pleasant.
 
 **Scope**:

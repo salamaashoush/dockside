@@ -88,6 +88,7 @@ impl NodesView {
           services::refresh_nodes(cx);
           services::refresh_pods(cx);
           services::refresh_events(cx);
+          services::refresh_node_metrics(cx);
         });
       }
     })

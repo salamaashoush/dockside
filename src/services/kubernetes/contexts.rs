@@ -112,6 +112,7 @@ pub fn set_kube_context(name: String, cx: &mut App) {
   super::pvcs::refresh_pvcs(cx);
   super::cluster::refresh_nodes(cx);
   super::cluster::refresh_events(cx);
+  super::cluster::refresh_node_metrics(cx);
 }
 
 // ============================================================================
