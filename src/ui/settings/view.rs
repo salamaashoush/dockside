@@ -4,7 +4,6 @@ use gpui_component::{
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputEvent, InputState},
-  label::Label,
   scroll::ScrollableElement,
   select::{Select, SelectItem, SelectState},
   switch::Switch,
@@ -18,6 +17,7 @@ use crate::state::{
   ExternalEditor, SettingsChanged, SettingsState, StateChanged, TerminalCursorStyle, ThemeName, docker_state,
   settings_state,
 };
+use crate::ui::components::{form_field, form_section};
 
 // ============================================================================
 // Select item wrappers
@@ -615,50 +615,10 @@ impl SettingsView {
   // Layout primitives
   // ==========================================================================
 
-  /// Section header — small uppercase muted label above a group of rows.
-  fn render_section(title: &'static str, cx: &Context<'_, Self>) -> impl IntoElement {
-    let colors = cx.theme().colors;
-    div()
-      .w_full()
-      .pt(px(20.))
-      .pb(px(8.))
-      .text_xs()
-      .font_weight(gpui::FontWeight::SEMIBOLD)
-      .text_color(colors.muted_foreground)
-      .child(title.to_uppercase())
-  }
-
-  /// Bare row — label + description on the left, control on the right.
-  fn render_row(
-    label: &'static str,
-    description: &'static str,
-    control: impl IntoElement,
-    cx: &Context<'_, Self>,
-  ) -> impl IntoElement {
-    let colors = cx.theme().colors;
-    h_flex()
-      .w_full()
-      .py(px(14.))
-      .gap(px(24.))
-      .items_center()
-      .justify_between()
-      .border_b_1()
-      .border_color(colors.border.opacity(0.4))
-      .child(
-        v_flex()
-          .flex_1()
-          .min_w_0()
-          .gap(px(2.))
-          .child(Label::new(label).text_color(colors.foreground))
-          .child(
-            div()
-              .text_xs()
-              .text_color(colors.muted_foreground)
-              .whitespace_normal()
-              .child(description),
-          ),
-      )
-      .child(div().flex_shrink_0().min_w(px(220.)).max_w(px(320.)).child(control))
+  /// One settings column. Every field inside uses the shared
+  /// `form_field` / `form_section`; this only sets the shared spacing.
+  fn body() -> gpui::Div {
+    v_flex().w_full().gap(px(16.))
   }
 
   // ==========================================================================
@@ -735,29 +695,29 @@ impl SettingsView {
     let log_input = self.log_lines_input.clone().unwrap();
     let confirm = self.settings_state.read(cx).settings.confirm_destructive;
     let notify = self.settings_state.read(cx).settings.show_notifications;
-    v_flex()
-      .w_full()
-      .child(Self::render_row(
+    Self::body()
+      .child(form_section("Refresh", cx))
+      .child(form_field(
         "Container refresh",
-        "How often to refresh the container list (seconds)",
         Input::new(&container_input).small().w_full(),
+        Some("How often to refresh the container list, in seconds."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Stats refresh",
-        "How often to refresh resource stats (seconds)",
         Input::new(&stats_input).small().w_full(),
+        Some("How often to refresh resource stats, in seconds."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Max log lines",
-        "Maximum number of log lines to display",
         Input::new(&log_input).small().w_full(),
+        Some("Maximum number of log lines to display."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_section("Behavior", cx))
+      .child(form_field(
         "Confirm destructive actions",
-        "Prompt before delete / prune / kill operations",
         Switch::new("confirm-destructive")
           .checked(confirm)
           .on_click(cx.listener(|this, checked: &bool, _window, cx| {
@@ -768,11 +728,11 @@ impl SettingsView {
             });
             cx.notify();
           })),
+        Some("Prompt before delete / prune / kill operations."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Show notifications",
-        "Surface OS notifications when background tasks finish",
         Switch::new("show-notifications")
           .checked(notify)
           .on_click(cx.listener(|this, checked: &bool, _window, cx| {
@@ -783,6 +743,7 @@ impl SettingsView {
             });
             cx.notify();
           })),
+        Some("Surface OS notifications when background tasks finish."),
         cx,
       ))
       .into_any_element()
@@ -790,12 +751,12 @@ impl SettingsView {
 
   fn render_appearance(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let theme_select = self.theme_select.clone().unwrap();
-    v_flex()
-      .w_full()
-      .child(Self::render_row(
+    Self::body()
+      .child(form_section("Theme", cx))
+      .child(form_field(
         "Theme",
-        "Color theme applied across the app",
         Select::new(&theme_select).w_full().small(),
+        Some("Color theme applied across the whole app."),
         cx,
       ))
       .into_any_element()
@@ -809,41 +770,41 @@ impl SettingsView {
     let font_family_input = self.font_family_input.clone().unwrap();
     let blink = self.settings_state.read(cx).settings.terminal_cursor_blink;
 
-    v_flex()
-      .w_full()
-      .child(Self::render_row(
+    Self::body()
+      .child(form_section("Font", cx))
+      .child(form_field(
         "Font family",
-        "Override terminal font family (empty = system mono)",
         Input::new(&font_family_input).small().w_full(),
+        Some("Override the terminal font family. Empty uses the system monospace font."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Font size",
-        "Pixel size for terminal glyphs",
         Input::new(&font_input).small().w_full(),
+        Some("Pixel size for terminal glyphs."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Line height",
-        "Multiplier (e.g. 1.4) — applied to font size",
         Input::new(&line_input).small().w_full(),
+        Some("Multiplier applied to the font size (e.g. 1.4)."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_section("Behavior", cx))
+      .child(form_field(
         "Scrollback",
-        "Lines of history kept by the terminal",
         Input::new(&scroll_input).small().w_full(),
+        Some("Lines of history kept by the terminal."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Cursor style",
-        "Block, underline, or thin bar",
         Select::new(&cursor_select).w_full().small(),
+        Some("Block, underline, or thin bar."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Cursor blink",
-        "Blink the terminal cursor",
         Switch::new("cursor-blink")
           .checked(blink)
           .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
@@ -854,6 +815,7 @@ impl SettingsView {
             });
             cx.notify();
           })),
+        Some("Blink the terminal cursor."),
         cx,
       ))
       .into_any_element()
@@ -862,18 +824,18 @@ impl SettingsView {
   fn render_docker(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let socket_input = self.docker_socket_input.clone().unwrap();
     let platform_input = self.default_platform_input.clone().unwrap();
-    v_flex()
-      .w_full()
-      .child(Self::render_row(
+    Self::body()
+      .child(form_section("Connection", cx))
+      .child(form_field(
         "Docker socket",
-        "Path to docker.sock (leave empty for the platform default)",
         Input::new(&socket_input).small().w_full(),
+        Some("Path to docker.sock. Leave empty for the platform default."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Default pull platform",
-        "Default --platform argument for image pulls (empty = host arch)",
         Input::new(&platform_input).small().w_full(),
+        Some("Default --platform argument for image pulls. Empty uses the host architecture."),
         cx,
       ))
       .into_any_element()
@@ -883,11 +845,10 @@ impl SettingsView {
     let enabled = self.settings_state.read(cx).settings.kubernetes_enabled;
     let kubeconfig_input = self.kubeconfig_input.clone().unwrap();
     let namespace_input = self.default_namespace_input.clone().unwrap();
-    v_flex()
-      .w_full()
-      .child(Self::render_row(
+    Self::body()
+      .child(form_section("Cluster", cx))
+      .child(form_field(
         "Enable Kubernetes",
-        "Show Pods, Deployments and Services in the sidebar (requires kubectl + kubeconfig)",
         Switch::new("kubernetes-enabled").checked(enabled).on_click(cx.listener(
           |this, checked: &bool, _window, cx| {
             this.settings_state.update(cx, |state, cx| {
@@ -898,18 +859,19 @@ impl SettingsView {
             cx.notify();
           },
         )),
+        Some("Show Pods, Deployments and Services in the sidebar. Requires kubectl and a kubeconfig."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "kubeconfig path",
-        "Override path to the kubeconfig file (empty = standard discovery)",
         Input::new(&kubeconfig_input).small().w_full(),
+        Some("Override the path to the kubeconfig file. Empty uses standard discovery."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Default namespace",
-        "Namespace selected on first load",
         Input::new(&namespace_input).small().w_full(),
+        Some("Namespace selected on first load."),
         cx,
       ))
       .into_any_element()
@@ -982,7 +944,6 @@ impl SettingsView {
       .w_full()
       .gap(px(2.))
       .p(px(16.))
-      .my(px(12.))
       .rounded(px(8.))
       .bg(colors.sidebar)
       .border_1()
@@ -1015,13 +976,8 @@ impl SettingsView {
 
     let port = settings.dns_port;
     let bootstrapped = crate::services::is_bootstrapped();
-    let toggle_row = Self::render_row(
+    let toggle_row = form_field(
       "Enable local DNS",
-      if bootstrapped {
-        "Resolve *.dockside.test to your containers."
-      } else {
-        "Click Set up below first — that runs the privileged installer once. Then this toggle starts/stops the resolver without prompting."
-      },
       Switch::new("dns-enabled")
         .checked(settings.dns_enabled)
         .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
@@ -1042,19 +998,37 @@ impl SettingsView {
           }
           cx.notify();
         })),
+      Some(if bootstrapped {
+        "Resolve *.dockside.test to your containers."
+      } else {
+        "Run Set up below first — that runs the privileged installer once. Then this toggle starts/stops the resolver without prompting."
+      }),
       cx,
     );
 
-    let setup_row = Self::render_row(
+    let autostart_row = form_field(
+      "Auto-start on launch",
+      Switch::new("dns-autostart")
+        .checked(settings.dns_autostart)
+        .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+          this.settings_state.update(cx, |state, cx| {
+            state.settings.dns_autostart = *checked;
+            let _ = state.settings.save();
+            cx.emit(SettingsChanged::SettingsUpdated);
+          });
+          cx.notify();
+        })),
+      Some(
+        "Start the resolver and proxy automatically when Dockside launches. Only applies while Local DNS is enabled.",
+      ),
+      cx,
+    );
+
+    let setup_row = form_field(
       if bootstrapped {
         "Local DNS already set up"
       } else {
         "First-time setup"
-      },
-      if bootstrapped {
-        "Helper installed at /usr/local/libexec/dockside-helper. Future toggles run silently."
-      } else {
-        "Installs the privileged helper + polkit rule + system resolver + root CA in one auth prompt. Click once, then enable."
       },
       h_flex()
         .gap(px(6.))
@@ -1089,35 +1063,40 @@ impl SettingsView {
               })),
           )
         }),
+      Some(if bootstrapped {
+        "Helper installed at /usr/local/libexec/dockside-helper. Future toggles run silently."
+      } else {
+        "Installs the privileged helper, polkit rule, system resolver and root CA in one auth prompt. Click once, then enable."
+      }),
       cx,
     );
 
-    let suffix_row = Self::render_row(
+    let suffix_row = form_field(
       "Suffix",
-      "Wildcard host suffix. .test is RFC 6761; avoid .local (mDNS).",
       Input::new(&suffix_input).small().w_full(),
+      Some("Wildcard host suffix. .test is RFC 6761; avoid .local (mDNS)."),
       cx,
     );
 
     let dns_port_box = self.dns_port_input.clone().unwrap();
     let plain_port_box = self.proxy_http_port_input.clone().unwrap();
     let secure_port_box = self.proxy_https_port_input.clone().unwrap();
-    let dns_port_row = Self::render_row(
+    let dns_port_row = form_field(
       "DNS port",
-      "UDP+TCP port for the local resolver. 15353 is the convention; 53 needs root.",
       Input::new(&dns_port_box).small().w_full(),
+      Some("UDP+TCP port for the local resolver. 15353 is the convention; 53 needs root."),
       cx,
     );
-    let plain_port_row = Self::render_row(
+    let plain_port_row = form_field(
       "HTTP proxy port",
-      "Loopback port for plain HTTP. 80 needs root; default 47080 avoids common dev-tool collisions.",
       Input::new(&plain_port_box).small().w_full(),
+      Some("Loopback port for plain HTTP. 80 needs root; default 47080 avoids common dev-tool collisions."),
       cx,
     );
-    let secure_port_row = Self::render_row(
+    let secure_port_row = form_field(
       "HTTPS proxy port",
-      "Loopback port for HTTPS. 443 needs root; default 47443 avoids common dev-tool collisions.",
       Input::new(&secure_port_box).small().w_full(),
+      Some("Loopback port for HTTPS. 443 needs root; default 47443 avoids common dev-tool collisions."),
       cx,
     );
 
@@ -1155,9 +1134,8 @@ impl SettingsView {
           .child(if low_ports_granted { "Granted" } else { "Not granted" }),
       );
 
-    let pretty_url_row = Self::render_row(
+    let pretty_url_row = form_field(
       "Drop port from URL",
-      "Redirect host 80/443 to the proxy so URLs drop the port suffix (http://name.dockside.test/). Linux: nftables nat hook with a systemd unit. macOS: pf redirect rule. Both persist across reboots and rebuilds.",
       h_flex()
         .gap(px(8.))
         .items_center()
@@ -1194,6 +1172,11 @@ impl SettingsView {
               })),
           )
         }),
+      Some(
+        "Redirect host 80/443 to the proxy so URLs drop the port suffix (http://name.dockside.test/). \
+         Linux uses an nftables nat hook with a systemd unit; macOS a pf redirect rule. Both persist \
+         across reboots and rebuilds.",
+      ),
       cx,
     );
 
@@ -1231,9 +1214,8 @@ impl SettingsView {
           .child(if ca_installed { "Installed" } else { "Not installed" }),
       );
 
-    let ca_row = Self::render_row(
+    let ca_row = form_field(
       "HTTPS root certificate",
-      "Trust dockside-issued certs so https://*.dockside.test shows a green lock.",
       h_flex()
         .gap(px(8.))
         .items_center()
@@ -1264,6 +1246,7 @@ impl SettingsView {
               })),
           )
         }),
+      Some("Trust dockside-issued certs so https://*.dockside.test shows a green lock."),
       cx,
     );
 
@@ -1276,7 +1259,6 @@ impl SettingsView {
         .w_full()
         .gap(px(2.))
         .p(px(16.))
-        .my(px(12.))
         .rounded(px(8.))
         .bg(colors.sidebar)
         .border_1()
@@ -1313,7 +1295,6 @@ impl SettingsView {
       .w_full()
       .gap(px(4.))
       .p(px(12.))
-      .my(px(8.))
       .rounded(px(8.))
       .bg(colors.danger.opacity(0.1))
       .border_1()
@@ -1331,22 +1312,24 @@ impl SettingsView {
          (47080 / 47443). Container links use those fallback ports automatically.",
       ));
 
-    v_flex()
-      .w_full()
-      .child(Self::render_section("Resolver", cx))
+    Self::body()
+      .child(form_section("Setup", cx))
       .when(restart_required, |el| el.child(restart_banner))
       .child(setup_row)
+      .child(form_section("Resolver", cx))
       .child(toggle_row)
+      .child(autostart_row)
       .child(suffix_row)
+      .child(form_section("Ports", cx))
       .child(dns_port_row)
       .child(plain_port_row)
       .child(secure_port_row)
       .child(pretty_url_row)
-      .child(Self::render_section("Status", cx))
+      .child(form_section("Status", cx))
       .child(status_card)
-      .child(Self::render_section("HTTPS", cx))
+      .child(form_section("HTTPS", cx))
       .child(ca_row)
-      .child(Self::render_section("Routes", cx))
+      .child(form_section("Routes", cx))
       .child(routes_panel)
       .into_any_element()
   }
@@ -1357,9 +1340,8 @@ impl SettingsView {
     let is_pruning = self.is_pruning;
     let profile_input = self.colima_profile_input.clone().unwrap();
 
-    let mut col = v_flex().w_full().child(Self::render_row(
+    let mut col = Self::body().child(form_section("Colima", cx)).child(form_field(
       "Enable Colima",
-      "Show the Machines view and Colima actions",
       Switch::new("colima-enabled")
         .checked(enabled)
         .on_click(cx.listener(|this, checked: &bool, window, cx| {
@@ -1374,6 +1356,7 @@ impl SettingsView {
           });
           cx.notify();
         })),
+      Some("Show the Machines view and Colima actions."),
       cx,
     ));
 
@@ -1386,34 +1369,33 @@ impl SettingsView {
     let disk_input = self.colima_disk_input.clone().unwrap();
 
     col = col
-      .child(Self::render_section("VM defaults", cx))
-      .child(Self::render_row(
+      .child(form_section("VM defaults", cx))
+      .child(form_field(
         "Default profile",
-        "Profile name used when no other is specified",
         Input::new(&profile_input).small().w_full(),
+        Some("Profile name used when no other is specified."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Default CPUs",
-        "CPU count for new Colima profiles",
         Input::new(&cpus_input).small().w_full(),
+        Some("CPU count for new Colima profiles."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Default memory (GiB)",
-        "RAM allocated to new Colima profiles",
         Input::new(&memory_input).small().w_full(),
+        Some("RAM allocated to new Colima profiles."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Default disk (GiB)",
-        "Disk allocated to new Colima profiles",
         Input::new(&disk_input).small().w_full(),
+        Some("Disk allocated to new Colima profiles."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Default template",
-        "YAML template seeded into new profiles",
         Button::new("edit-template")
           .icon(Icon::new(AppIcon::Edit))
           .label("Edit")
@@ -1422,16 +1404,15 @@ impl SettingsView {
           .on_click(cx.listener(|this, _ev, window, cx| {
             this.open_template_editor(window, cx);
           })),
+        Some("YAML template seeded into new profiles."),
         cx,
       ))
-      .child(Self::render_section("Cache", cx))
-      .child(Self::render_row(
+      .child(form_section("Cache", cx))
+      .child(form_field(
         "Disk usage",
-        "Total cache size on disk",
         h_flex()
           .gap(px(8.))
           .items_center()
-          .justify_end()
           .child(
             div()
               .text_sm()
@@ -1448,6 +1429,7 @@ impl SettingsView {
                 this.prune_cache(cx);
               })),
           ),
+        Some("Total Colima cache size on disk."),
         cx,
       ));
 
@@ -1457,17 +1439,16 @@ impl SettingsView {
   fn render_editor(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
     let editor_select = self.editor_select.clone().unwrap();
     let wait_close = self.settings_state.read(cx).settings.editor_wait_close;
-    v_flex()
-      .w_full()
-      .child(Self::render_row(
+    Self::body()
+      .child(form_section("External editor", cx))
+      .child(form_field(
         "External editor",
-        "Editor used when opening container or volume files remotely",
         Select::new(&editor_select).w_full().small(),
+        Some("Editor used when opening container or volume files remotely."),
         cx,
       ))
-      .child(Self::render_row(
+      .child(form_field(
         "Wait for editor to close",
-        "Block the calling task until the editor process exits",
         Switch::new("editor-wait")
           .checked(wait_close)
           .on_click(cx.listener(|this, checked: &bool, _window, cx| {
@@ -1478,6 +1459,7 @@ impl SettingsView {
             });
             cx.notify();
           })),
+        Some("Block the calling task until the editor process exits."),
         cx,
       ))
       .into_any_element()
