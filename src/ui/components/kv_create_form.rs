@@ -113,21 +113,16 @@ where
 {
   let colors = cx.theme().colors;
 
-  let identity = h_flex()
+  let identity = v_flex()
     .w_full()
     .gap(px(12.))
-    .items_start()
-    .child(
-      div()
-        .flex_1()
-        .child(form_field("Name", Input::new(&state.name).w_full().small(), None, cx)),
-    )
-    .child(div().w(px(200.)).child(form_field(
+    .child(form_field("Name", Input::new(&state.name).w_full().small(), None, cx))
+    .child(form_field(
       "Namespace",
       Input::new(&state.namespace).w_full().small(),
       None,
       cx,
-    )));
+    ));
 
   // One header row of column labels rather than repeating a label on
   // every entry — reads as a proper key/value table.
