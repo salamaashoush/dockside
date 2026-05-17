@@ -238,6 +238,7 @@ pub enum FavoriteRef {
   Pvc { name: String, namespace: String },
   Secret { name: String, namespace: String },
   ConfigMap { name: String, namespace: String },
+  Node { name: String },
   Machine { id: String, label: String },
 }
 
@@ -258,7 +259,8 @@ impl FavoriteRef {
       | Self::Ingress { name, .. }
       | Self::Pvc { name, .. }
       | Self::Secret { name, .. }
-      | Self::ConfigMap { name, .. } => name,
+      | Self::ConfigMap { name, .. }
+      | Self::Node { name } => name,
       Self::Machine { label, .. } => label,
     }
   }
@@ -280,6 +282,7 @@ impl FavoriteRef {
       Self::Pvc { .. } => "PVC",
       Self::Secret { .. } => "Secret",
       Self::ConfigMap { .. } => "ConfigMap",
+      Self::Node { .. } => "Node",
       Self::Machine { .. } => "Machine",
     }
   }

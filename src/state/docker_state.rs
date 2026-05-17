@@ -206,6 +206,34 @@ pub enum PvcDetailTab {
   Yaml = 1,
 }
 
+/// Tab indices for Node detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum NodeDetailTab {
+  #[default]
+  Info = 0,
+  Pods = 1,
+  Conditions = 2,
+  Taints = 3,
+  Labels = 4,
+  Yaml = 5,
+  Events = 6,
+}
+
+impl NodeDetailTab {
+  pub fn label(self) -> &'static str {
+    match self {
+      NodeDetailTab::Info => "Info",
+      NodeDetailTab::Pods => "Pods",
+      NodeDetailTab::Conditions => "Conditions",
+      NodeDetailTab::Taints => "Taints",
+      NodeDetailTab::Labels => "Labels",
+      NodeDetailTab::Yaml => "YAML",
+      NodeDetailTab::Events => "Events",
+    }
+  }
+}
+
 /// Tab indices for Secret detail view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(usize)]
@@ -282,6 +310,7 @@ pub enum Selection {
     name: String,
     namespace: String,
   },
+  Node(String),       // Node name (cluster-scoped)
   Machine(MachineId), // Machine identifier (Host or Colima VM)
 }
 
@@ -519,6 +548,14 @@ pub enum StateChanged {
   IngressesUpdated,
   PvcsUpdated,
   NodesUpdated,
+  NodeYamlLoaded {
+    name: String,
+    yaml: String,
+  },
+  NodeTabRequest {
+    name: String,
+    tab: NodeDetailTab,
+  },
   EventsUpdated,
 
   // ConfigMaps
@@ -900,6 +937,7 @@ impl DockerState {
         | Selection::Pvc { .. }
         | Selection::Secret { .. }
         | Selection::ConfigMap { .. }
+        | Selection::Node(_)
     ) {
       self.selection = Selection::None;
     }
@@ -992,6 +1030,10 @@ impl DockerState {
       .configmaps
       .iter()
       .find(|c| c.name == name && c.namespace == namespace)
+  }
+
+  pub fn get_node(&self, name: &str) -> Option<&NodeInfo> {
+    self.nodes.iter().find(|n| n.name == name)
   }
 
   // Navigation

@@ -110,6 +110,26 @@ original plan, all intentional:
 
 ### Phase 3 — Node detail + ops
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). Notes:
+
+- `NodeInfo` enriched (kernel, runtime, capacity/allocatable for
+  cpu/mem/pods, pod CIDR, conditions, taints, sorted labels). New
+  `NodeCondition`/`NodeTaint` + `is_reserved_node_label`.
+- `KubeClient`: `get_node_yaml`, `apply_node_yaml`, `patch_node_labels`
+  (merge patch; null tombstone for deletes), `set_node_taints`.
+- `Selection::Node(name)` (cluster-scoped), `NodeDetailTab`,
+  `FavoriteRef::Node`, `NodeYamlLoaded`/`NodeTabRequest` events.
+- New `src/ui/nodes/{view,list,detail}.rs` (list+detail split, same
+  idiom as deployments). Seven tabs: Info, Pods (filtered by
+  `pod.node`), Conditions, Taints (inline add/remove), Labels (inline
+  add/remove; reserved labels read-only), YAML (edit+apply+reload),
+  Events (filtered by involved object). Cordon/Uncordon/Drain/Pin from
+  the row menu.
+- `ClusterView` now hosts `NodesView` in its Nodes tab (the old inline
+  table was removed); `NodeTabRequest` switches it to the Nodes tab.
+- Metrics tab deferred (kept optional per the plan; needs the
+  metrics-server probe from Phase 5).
+
 **Goal**: per-node detail pane matching the depth of `kubectl describe node` plus inline editing for labels and taints.
 
 **Scope**:

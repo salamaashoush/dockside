@@ -1296,6 +1296,15 @@ impl Render for DocksideApp {
           Selection::ConfigMap { name, namespace } => {
             crate::services::delete_configmap(name, namespace, cx);
           }
+          Selection::Node(_) => {
+            window.push_notification(
+              (
+                NotificationType::Info,
+                SharedString::from("Nodes can't be deleted from here. Use cordon/drain instead."),
+              ),
+              cx,
+            );
+          }
           Selection::Machine(MachineId::Colima(name)) => {
             crate::services::delete_machine(name, cx);
           }

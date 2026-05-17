@@ -452,6 +452,36 @@ impl DaemonSetInfo {
 // Cluster Overview Types (Node + Event)
 // ============================================================================
 
+/// A single `node.status.conditions[]` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeCondition {
+  pub type_: String,
+  pub status: String,
+  pub reason: String,
+  pub message: String,
+  pub last_transition: String,
+}
+
+/// A scheduling taint (`spec.taints[]`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeTaint {
+  pub key: String,
+  pub value: String,
+  pub effect: String,
+}
+
+impl NodeTaint {
+  /// Render as `key=value:Effect` (or `key:Effect` when value is empty),
+  /// matching `kubectl` taint syntax.
+  pub fn display(&self) -> String {
+    if self.value.is_empty() {
+      format!("{}:{}", self.key, self.effect)
+    } else {
+      format!("{}={}:{}", self.key, self.value, self.effect)
+    }
+  }
+}
+
 #[derive(Debug, Clone)]
 pub struct NodeInfo {
   pub name: String,
@@ -460,14 +490,45 @@ pub struct NodeInfo {
   pub version: String,
   pub os: String,
   pub arch: String,
+  pub kernel_version: String,
+  pub container_runtime: String,
   pub internal_ip: Option<String>,
   pub age: String,
   /// Allocatable CPU (cores).
   pub cpu_allocatable: String,
   /// Allocatable memory (bytes/IEC string).
   pub mem_allocatable: String,
+  /// Total CPU capacity.
+  pub cpu_capacity: String,
+  /// Total memory capacity.
+  pub mem_capacity: String,
+  /// Schedulable pod slots.
+  pub pods_allocatable: String,
+  /// Total pod capacity.
+  pub pods_capacity: String,
+  /// First `spec.podCIDR`, if assigned.
+  pub pod_cidr: Option<String>,
+  pub conditions: Vec<NodeCondition>,
+  pub taints: Vec<NodeTaint>,
+  /// All labels, sorted by key. Reserved (`*kubernetes.io/*`) labels are
+  /// kept here too; the UI marks them read-only.
+  pub labels: Vec<(String, String)>,
   /// `true` when the node is cordoned (`spec.unschedulable`).
   pub unschedulable: bool,
+}
+
+/// Label keys Kubernetes manages itself — surfaced read-only in the UI
+/// because the API server rejects most writes to them (422).
+#[must_use]
+pub fn is_reserved_node_label(key: &str) -> bool {
+  key == "kubernetes.io"
+    || key == "k8s.io"
+    || key.starts_with("kubernetes.io/")
+    || key.starts_with("k8s.io/")
+    || key.starts_with("node.kubernetes.io/")
+    || key.starts_with("node-role.kubernetes.io/")
+    || key.contains(".kubernetes.io/")
+    || key.contains(".k8s.io/")
 }
 
 impl NodeInfo {
@@ -514,14 +575,63 @@ impl NodeInfo {
     });
 
     let alloc = status.and_then(|s| s.allocatable.as_ref());
-    let cpu_allocatable = alloc
-      .and_then(|a| a.get("cpu"))
-      .map(|q| q.0.clone())
+    let cap = status.and_then(|s| s.capacity.as_ref());
+    let q =
+      |m: Option<&std::collections::BTreeMap<String, k8s_openapi::apimachinery::pkg::api::resource::Quantity>>,
+       k: &str| { m.and_then(|a| a.get(k)).map(|q| q.0.clone()).unwrap_or_default() };
+    let cpu_allocatable = q(alloc, "cpu");
+    let mem_allocatable = q(alloc, "memory");
+    let pods_allocatable = q(alloc, "pods");
+    let cpu_capacity = q(cap, "cpu");
+    let mem_capacity = q(cap, "memory");
+    let pods_capacity = q(cap, "pods");
+
+    let kernel_version = node_info.map(|ni| ni.kernel_version.clone()).unwrap_or_default();
+    let container_runtime = node_info
+      .map(|ni| ni.container_runtime_version.clone())
       .unwrap_or_default();
-    let mem_allocatable = alloc
-      .and_then(|a| a.get("memory"))
-      .map(|q| q.0.clone())
+
+    let pod_cidr = n.spec.as_ref().and_then(|s| s.pod_cidr.clone());
+
+    let conditions: Vec<NodeCondition> = conditions
+      .map(|cs| {
+        cs.iter()
+          .map(|c| NodeCondition {
+            type_: c.type_.clone(),
+            status: c.status.clone(),
+            reason: c.reason.clone().unwrap_or_default(),
+            message: c.message.clone().unwrap_or_default(),
+            last_transition: c
+              .last_transition_time
+              .as_ref()
+              .map(|t| t.0.to_rfc3339())
+              .unwrap_or_default(),
+          })
+          .collect()
+      })
       .unwrap_or_default();
+
+    let taints: Vec<NodeTaint> = n
+      .spec
+      .as_ref()
+      .and_then(|s| s.taints.as_ref())
+      .map(|ts| {
+        ts.iter()
+          .map(|t| NodeTaint {
+            key: t.key.clone(),
+            value: t.value.clone().unwrap_or_default(),
+            effect: t.effect.clone(),
+          })
+          .collect()
+      })
+      .unwrap_or_default();
+
+    let mut labels: Vec<(String, String)> = metadata
+      .labels
+      .as_ref()
+      .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+      .unwrap_or_default();
+    labels.sort_by(|a, b| a.0.cmp(&b.0));
 
     let age = creation_timestamp.map_or_else(|| "Unknown".to_string(), format_age);
 
@@ -534,10 +644,20 @@ impl NodeInfo {
       version,
       os,
       arch,
+      kernel_version,
+      container_runtime,
       internal_ip,
       age,
       cpu_allocatable,
       mem_allocatable,
+      cpu_capacity,
+      mem_capacity,
+      pods_allocatable,
+      pods_capacity,
+      pod_cidr,
+      conditions,
+      taints,
+      labels,
       unschedulable,
     }
   }

@@ -306,6 +306,21 @@ pub fn open_configmap_yaml(name: String, namespace: String, cx: &mut App) {
   super::kubernetes::get_configmap_yaml(name, namespace, cx);
 }
 
+pub fn open_node_yaml(name: String, cx: &mut App) {
+  let state = docker_state(cx);
+  state.update(cx, |state, cx| {
+    state.set_view(CurrentView::Cluster);
+    state.set_selection(crate::state::Selection::Node(name.clone()));
+    cx.emit(StateChanged::ViewChanged);
+    cx.emit(StateChanged::SelectionChanged);
+    cx.emit(StateChanged::NodeTabRequest {
+      name: name.clone(),
+      tab: crate::state::NodeDetailTab::Yaml,
+    });
+  });
+  super::kubernetes::get_node_yaml(name, cx);
+}
+
 pub fn open_deployment_yaml(name: String, namespace: String, cx: &mut App) {
   let state = docker_state(cx);
   state.update(cx, |_state, cx| {

@@ -18,7 +18,7 @@ use k8s_openapi::api::core::v1::Service;
 use super::diagnostics::first_existing_known_kubeconfig;
 use super::types::{
   ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, EventInfo, IngressInfo, JobInfo, KubeContextInfo,
-  NamespaceInfo, NodeInfo, PodInfo, PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+  NamespaceInfo, NodeInfo, NodeTaint, PodInfo, PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
 };
 
 /// Kubernetes client wrapper
@@ -1085,6 +1085,69 @@ impl KubeClient {
       }
     }
     Ok(deleted)
+  }
+
+  /// Get a node's full manifest as YAML.
+  pub async fn get_node_yaml(&self, name: &str) -> Result<String> {
+    let api: Api<Node> = Api::all(self.client.clone());
+    let node = api.get(name).await.context(format!("Failed to get node {name}"))?;
+    serde_yaml::to_string(&node).context("Failed to serialize node to YAML")
+  }
+
+  /// Replace a node from edited YAML, pinning `metadata.name` so a typo
+  /// can't rename the object.
+  pub async fn apply_node_yaml(&self, name: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut node: Node = serde_yaml::from_str(yaml_str).context("Failed to parse node YAML")?;
+    node.metadata.name = Some(name.to_string());
+    let api: Api<Node> = Api::all(self.client.clone());
+    api
+      .replace(name, &PostParams::default(), &node)
+      .await
+      .with_context(|| format!("Failed to apply node {name}"))?;
+    Ok(())
+  }
+
+  /// Merge-patch `metadata.labels`: `set` upserts keys, `removed` keys are
+  /// deleted (JSON merge patch treats a null value as a tombstone).
+  pub async fn patch_node_labels(&self, name: &str, set: &[(String, String)], removed: &[String]) -> Result<()> {
+    let mut labels = serde_json::Map::new();
+    for (k, v) in set {
+      labels.insert(k.clone(), serde_json::Value::String(v.clone()));
+    }
+    for k in removed {
+      labels.insert(k.clone(), serde_json::Value::Null);
+    }
+    let patch = json!({ "metadata": { "labels": labels } });
+    let api: Api<Node> = Api::all(self.client.clone());
+    api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to patch labels on node {name}"))?;
+    Ok(())
+  }
+
+  /// Replace the whole `spec.taints` array with `taints`.
+  pub async fn set_node_taints(&self, name: &str, taints: &[NodeTaint]) -> Result<()> {
+    let arr: Vec<serde_json::Value> = taints
+      .iter()
+      .map(|t| {
+        let mut m = serde_json::Map::new();
+        m.insert("key".to_string(), serde_json::Value::String(t.key.clone()));
+        m.insert("effect".to_string(), serde_json::Value::String(t.effect.clone()));
+        if !t.value.is_empty() {
+          m.insert("value".to_string(), serde_json::Value::String(t.value.clone()));
+        }
+        serde_json::Value::Object(m)
+      })
+      .collect();
+    let patch = json!({ "spec": { "taints": arr } });
+    let api: Api<Node> = Api::all(self.client.clone());
+    api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to set taints on node {name}"))?;
+    Ok(())
   }
 
   pub async fn list_events(&self, namespace: Option<&str>) -> Result<Vec<EventInfo>> {

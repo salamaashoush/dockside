@@ -19,6 +19,7 @@ pub mod machines;
 pub mod models;
 pub mod networking;
 pub mod networks;
+pub mod nodes;
 pub mod pods;
 pub mod prune_dialog;
 pub mod pvcs;

@@ -8,5 +8,5 @@ pub use client::{
 pub use diagnostics::{K8sStatus, kubeconfig_setup_hint, kubectl_install_hint};
 pub use types::{
   ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, EventInfo, IngressInfo, JobInfo, KubeContextInfo,
-  NodeInfo, PodInfo, PodPhase, PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+  NodeInfo, NodeTaint, PodInfo, PodPhase, PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo, is_reserved_node_label,
 };
