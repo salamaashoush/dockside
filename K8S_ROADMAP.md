@@ -210,6 +210,21 @@ get the join command). No remote execution (4b is the SSH slice).
 - k3s test cluster: open Add Node, see correct join command with token if running locally; otherwise see "join from a node with SSH access" placeholder.
 - EKS cluster: see deep link to AWS console node group page.
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). SSH auth delegated to
+the system `ssh` binary (agent / `~/.ssh/config` / explicit identity
+file) — no in-app key/password handling, best for packaging and least
+surprising. Per-context host inventory in `settings.cluster_hosts`. The
+Add Node dialog gained a "Remote provisioning (SSH)" section: manage
+hosts, pick target + source(control-plane) + role, then Provision.
+`provision_node` SSHes the source for a k3s node-token / `kubeadm token
+create --print-join-command`, then SSHes the target to install + join
+(k3s server/agent or `kubeadm join`, `--control-plane` for CP role).
+Idempotency check vs current Ready nodes; every remote command appended
+to `<config>/audit.log`; runs only on explicit Provision click.
+
+**All roadmap phases (1, 2, 3, 4a, 4b, 5) are shipped on
+`feat/k8s-roadmap`.**
+
 #### Phase 4b — SSH-based remote join (stretch)
 
 **Scope**:

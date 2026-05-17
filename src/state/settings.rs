@@ -288,6 +288,29 @@ impl FavoriteRef {
   }
 }
 
+/// An SSH-reachable host used by the Phase 4b remote node provisioner.
+/// Auth is delegated to the system `ssh` (agent / `~/.ssh/config` /
+/// `identity_file`) — we never store secrets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostEntry {
+  pub name: String,
+  pub address: String,
+  #[serde(default = "default_ssh_user")]
+  pub user: String,
+  #[serde(default = "default_ssh_port")]
+  pub port: u16,
+  /// Optional explicit private key path (`ssh -i`). Empty = agent/config.
+  #[serde(default)]
+  pub identity_file: String,
+}
+
+fn default_ssh_user() -> String {
+  "root".to_string()
+}
+fn default_ssh_port() -> u16 {
+  22
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -378,6 +401,10 @@ pub struct AppSettings {
   /// HTTPS listen port for the reverse proxy.
   #[serde(default = "default_proxy_https_port")]
   pub proxy_https_port: u16,
+  /// SSH host inventory for the remote node provisioner, keyed by
+  /// kubeconfig context name.
+  #[serde(default)]
+  pub cluster_hosts: std::collections::HashMap<String, Vec<HostEntry>>,
 }
 
 fn default_true() -> bool {
@@ -461,6 +488,7 @@ impl Default for AppSettings {
       dns_port: default_dns_port(),
       proxy_http_port: default_proxy_http_port(),
       proxy_https_port: default_proxy_https_port(),
+      cluster_hosts: std::collections::HashMap::new(),
     }
   }
 }
@@ -656,6 +684,7 @@ mod tests {
       dns_port: 15353,
       proxy_http_port: 47080,
       proxy_https_port: 47443,
+      cluster_hosts: std::collections::HashMap::new(),
     };
 
     assert_eq!(settings.theme, ThemeName::GruvboxDark);
