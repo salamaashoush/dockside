@@ -17,8 +17,8 @@ use k8s_openapi::api::core::v1::Service;
 
 use super::diagnostics::first_existing_known_kubeconfig;
 use super::types::{
-  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, EventInfo, IngressInfo, JobInfo, NamespaceInfo, NodeInfo,
-  PodInfo, PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, EventInfo, IngressInfo, JobInfo, KubeContextInfo,
+  NamespaceInfo, NodeInfo, NodeTaint, PodInfo, PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
 };
 
 /// Kubernetes client wrapper
@@ -27,16 +27,35 @@ pub struct KubeClient {
 }
 
 impl KubeClient {
-  /// Create a new `KubeClient` from default kubeconfig
-  /// Includes VPN-aware fallback: if the server URL uses a VM IP that's unreachable,
-  /// automatically tries localhost with the same port
+  /// Create a `KubeClient` for the user's active context.
+  ///
+  /// Resolves the context from `settings.kube_context` (empty = the
+  /// kubeconfig's own `current-context`). Includes VPN-aware fallback:
+  /// if the server URL uses a VM IP that's unreachable, automatically
+  /// tries localhost with the same port.
   pub async fn new() -> Result<Self> {
+    let settings = crate::state::AppSettings::load();
+    let ctx = if settings.kube_context.is_empty() {
+      None
+    } else {
+      Some(settings.kube_context.clone())
+    };
+    Self::for_context(ctx.as_deref()).await
+  }
+
+  /// Create a `KubeClient` bound to a specific kubeconfig context.
+  ///
+  /// `None` keeps prior behaviour: standard `Config::infer` (respects
+  /// `KUBECONFIG`, `~/.kube/config`, in-cluster) with a fallback to known
+  /// distro paths. `Some(name)` activates that named context without
+  /// mutating the on-disk kubeconfig.
+  pub async fn for_context(context: Option<&str>) -> Result<Self> {
     // Honor the user's `kubeconfig_path` setting if set, then standard
     // `Config::infer` (which respects KUBECONFIG and ~/.kube/config),
     // then fall back to known distro paths (k3s, kubeadm, microk8s) so
     // a fresh native install with no `~/.kube/config` still works.
     let custom_path = crate::state::AppSettings::load().kubeconfig_path;
-    let config = if custom_path.is_empty() {
+    let config = if custom_path.is_empty() && context.is_none() {
       match Config::infer().await {
         Ok(c) => c,
         Err(infer_err) => {
@@ -54,13 +73,24 @@ impl KubeClient {
         }
       }
     } else {
-      let kubeconfig =
-        Kubeconfig::read_from(&custom_path).with_context(|| format!("Failed to read kubeconfig at {custom_path}"))?;
-      Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
+      let kubeconfig = resolve_kubeconfig()?;
+      let options = KubeConfigOptions {
+        context: context.map(str::to_string),
+        ..KubeConfigOptions::default()
+      };
+      Config::from_custom_kubeconfig(kubeconfig, &options)
         .await
-        .context("Failed to build kube config from custom path")?
+        .with_context(|| match context {
+          Some(c) => format!("Failed to build kube config for context '{c}'"),
+          None => "Failed to build kube config from custom path".to_string(),
+        })?
     };
 
+    Self::connect(config).await
+  }
+
+  /// Connect with the VPN-aware localhost fallback applied.
+  async fn connect(config: Config) -> Result<Self> {
     // Check if the server URL uses a non-localhost IP (likely VM IP)
     let server_url = config.cluster_url.to_string();
     let is_vm_ip = is_non_localhost_ip(&server_url);
@@ -114,6 +144,17 @@ impl KubeClient {
       .await
       .context("Cannot reach K8s API server")?;
     Ok(())
+  }
+
+  /// `gitVersion` of the API server (e.g. `v1.32.1`). Used by the
+  /// Clusters view's "Test connection" affordance.
+  pub async fn server_version(&self) -> Result<String> {
+    let info = self
+      .client
+      .apiserver_version()
+      .await
+      .context("Cannot reach K8s API server")?;
+    Ok(info.git_version)
   }
 
   /// List all namespaces
@@ -1010,6 +1051,37 @@ impl KubeClient {
     Ok(nodes.items.iter().map(NodeInfo::from_node).collect())
   }
 
+  /// Per-node CPU/memory usage from `metrics.k8s.io/v1beta1/nodes`.
+  /// `Err` means metrics-server is absent (the UI hides the Metrics tab).
+  /// Returns `(node, cpu, memory)` as raw quantity strings.
+  pub async fn node_metrics(&self) -> Result<Vec<(String, String, String)>> {
+    use kube::core::{ApiResource, DynamicObject, GroupVersionKind};
+    let gvk = GroupVersionKind::gvk("metrics.k8s.io", "v1beta1", "NodeMetrics");
+    let ar = ApiResource::from_gvk_with_plural(&gvk, "nodes");
+    let api: Api<DynamicObject> = Api::all_with(self.client.clone(), &ar);
+    let list = api
+      .list(&ListParams::default())
+      .await
+      .context("metrics.k8s.io API not available")?;
+    let mut out = Vec::with_capacity(list.items.len());
+    for item in list.items {
+      let name = item.metadata.name.clone().unwrap_or_default();
+      let usage = item.data.get("usage");
+      let cpu = usage
+        .and_then(|u| u.get("cpu"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+      let mem = usage
+        .and_then(|u| u.get("memory"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+      out.push((name, cpu, mem));
+    }
+    Ok(out)
+  }
+
   /// Set or clear `spec.unschedulable` on a node.
   pub async fn set_node_unschedulable(&self, name: &str, unschedulable: bool) -> Result<()> {
     let api: Api<Node> = Api::all(self.client.clone());
@@ -1055,6 +1127,69 @@ impl KubeClient {
       }
     }
     Ok(deleted)
+  }
+
+  /// Get a node's full manifest as YAML.
+  pub async fn get_node_yaml(&self, name: &str) -> Result<String> {
+    let api: Api<Node> = Api::all(self.client.clone());
+    let node = api.get(name).await.context(format!("Failed to get node {name}"))?;
+    serde_yaml::to_string(&node).context("Failed to serialize node to YAML")
+  }
+
+  /// Replace a node from edited YAML, pinning `metadata.name` so a typo
+  /// can't rename the object.
+  pub async fn apply_node_yaml(&self, name: &str, yaml_str: &str) -> Result<()> {
+    use kube::api::PostParams;
+    let mut node: Node = serde_yaml::from_str(yaml_str).context("Failed to parse node YAML")?;
+    node.metadata.name = Some(name.to_string());
+    let api: Api<Node> = Api::all(self.client.clone());
+    api
+      .replace(name, &PostParams::default(), &node)
+      .await
+      .with_context(|| format!("Failed to apply node {name}"))?;
+    Ok(())
+  }
+
+  /// Merge-patch `metadata.labels`: `set` upserts keys, `removed` keys are
+  /// deleted (JSON merge patch treats a null value as a tombstone).
+  pub async fn patch_node_labels(&self, name: &str, set: &[(String, String)], removed: &[String]) -> Result<()> {
+    let mut labels = serde_json::Map::new();
+    for (k, v) in set {
+      labels.insert(k.clone(), serde_json::Value::String(v.clone()));
+    }
+    for k in removed {
+      labels.insert(k.clone(), serde_json::Value::Null);
+    }
+    let patch = json!({ "metadata": { "labels": labels } });
+    let api: Api<Node> = Api::all(self.client.clone());
+    api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to patch labels on node {name}"))?;
+    Ok(())
+  }
+
+  /// Replace the whole `spec.taints` array with `taints`.
+  pub async fn set_node_taints(&self, name: &str, taints: &[NodeTaint]) -> Result<()> {
+    let arr: Vec<serde_json::Value> = taints
+      .iter()
+      .map(|t| {
+        let mut m = serde_json::Map::new();
+        m.insert("key".to_string(), serde_json::Value::String(t.key.clone()));
+        m.insert("effect".to_string(), serde_json::Value::String(t.effect.clone()));
+        if !t.value.is_empty() {
+          m.insert("value".to_string(), serde_json::Value::String(t.value.clone()));
+        }
+        serde_json::Value::Object(m)
+      })
+      .collect();
+    let patch = json!({ "spec": { "taints": arr } });
+    let api: Api<Node> = Api::all(self.client.clone());
+    api
+      .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+      .await
+      .with_context(|| format!("Failed to set taints on node {name}"))?;
+    Ok(())
   }
 
   pub async fn list_events(&self, namespace: Option<&str>) -> Result<Vec<EventInfo>> {
@@ -1528,6 +1663,51 @@ pub struct ServicePortConfig {
   pub target_port: i32,
   pub node_port: i32,
   pub protocol: String,
+}
+
+// ============================================================================
+// Kubeconfig context discovery
+// ============================================================================
+
+/// Resolve the kubeconfig the same way `KubeClient::new` does, but as a raw
+/// parsed document (no API connection). Honors `settings.kubeconfig_path`,
+/// then `$KUBECONFIG`/`~/.kube/config` (with merge), then known distro paths.
+fn resolve_kubeconfig() -> Result<Kubeconfig> {
+  let custom_path = crate::state::AppSettings::load().kubeconfig_path;
+  if !custom_path.is_empty() {
+    return Kubeconfig::read_from(&custom_path).with_context(|| format!("Failed to read kubeconfig at {custom_path}"));
+  }
+  match Kubeconfig::read() {
+    Ok(kc) => Ok(kc),
+    Err(read_err) => {
+      if let Some(path) = first_existing_known_kubeconfig() {
+        let path_str = path.to_string_lossy().into_owned();
+        Kubeconfig::read_from(&path).with_context(|| format!("Failed to read detected kubeconfig at {path_str}"))
+      } else {
+        Err(read_err).context("Failed to locate a kubeconfig")
+      }
+    }
+  }
+}
+
+/// List every context across the full kubeconfig file set, with origin
+/// file + resolved server. Mirrors `kubectl config get-contexts` but
+/// keeps per-file provenance for the Clusters editor.
+#[must_use]
+pub fn list_kube_contexts() -> Vec<KubeContextInfo> {
+  let (entries, _current) = super::kubeconfig::Kubeconfigs::discover().list();
+  entries
+    .into_iter()
+    .map(|e| KubeContextInfo {
+      name: e.name,
+      cluster: e.cluster,
+      user: e.user,
+      namespace: e.namespace,
+      server: e.server,
+      is_current: e.is_current,
+      origin: e.origin,
+    })
+    .collect()
 }
 
 // ============================================================================

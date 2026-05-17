@@ -24,6 +24,7 @@ pub fn refresh_pods(cx: &mut App) {
     });
   }
 
+  let ctx_gen = state.read(cx).kube_context_generation;
   let tokio_task = Tokio::spawn(cx, async move {
     // Check both client creation AND actual API connectivity
     match crate::kubernetes::KubeClient::new().await {
@@ -42,6 +43,9 @@ pub fn refresh_pods(cx: &mut App) {
     let result = tokio_task.await;
 
     cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
       state.update(cx, |state, cx| {
         match result {
           Ok(Ok((available, pods))) => {
@@ -71,6 +75,7 @@ pub fn refresh_pods(cx: &mut App) {
 /// Refresh the list of namespaces
 pub fn refresh_namespaces(cx: &mut App) {
   let state = docker_state(cx);
+  let ctx_gen = state.read(cx).kube_context_generation;
 
   let tokio_task = Tokio::spawn(cx, async move {
     // Check both client creation AND actual API connectivity
@@ -94,6 +99,9 @@ pub fn refresh_namespaces(cx: &mut App) {
     let (available, namespaces) = result.unwrap_or((false, vec!["default".to_string()]));
 
     cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
       state.update(cx, |state, cx| {
         state.set_k8s_available(available);
         state.set_namespaces(namespaces);

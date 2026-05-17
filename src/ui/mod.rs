@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod cluster;
+pub mod clusters;
 pub mod command_palette;
 pub mod components;
 pub mod compose;
@@ -19,6 +20,7 @@ pub mod machines;
 pub mod models;
 pub mod networking;
 pub mod networks;
+pub mod nodes;
 pub mod pods;
 pub mod prune_dialog;
 pub mod pvcs;

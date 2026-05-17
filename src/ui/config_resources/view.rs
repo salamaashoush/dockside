@@ -1,14 +1,13 @@
 //! Tabbed wrapper for k8s config resources: `ConfigMaps`, `Secrets`.
 
-use gpui::{Context, Entity, Render, Styled, Window, div, prelude::*, px};
+use gpui::{Context, Entity, Render, Window, div, prelude::*};
 use gpui_component::{
-  Selectable, h_flex,
+  Selectable,
   tab::{Tab, TabBar},
-  theme::ActiveTheme,
   v_flex,
 };
 
-use crate::ui::components::render_namespace_selector;
+use crate::ui::components::render_k8s_header;
 use crate::ui::configmaps::ConfigMapsView;
 use crate::ui::secrets::SecretsView;
 
@@ -37,7 +36,6 @@ impl ConfigResourcesView {
 
 impl Render for ConfigResourcesView {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-    let colors = cx.theme().colors;
     let active = self.active_tab;
 
     let tab_bar = TabBar::new("config-tabs")
@@ -67,22 +65,7 @@ impl Render for ConfigResourcesView {
 
     v_flex()
       .size_full()
-      .child(
-        h_flex()
-          .w_full()
-          .items_center()
-          .flex_shrink_0()
-          .bg(colors.tab_bar)
-          .border_b_1()
-          .border_color(colors.border)
-          .child(div().flex_1().min_w_0().overflow_hidden().child(tab_bar))
-          .child(
-            h_flex()
-              .px(px(12.))
-              .flex_shrink_0()
-              .child(render_namespace_selector(cx)),
-          ),
-      )
+      .child(render_k8s_header(tab_bar, true, div(), cx))
       .child(div().flex_1().min_h_0().child(body))
   }
 }

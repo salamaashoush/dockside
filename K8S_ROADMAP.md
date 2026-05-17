@@ -44,6 +44,25 @@ Plan for evolving Dockside's Kubernetes capabilities from a single-context viewe
 
 ### Phase 1 — Multi-context foundation
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). Deviations from the
+original plan, all intentional:
+
+- Active context persists to `settings.kube_context` (empty = kubeconfig
+  `current-context`) instead of a separate `default_context`. `KubeClient`
+  already loads settings inside `new()`, so every one of the ~20 service
+  callsites picks up the switch with zero refactor — `KubeClient::new()`
+  now delegates to `KubeClient::for_context(Option<&str>)`.
+- Per-context `ClusterState` map deferred. Instead a monotonic
+  `kube_context_generation` is captured before each list refresh and
+  re-checked before the write; stale results from the previous context
+  are dropped. `clear_k8s_data()` wipes every collection + `LoadState`
+  and any k8s `Selection` on switch, so no cross-cluster bleed.
+- Context switcher is a shared `render_context_selector` mounted next to
+  the namespace selector in every k8s group view (Workloads, Networking,
+  Config, Storage) and the Cluster toolbar. Hidden when <2 contexts.
+- `KubeContextInfo` parsed via `kube::config::Kubeconfig` (honors
+  `kubeconfig_path`, `$KUBECONFIG` merge, then known distro paths).
+
 **Goal**: switch between kubeconfig contexts inside the app; refresh all k8s state on switch.
 
 **Scope**:
@@ -63,6 +82,29 @@ Plan for evolving Dockside's Kubernetes capabilities from a single-context viewe
 - Two contexts in `~/.kube/config`. Switch in UI. Pods/Services lists swap. No stale data shown after switch. No panic if a context is unreachable.
 
 ### Phase 2 — Cluster CRUD (kubeconfig editor)
+
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). Open question
+resolved per user: support **all** kubeconfig setups like kubectl/Lens,
+not single-file. Notes:
+
+- New `src/kubernetes/kubeconfig.rs` `Kubeconfigs` store: discovers the
+  full file set (`settings.kubeconfig_path` → `$KUBECONFIG` list →
+  `~/.kube/config` → known distro paths). `list()` merges all with
+  per-context **origin file** + resolved server (first file wins, like
+  kubectl). Writes are per-origin, atomic (temp in same dir + rename),
+  with a one-time `<file>.dockside.bak`, and **preserve unknown YAML
+  keys** by mutating a `serde_yaml::Value` tree. Unit-tested
+  (list/edit/remove/add/import + unknown-key preservation).
+- Operations: add (manual: token / exec / client-cert / insecure / CA),
+  import-file (merge, overwrite same-named), remove, rename + re-namespace,
+  set-current (writes kubeconfig `current-context` *and* switches the app
+  like `kubectl config use-context`), test-connection (server version
+  toast via `KubeClient::server_version`).
+- New top-level **Clusters** view (`CurrentView::Clusters`, sidebar entry
+  above Cluster) — `src/ui/clusters/{view,dialog}.rs`: context list with
+  origin/server/current badge + row menu, Add/Import dialogs.
+- `KubeContextInfo` gained `server` + `origin`; `list_kube_contexts` now
+  flows through the new store so the Phase 1 switcher benefits too.
 
 **Goal**: add and remove cluster contexts from inside the app, write kubeconfig back atomically.
 
@@ -91,6 +133,26 @@ Plan for evolving Dockside's Kubernetes capabilities from a single-context viewe
 
 ### Phase 3 — Node detail + ops
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). Notes:
+
+- `NodeInfo` enriched (kernel, runtime, capacity/allocatable for
+  cpu/mem/pods, pod CIDR, conditions, taints, sorted labels). New
+  `NodeCondition`/`NodeTaint` + `is_reserved_node_label`.
+- `KubeClient`: `get_node_yaml`, `apply_node_yaml`, `patch_node_labels`
+  (merge patch; null tombstone for deletes), `set_node_taints`.
+- `Selection::Node(name)` (cluster-scoped), `NodeDetailTab`,
+  `FavoriteRef::Node`, `NodeYamlLoaded`/`NodeTabRequest` events.
+- New `src/ui/nodes/{view,list,detail}.rs` (list+detail split, same
+  idiom as deployments). Seven tabs: Info, Pods (filtered by
+  `pod.node`), Conditions, Taints (inline add/remove), Labels (inline
+  add/remove; reserved labels read-only), YAML (edit+apply+reload),
+  Events (filtered by involved object). Cordon/Uncordon/Drain/Pin from
+  the row menu.
+- `ClusterView` now hosts `NodesView` in its Nodes tab (the old inline
+  table was removed); `NodeTabRequest` switches it to the Nodes tab.
+- Metrics tab deferred (kept optional per the plan; needs the
+  metrics-server probe from Phase 5).
+
 **Goal**: per-node detail pane matching the depth of `kubectl describe node` plus inline editing for labels and taints.
 
 **Scope**:
@@ -118,6 +180,14 @@ Plan for evolving Dockside's Kubernetes capabilities from a single-context viewe
 
 **Goal**: surface the right join workflow for the detected distro. Phase 4 has two slices; ship 4a first.
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). `src/kubernetes/distro.rs`
+detects k3s/k3d/kubeadm/EKS/GKE/AKS/kind/minikube/Unknown from node
+labels + kubelet version + API endpoint (unit-tested). `join_guide`
+returns per-distro steps + a copy-pasteable command + cloud-console
+deep link. "Add Node" button in the Nodes toolbar opens a read-only
+dialog (managed clusters get a scale hint + console link; self-managed
+get the join command). No remote execution (4b is the SSH slice).
+
 #### Phase 4a — Read-only join surface
 
 **Scope**:
@@ -140,6 +210,21 @@ Plan for evolving Dockside's Kubernetes capabilities from a single-context viewe
 - k3s test cluster: open Add Node, see correct join command with token if running locally; otherwise see "join from a node with SSH access" placeholder.
 - EKS cluster: see deep link to AWS console node group page.
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). SSH auth delegated to
+the system `ssh` binary (agent / `~/.ssh/config` / explicit identity
+file) — no in-app key/password handling, best for packaging and least
+surprising. Per-context host inventory in `settings.cluster_hosts`. The
+Add Node dialog gained a "Remote provisioning (SSH)" section: manage
+hosts, pick target + source(control-plane) + role, then Provision.
+`provision_node` SSHes the source for a k3s node-token / `kubeadm token
+create --print-join-command`, then SSHes the target to install + join
+(k3s server/agent or `kubeadm join`, `--control-plane` for CP role).
+Idempotency check vs current Ready nodes; every remote command appended
+to `<config>/audit.log`; runs only on explicit Provision click.
+
+**All roadmap phases (1, 2, 3, 4a, 4b, 5) are shipped on
+`feat/k8s-roadmap`.**
+
 #### Phase 4b — SSH-based remote join (stretch)
 
 **Scope**:
@@ -161,6 +246,17 @@ Plan for evolving Dockside's Kubernetes capabilities from a single-context viewe
 - Two-VM lab: Dockside on laptop, Ubuntu masters/workers reachable via SSH. Add a worker via the wizard. `kubectl get nodes` shows it `Ready` within 90s.
 
 ### Phase 5 — Smart defaults and quality-of-life
+
+**Status: 🟡 In progress** (branch `feat/k8s-roadmap`). Shipped so far:
+- Last-used context restored on launch (done in Phase 1 bootstrap).
+- Connection status dot on every k8s view (shared header): green
+  reachable / red errored / grey not-loaded.
+- API discovery: probe `metrics.k8s.io`; the Node **Metrics** tab
+  (deferred from Phase 3) now appears only when metrics-server is
+  present and shows live CPU/mem from `metrics.k8s.io/v1beta1/nodes`
+  (`kubectl top node`). Reset on context switch.
+Remaining: per-API tab gating beyond metrics (gateway-api), "copy as
+kubectl" buttons, per-context UI prefs.
 
 **Goal**: polish layer that makes the multi-cluster experience pleasant.
 

@@ -2,6 +2,7 @@
 
 pub mod cluster;
 pub mod configmaps;
+pub mod contexts;
 pub mod cronjobs;
 pub mod daemonsets;
 pub mod deployments;
@@ -11,10 +12,12 @@ pub mod pods;
 pub mod pvcs;
 pub mod secrets;
 pub mod services;
+pub mod ssh;
 pub mod statefulsets;
 
 pub use cluster::*;
 pub use configmaps::*;
+pub use contexts::*;
 pub use cronjobs::*;
 pub use daemonsets::*;
 pub use deployments::*;
@@ -24,4 +27,5 @@ pub use pods::*;
 pub use pvcs::*;
 pub use secrets::*;
 pub use services::*;
+pub use ssh::*;
 pub use statefulsets::*;

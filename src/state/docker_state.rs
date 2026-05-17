@@ -3,8 +3,8 @@ use gpui::{App, AppContext, Entity, EventEmitter, Global};
 use crate::colima::{ColimaVm, Machine, MachineId};
 use crate::docker::{ContainerInfo, ImageInfo, NetworkInfo, VolumeInfo};
 use crate::kubernetes::{
-  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, EventInfo, IngressInfo, JobInfo, NodeInfo, PodInfo,
-  PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
+  ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, EventInfo, IngressInfo, JobInfo, KubeContextInfo,
+  NodeInfo, PodInfo, PvcInfo, SecretInfo, ServiceInfo, StatefulSetInfo,
 };
 
 use super::app_state::CurrentView;
@@ -206,6 +206,36 @@ pub enum PvcDetailTab {
   Yaml = 1,
 }
 
+/// Tab indices for Node detail view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(usize)]
+pub enum NodeDetailTab {
+  #[default]
+  Info = 0,
+  Pods = 1,
+  Conditions = 2,
+  Taints = 3,
+  Labels = 4,
+  Metrics = 5,
+  Yaml = 6,
+  Events = 7,
+}
+
+impl NodeDetailTab {
+  pub fn label(self) -> &'static str {
+    match self {
+      NodeDetailTab::Info => "Info",
+      NodeDetailTab::Pods => "Pods",
+      NodeDetailTab::Conditions => "Conditions",
+      NodeDetailTab::Taints => "Taints",
+      NodeDetailTab::Labels => "Labels",
+      NodeDetailTab::Metrics => "Metrics",
+      NodeDetailTab::Yaml => "YAML",
+      NodeDetailTab::Events => "Events",
+    }
+  }
+}
+
 /// Tab indices for Secret detail view
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(usize)]
@@ -282,6 +312,7 @@ pub enum Selection {
     name: String,
     namespace: String,
   },
+  Node(String),       // Node name (cluster-scoped)
   Machine(MachineId), // Machine identifier (Host or Colima VM)
 }
 
@@ -313,6 +344,10 @@ pub enum StateChanged {
   NetworksUpdated,
   PodsUpdated,
   NamespacesUpdated,
+  /// Kubeconfig context list (re)loaded.
+  KubeContextsUpdated,
+  /// Active context changed; every k8s view should reset + reload.
+  KubeContextSwitched,
   ViewChanged,
   SelectionChanged,
   Loading,
@@ -515,6 +550,15 @@ pub enum StateChanged {
   IngressesUpdated,
   PvcsUpdated,
   NodesUpdated,
+  NodeMetricsUpdated,
+  NodeYamlLoaded {
+    name: String,
+    yaml: String,
+  },
+  NodeTabRequest {
+    name: String,
+    tab: NodeDetailTab,
+  },
   EventsUpdated,
 
   // ConfigMaps
@@ -568,12 +612,27 @@ pub struct DockerState {
   pub ingresses: Vec<IngressInfo>,
   pub pvcs: Vec<PvcInfo>,
   pub nodes: Vec<NodeInfo>,
+  /// True when the active cluster has metrics-server (`metrics.k8s.io`).
+  /// Gates the Node detail Metrics tab. Reset on context switch.
+  pub api_metrics_server: bool,
+  /// node name -> (cpu, memory) raw quantity strings from metrics-server.
+  pub node_metrics: std::collections::HashMap<String, (String, String)>,
   pub events: Vec<EventInfo>,
   pub namespaces: Vec<String>,
   pub selected_namespace: String,
   pub k8s_available: bool,
   /// Error message for K8s connectivity issues
   pub k8s_error: Option<String>,
+
+  // Multi-cluster (kubeconfig contexts)
+  /// All contexts parsed from the resolved kubeconfig.
+  pub kube_contexts: Vec<KubeContextInfo>,
+  /// Name of the active context (None = kubeconfig `current-context`).
+  pub active_kube_context: Option<String>,
+  /// Bumped on every context switch. In-flight refreshes capture this
+  /// before spawning and drop their result if it changed, so a slow
+  /// response from a previous context can't overwrite the new one.
+  pub kube_context_generation: u64,
 
   // UI state
   pub current_view: CurrentView,
@@ -628,11 +687,16 @@ impl DockerState {
       ingresses: Vec::new(),
       pvcs: Vec::new(),
       nodes: Vec::new(),
+      api_metrics_server: false,
+      node_metrics: std::collections::HashMap::new(),
       events: Vec::new(),
       namespaces: vec!["default".to_string()],
       selected_namespace: "all".to_string(),
       k8s_available: false,
       k8s_error: None,
+      kube_contexts: Vec::new(),
+      active_kube_context: None,
+      kube_context_generation: 0,
       current_view: CurrentView::default(),
       active_detail_tab: 0,
       selection: Selection::None,
@@ -806,6 +870,91 @@ impl DockerState {
     }
   }
 
+  // Multi-cluster contexts
+
+  pub fn set_kube_contexts(&mut self, contexts: Vec<KubeContextInfo>) {
+    self.kube_contexts = contexts;
+  }
+
+  pub fn set_active_kube_context(&mut self, context: Option<String>) {
+    self.active_kube_context = context;
+  }
+
+  /// Name shown in the context switcher: the explicit active context, else
+  /// whichever context the kubeconfig marks as current.
+  pub fn current_kube_context_name(&self) -> Option<String> {
+    self
+      .active_kube_context
+      .clone()
+      .or_else(|| self.kube_contexts.iter().find(|c| c.is_current).map(|c| c.name.clone()))
+  }
+
+  /// Bump the context generation and return the new value. Callers tag
+  /// in-flight refreshes with this so stale results can be discarded.
+  pub fn bump_kube_generation(&mut self) -> u64 {
+    self.kube_context_generation += 1;
+    self.kube_context_generation
+  }
+
+  /// Wipe every per-cluster collection back to its empty/NotLoaded state.
+  /// Called on a context switch so no resource from the previous cluster
+  /// lingers while the new cluster loads. Docker-side state is untouched.
+  pub fn clear_k8s_data(&mut self) {
+    self.pods.clear();
+    self.services.clear();
+    self.deployments.clear();
+    self.secrets.clear();
+    self.configmaps.clear();
+    self.statefulsets.clear();
+    self.daemonsets.clear();
+    self.jobs.clear();
+    self.cronjobs.clear();
+    self.ingresses.clear();
+    self.pvcs.clear();
+    self.nodes.clear();
+    self.api_metrics_server = false;
+    self.node_metrics.clear();
+    self.events.clear();
+    self.namespaces = vec!["default".to_string()];
+
+    self.pods_state = LoadState::NotLoaded;
+    self.services_state = LoadState::NotLoaded;
+    self.deployments_state = LoadState::NotLoaded;
+    self.secrets_state = LoadState::NotLoaded;
+    self.configmaps_state = LoadState::NotLoaded;
+    self.statefulsets_state = LoadState::NotLoaded;
+    self.daemonsets_state = LoadState::NotLoaded;
+    self.jobs_state = LoadState::NotLoaded;
+    self.cronjobs_state = LoadState::NotLoaded;
+    self.ingresses_state = LoadState::NotLoaded;
+    self.pvcs_state = LoadState::NotLoaded;
+    self.nodes_state = LoadState::NotLoaded;
+    self.events_state = LoadState::NotLoaded;
+
+    self.k8s_available = false;
+    self.k8s_error = None;
+
+    // Drop any selection that points at a now-gone k8s resource so the
+    // detail pane doesn't render a stale object from the old cluster.
+    if matches!(
+      self.selection,
+      Selection::Pod { .. }
+        | Selection::Deployment { .. }
+        | Selection::Service { .. }
+        | Selection::StatefulSet { .. }
+        | Selection::DaemonSet { .. }
+        | Selection::Job { .. }
+        | Selection::CronJob { .. }
+        | Selection::Ingress { .. }
+        | Selection::Pvc { .. }
+        | Selection::Secret { .. }
+        | Selection::ConfigMap { .. }
+        | Selection::Node(_)
+    ) {
+      self.selection = Selection::None;
+    }
+  }
+
   // Services (Kubernetes)
   pub fn set_services(&mut self, services: Vec<ServiceInfo>) {
     self.services = services;
@@ -893,6 +1042,26 @@ impl DockerState {
       .configmaps
       .iter()
       .find(|c| c.name == name && c.namespace == namespace)
+  }
+
+  pub fn get_node(&self, name: &str) -> Option<&NodeInfo> {
+    self.nodes.iter().find(|n| n.name == name)
+  }
+
+  /// Store metrics-server node usage and mark the API present.
+  pub fn set_node_metrics(&mut self, metrics: Vec<(String, String, String)>) {
+    self.api_metrics_server = true;
+    self.node_metrics = metrics.into_iter().map(|(n, cpu, mem)| (n, (cpu, mem))).collect();
+  }
+
+  /// metrics-server absent/unreachable — hide the Metrics tab.
+  pub fn clear_node_metrics(&mut self) {
+    self.api_metrics_server = false;
+    self.node_metrics.clear();
+  }
+
+  pub fn node_usage(&self, name: &str) -> Option<&(String, String)> {
+    self.node_metrics.get(name)
   }
 
   // Navigation

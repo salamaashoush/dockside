@@ -12,44 +12,30 @@ use gpui_component::{
 };
 
 use crate::assets::AppIcon;
-use crate::kubernetes::ConfigMapInfo;
+use crate::kubernetes::NodeInfo;
 use crate::services;
-use crate::state::{DockerState, LoadState, Selection, StateChanged, docker_state};
+use crate::state::{DockerState, FavoriteRef, LoadState, Selection, StateChanged, docker_state};
 use crate::ui::components::{render_k8s_error, render_loading};
 
-pub enum ConfigMapListEvent {
-  Selected(ConfigMapInfo),
+pub enum NodeListEvent {
+  Selected(NodeInfo),
 }
 
-pub struct ConfigMapListDelegate {
+pub struct NodeListDelegate {
   docker_state: Entity<DockerState>,
   search_query: String,
 }
 
-impl ConfigMapListDelegate {
-  fn items(&self, cx: &App) -> Vec<ConfigMapInfo> {
-    let state = self.docker_state.read(cx);
-    if state.selected_namespace == "all" {
-      state.configmaps.clone()
-    } else {
-      state
-        .configmaps
-        .iter()
-        .filter(|c| c.namespace == state.selected_namespace)
-        .cloned()
-        .collect()
-    }
-  }
-
-  fn filtered(&self, cx: &App) -> Vec<ConfigMapInfo> {
-    let items = self.items(cx);
+impl NodeListDelegate {
+  fn filtered_nodes(&self, cx: &App) -> Vec<NodeInfo> {
+    let nodes = self.docker_state.read(cx).nodes.clone();
     if self.search_query.is_empty() {
-      return items;
+      return nodes;
     }
     let q = self.search_query.to_lowercase();
-    items
+    nodes
       .into_iter()
-      .filter(|c| c.name.to_lowercase().contains(&q) || c.namespace.to_lowercase().contains(&q))
+      .filter(|n| n.name.to_lowercase().contains(&q) || n.roles.iter().any(|r| r.to_lowercase().contains(&q)))
       .collect()
   }
 
@@ -58,11 +44,11 @@ impl ConfigMapListDelegate {
   }
 }
 
-impl ListDelegate for ConfigMapListDelegate {
+impl ListDelegate for NodeListDelegate {
   type Item = ListItem;
 
   fn items_count(&self, _section: usize, cx: &App) -> usize {
-    self.filtered(cx).len()
+    self.filtered_nodes(cx).len()
   }
 
   fn render_item(
@@ -71,22 +57,40 @@ impl ListDelegate for ConfigMapListDelegate {
     _window: &mut Window,
     cx: &mut Context<'_, ListState<Self>>,
   ) -> Option<Self::Item> {
-    let items = self.filtered(cx);
-    let cm = items.get(ix.row)?;
+    let nodes = self.filtered_nodes(cx);
+    let node = nodes.get(ix.row)?;
     let colors = &cx.theme().colors;
 
     let global_selection = &self.docker_state.read(cx).selection;
-    let is_selected = matches!(global_selection, Selection::ConfigMap { name, namespace } if *name == cm.name && *namespace == cm.namespace);
-    let name_clone = cm.name.clone();
-    let ns_clone = cm.namespace.clone();
-    let pin_favorite = crate::state::FavoriteRef::ConfigMap {
-      name: cm.name.clone(),
-      namespace: cm.namespace.clone(),
-    };
-    let pinned = services::is_favorite(&pin_favorite, cx);
+    let is_selected = matches!(global_selection, Selection::Node(name) if *name == node.name);
 
-    let key_count = cm.keys.len();
-    let subtitle = format!("{} • {} keys", cm.namespace, key_count);
+    let is_ready = node.status == "Ready";
+    let icon_bg = if !is_ready {
+      colors.danger
+    } else if node.unschedulable {
+      colors.warning
+    } else {
+      colors.success
+    };
+
+    let roles = if node.roles.is_empty() {
+      "worker".to_string()
+    } else {
+      node.roles.join(",")
+    };
+    let status_text = if node.unschedulable && is_ready {
+      "Ready,SchedulingDisabled".to_string()
+    } else {
+      node.status.clone()
+    };
+    let subtitle = format!("{roles} · {} · {}", node.version, node.age);
+
+    let node_name = node.name.clone();
+    let unschedulable = node.unschedulable;
+    let pin = FavoriteRef::Node {
+      name: node.name.clone(),
+    };
+    let pinned = services::is_favorite(&pin, cx);
 
     let row = ix.row;
     let menu_button = Button::new(("menu", row))
@@ -94,15 +98,28 @@ impl ListDelegate for ConfigMapListDelegate {
       .ghost()
       .xsmall()
       .dropdown_menu(move |menu, _window, _cx| {
-        let name = name_clone.clone();
-        let ns = ns_clone.clone();
-        menu
+        let name = node_name.clone();
+        let mut menu = menu;
+        if unschedulable {
+          menu = menu.item(PopupMenuItem::new("Uncordon").icon(IconName::Check).on_click({
+            let name = name.clone();
+            move |_, _, cx| services::uncordon_node(name.clone(), cx)
+          }));
+        } else {
+          menu = menu.item(PopupMenuItem::new("Cordon").icon(IconName::CircleX).on_click({
+            let name = name.clone();
+            move |_, _, cx| services::cordon_node(name.clone(), cx)
+          }));
+        }
+        menu = menu
+          .item(PopupMenuItem::new("Drain").icon(Icon::new(AppIcon::Trash)).on_click({
+            let name = name.clone();
+            move |_, _, cx| services::drain_node(name.clone(), cx)
+          }))
+          .separator()
           .item(PopupMenuItem::new("View YAML").icon(IconName::File).on_click({
             let name = name.clone();
-            let ns = ns.clone();
-            move |_, _, cx| {
-              services::open_configmap_yaml(name.clone(), ns.clone(), cx);
-            }
+            move |_, _, cx| services::open_node_yaml(name.clone(), cx)
           }))
           .separator()
           .item(
@@ -113,20 +130,11 @@ impl ListDelegate for ConfigMapListDelegate {
             })
             .icon(IconName::Star)
             .on_click({
-              let pin = pin_favorite.clone();
-              move |_, _, cx| {
-                services::toggle_favorite(pin.clone(), cx);
-              }
+              let pin = pin.clone();
+              move |_, _, cx| services::toggle_favorite(pin.clone(), cx)
             }),
-          )
-          .separator()
-          .item(PopupMenuItem::new("Delete").icon(Icon::new(AppIcon::Trash)).on_click({
-            let name = name.clone();
-            let ns = ns.clone();
-            move |_, _, cx| {
-              services::delete_configmap(name.clone(), ns.clone(), cx);
-            }
-          }))
+          );
+        menu
       });
 
     let item_content = h_flex()
@@ -145,11 +153,11 @@ impl ListDelegate for ConfigMapListDelegate {
               .size(px(36.))
               .flex_shrink_0()
               .rounded(px(8.))
-              .bg(colors.primary)
+              .bg(icon_bg)
               .flex()
               .items_center()
               .justify_center()
-              .child(Icon::new(AppIcon::Settings).text_color(colors.background)),
+              .child(Icon::new(AppIcon::Machine).text_color(colors.background)),
           )
           .child(
             v_flex()
@@ -163,7 +171,7 @@ impl ListDelegate for ConfigMapListDelegate {
                   .text_ellipsis()
                   .overflow_hidden()
                   .whitespace_nowrap()
-                  .child(cm.name.clone()),
+                  .child(node.name.clone()),
               )
               .child(
                 div()
@@ -174,38 +182,55 @@ impl ListDelegate for ConfigMapListDelegate {
                   .whitespace_nowrap()
                   .child(subtitle),
               ),
+          )
+          .child(
+            div()
+              .flex_shrink_0()
+              .px(px(8.))
+              .py(px(2.))
+              .rounded(px(4.))
+              .bg(icon_bg.opacity(0.2))
+              .text_xs()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(icon_bg)
+              .child(status_text),
           ),
       )
       .child(div().flex_shrink_0().child(menu_button));
 
-    let item = ListItem::new(ix)
-      .py(px(6.))
-      .rounded(px(6.))
-      .overflow_hidden()
-      .selected(is_selected)
-      .child(item_content);
-
-    Some(item)
+    Some(
+      ListItem::new(ix)
+        .py(px(6.))
+        .rounded(px(6.))
+        .overflow_hidden()
+        .selected(is_selected)
+        .child(item_content),
+    )
   }
 
-  fn set_selected_index(&mut self, _ix: Option<IndexPath>, _w: &mut Window, cx: &mut Context<'_, ListState<Self>>) {
+  fn set_selected_index(
+    &mut self,
+    _ix: Option<IndexPath>,
+    _window: &mut Window,
+    cx: &mut Context<'_, ListState<Self>>,
+  ) {
     cx.notify();
   }
 }
 
-pub struct ConfigMapList {
+pub struct NodeList {
   docker_state: Entity<DockerState>,
-  list_state: Entity<ListState<ConfigMapListDelegate>>,
+  list_state: Entity<ListState<NodeListDelegate>>,
   search_input: Option<Entity<InputState>>,
   search_visible: bool,
   search_query: String,
 }
 
-impl ConfigMapList {
+impl NodeList {
   pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
     let docker_state = docker_state(cx);
 
-    let delegate = ConfigMapListDelegate {
+    let delegate = NodeListDelegate {
       docker_state: docker_state.clone(),
       search_query: String::new(),
     };
@@ -214,9 +239,9 @@ impl ConfigMapList {
     cx.subscribe(&list_state, |_this, state, event: &ListEvent, cx| match event {
       ListEvent::Select(ix) | ListEvent::Confirm(ix) => {
         let delegate = state.read(cx).delegate();
-        let filtered = delegate.filtered(cx);
-        if let Some(c) = filtered.get(ix.row) {
-          cx.emit(ConfigMapListEvent::Selected(c.clone()));
+        let filtered = delegate.filtered_nodes(cx);
+        if let Some(node) = filtered.get(ix.row) {
+          cx.emit(NodeListEvent::Selected(node.clone()));
         }
       }
       ListEvent::Cancel => {}
@@ -226,10 +251,7 @@ impl ConfigMapList {
     cx.subscribe(&docker_state, |this, _state, event: &StateChanged, cx| {
       if matches!(
         event,
-        StateChanged::ConfigMapsUpdated
-          | StateChanged::NamespacesUpdated
-          | StateChanged::MachinesUpdated
-          | StateChanged::SelectionChanged
+        StateChanged::NodesUpdated | StateChanged::SelectionChanged | StateChanged::KubeContextSwitched
       ) {
         this.list_state.update(cx, |_state, cx| cx.notify());
         cx.notify();
@@ -248,7 +270,7 @@ impl ConfigMapList {
 
   fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
     if self.search_input.is_none() {
-      let input_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search configmaps..."));
+      let input_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search nodes..."));
       self.search_input = Some(input_state);
     }
   }
@@ -281,8 +303,14 @@ impl ConfigMapList {
     cx.notify();
   }
 
-  fn render_empty(cx: &mut Context<'_, Self>) -> gpui::Div {
+  fn render_empty(&self, cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = &cx.theme().colors;
+    let k8s_available = self.docker_state.read(cx).k8s_available;
+    let title = if k8s_available {
+      "No Nodes"
+    } else {
+      "Kubernetes Unavailable"
+    };
     v_flex()
       .flex_1()
       .w_full()
@@ -299,7 +327,7 @@ impl ConfigMapList {
           .items_center()
           .justify_center()
           .child(
-            Icon::new(AppIcon::Settings)
+            Icon::new(AppIcon::Machine)
               .size(px(32.))
               .text_color(colors.muted_foreground),
           ),
@@ -309,36 +337,37 @@ impl ConfigMapList {
           .text_xl()
           .font_weight(gpui::FontWeight::SEMIBOLD)
           .text_color(colors.secondary_foreground)
-          .child("No ConfigMaps"),
+          .child(title),
       )
   }
 }
 
-impl gpui::EventEmitter<ConfigMapListEvent> for ConfigMapList {}
+impl gpui::EventEmitter<NodeListEvent> for NodeList {}
 
-impl Render for ConfigMapList {
+impl Render for NodeList {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let state = self.docker_state.read(cx);
-    let total_count = state.configmaps.len();
-    let load_state = state.configmaps_state.clone();
-    let filtered_count = self.list_state.read(cx).delegate().filtered(cx).len();
-    let is_filtering = !self.search_query.is_empty();
-    let empty = filtered_count == 0;
+    let total = state.nodes.len();
+    let nodes_state = state.nodes_state.clone();
 
-    let subtitle = match &load_state {
+    let filtered = self.list_state.read(cx).delegate().filtered_nodes(cx).len();
+    let is_filtering = !self.search_query.is_empty();
+
+    let subtitle = match &nodes_state {
       LoadState::NotLoaded | LoadState::Loading => "Loading...".to_string(),
       LoadState::Error(_) => "Error loading".to_string(),
       LoadState::Loaded => {
         if is_filtering {
-          format!("{filtered_count} of {total_count}")
+          format!("{filtered} of {total}")
         } else {
-          format!("{total_count} total")
+          format!("{total} total")
         }
       }
     };
 
     let colors = cx.theme().colors;
     let search_visible = self.search_visible;
+
     if search_visible {
       self.ensure_search_input(window, cx);
       self.sync_search_query(cx);
@@ -355,7 +384,7 @@ impl Render for ConfigMapList {
       .flex_shrink_0()
       .child(
         v_flex()
-          .child(Label::new("ConfigMaps"))
+          .child(Label::new("Nodes"))
           .child(div().text_xs().text_color(colors.muted_foreground).child(subtitle)),
       )
       .child(
@@ -368,29 +397,25 @@ impl Render for ConfigMapList {
               .when(search_visible, Button::primary)
               .when(!search_visible, ButtonVariants::ghost)
               .compact()
-              .on_click(cx.listener(|this, _ev, window, cx| this.toggle_search(window, cx))),
+              .on_click(cx.listener(|this, _ev, window, cx| {
+                this.toggle_search(window, cx);
+              })),
           )
           .child(
-            Button::new("cm-new")
+            Button::new("nodes-add")
               .icon(IconName::Plus)
               .ghost()
               .compact()
               .on_click(cx.listener(|_this, _ev, window, cx| {
-                crate::ui::dialogs::open_create_configmap_dialog(window, cx);
+                super::join_dialog::open_add_node_dialog(window, cx);
               })),
           )
           .child(
-            Button::new("cm-toolbar-actions")
-              .icon(IconName::Ellipsis)
+            Button::new("nodes-refresh")
+              .icon(Icon::new(AppIcon::Refresh))
               .ghost()
               .compact()
-              .dropdown_menu(|menu, _, _| {
-                menu.item(
-                  PopupMenuItem::new("Refresh")
-                    .icon(Icon::new(AppIcon::Refresh))
-                    .on_click(|_, _, cx| services::refresh_configmaps(cx)),
-                )
-              }),
+              .on_click(|_, _, cx| services::refresh_nodes(cx)),
           ),
       );
 
@@ -412,32 +437,21 @@ impl Render for ConfigMapList {
           )
           .child(div().flex_1().when_some(self.search_input.clone(), |el, input| {
             el.child(Input::new(&input).small().w_full())
-          }))
-          .when(!self.search_query.is_empty(), |el| {
-            el.child(
-              Button::new("clear-search")
-                .icon(IconName::Close)
-                .ghost()
-                .xsmall()
-                .on_click(cx.listener(|this, _ev, window, cx| this.toggle_search(window, cx))),
-            )
-          }),
+          })),
       )
     } else {
       None
     };
 
-    let content: gpui::Div = match &load_state {
-      LoadState::NotLoaded | LoadState::Loading => render_loading("configmaps", cx),
-      LoadState::Error(e) => render_k8s_error(
-        "configmaps",
-        &e.clone(),
-        |_ev, _w, cx| services::refresh_configmaps(cx),
-        cx,
-      ),
+    let content: gpui::Div = match &nodes_state {
+      LoadState::NotLoaded | LoadState::Loading => render_loading("nodes", cx),
+      LoadState::Error(e) => {
+        let msg = e.clone();
+        render_k8s_error("nodes", &msg, |_ev, _window, cx| services::refresh_nodes(cx), cx)
+      }
       LoadState::Loaded => {
-        if empty {
-          Self::render_empty(cx)
+        if filtered == 0 {
+          self.render_empty(cx)
         } else {
           div().size_full().p(px(8.)).child(List::new(&self.list_state))
         }
@@ -453,7 +467,7 @@ impl Render for ConfigMapList {
       .children(search_bar)
       .child(
         div()
-          .id("configmaps-list-scroll")
+          .id("node-list-scroll")
           .flex_1()
           .min_h_0()
           .overflow_hidden()

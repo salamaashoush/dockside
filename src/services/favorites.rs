@@ -190,6 +190,18 @@ pub fn open_favorite(item: &FavoriteRef, cx: &mut App) {
         cx.emit(StateChanged::SelectionChanged);
       });
     }
+    FavoriteRef::Node { name } => {
+      state.update(cx, |s, cx| {
+        s.set_view(CurrentView::Cluster);
+        s.set_selection(Selection::Node(name.clone()));
+        cx.emit(StateChanged::ViewChanged);
+        cx.emit(StateChanged::SelectionChanged);
+        cx.emit(StateChanged::NodeTabRequest {
+          name: name.clone(),
+          tab: crate::state::NodeDetailTab::Info,
+        });
+      });
+    }
     FavoriteRef::Machine { id, .. } => {
       use crate::colima::MachineId;
       let parsed = if id == "host" {

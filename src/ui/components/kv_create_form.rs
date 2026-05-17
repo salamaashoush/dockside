@@ -1,7 +1,7 @@
-//! Reusable inline create-form for resources that take a `name`, optional
+//! Modal create-form for resources that take a `name`, optional
 //! `namespace`, and a list of `(key, value)` entries (Secrets, `ConfigMaps`).
 
-use gpui::{App, Context, Entity, Render, SharedString, Styled, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, FocusHandle, Focusable, Render, SharedString, Styled, Window, div, prelude::*, px};
 use gpui_component::{
   Icon, IconName, Sizable,
   button::{Button, ButtonVariants},
@@ -12,6 +12,7 @@ use gpui_component::{
 };
 
 use crate::assets::AppIcon;
+use crate::ui::components::{form_field, form_section};
 
 /// Per-entry input pair (key + value editor). Held in the parent so the form
 /// remains stateful across re-renders.
@@ -98,84 +99,83 @@ impl KvFormState {
   }
 }
 
-/// Render the form. `on_save` receives the collected entries and is called
-/// when the user clicks Create. `on_cancel` is invoked from the Cancel button.
-pub fn render_kv_create_form<P>(
+/// Render just the form fields (name/namespace + key/value rows + an
+/// "Add entry" button). No header or Create/Cancel — those belong to the
+/// surrounding modal dialog frame.
+fn render_kv_fields<P>(
   state: &KvFormState,
-  title: &str,
   on_add_row: impl Fn(&mut P, &mut Window, &mut Context<'_, P>) + 'static,
   on_remove_row: impl Fn(&mut P, usize, &mut Context<'_, P>) + 'static + Clone,
-  on_save: impl Fn(&mut P, &mut Window, &mut Context<'_, P>) + 'static,
-  on_cancel: impl Fn(&mut P, &mut Window, &mut Context<'_, P>) + 'static,
   cx: &mut Context<'_, P>,
 ) -> gpui::Div
 where
   P: Render,
 {
-  let colors = &cx.theme().colors;
+  let colors = cx.theme().colors;
 
-  let header = h_flex()
+  let identity = v_flex()
     .w_full()
-    .items_center()
-    .justify_between()
-    .child(
-      div()
-        .text_sm()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(colors.foreground)
-        .child(title.to_string()),
-    )
-    .child(
-      h_flex()
-        .gap(px(6.))
-        .child(
-          Button::new("kv-form-save")
-            .label("Create")
-            .primary()
-            .small()
-            .on_click(cx.listener(move |this, _ev, w, cx| on_save(this, w, cx))),
-        )
-        .child(
-          Button::new("kv-form-cancel")
-            .label("Cancel")
-            .ghost()
-            .small()
-            .on_click(cx.listener(move |this, _ev, w, cx| on_cancel(this, w, cx))),
-        ),
-    );
+    .gap(px(12.))
+    .child(form_field("Name", Input::new(&state.name).w_full().small(), None, cx))
+    .child(form_field(
+      "Namespace",
+      Input::new(&state.namespace).w_full().small(),
+      None,
+      cx,
+    ));
 
-  let identity = h_flex()
+  // One header row of column labels rather than repeating a label on
+  // every entry — reads as a proper key/value table.
+  let col_headers = h_flex()
     .w_full()
     .gap(px(8.))
-    .child(div().flex_1().child(Input::new(&state.name).w_full().small()))
-    .child(div().w(px(180.)).child(Input::new(&state.namespace).w_full().small()));
+    .child(
+      div()
+        .w(px(220.))
+        .flex_shrink_0()
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(colors.muted_foreground)
+        .child("Key"),
+    )
+    .child(
+      div()
+        .flex_1()
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(colors.muted_foreground)
+        .child("Value"),
+    )
+    .child(div().w(px(28.)).flex_shrink_0());
 
-  let mut entries_block = v_flex().w_full().gap(px(6.));
+  let mut rows = v_flex().w_full().gap(px(6.)).child(col_headers);
   for (idx, entry) in state.entries.iter().enumerate() {
     let remove = on_remove_row.clone();
-    entries_block = entries_block.child(
+    rows = rows.child(
       h_flex()
         .w_full()
-        .gap(px(6.))
-        .items_start()
+        .gap(px(8.))
+        .items_center()
         .child(
           div()
-            .w(px(180.))
+            .w(px(220.))
             .flex_shrink_0()
             .child(Input::new(&entry.key).w_full().small()),
         )
         .child(div().flex_1().child(Input::new(&entry.value).w_full().small()))
         .child(
-          Button::new(SharedString::from(format!("kv-remove-{idx}")))
-            .icon(Icon::new(AppIcon::Trash))
-            .ghost()
-            .xsmall()
-            .on_click(cx.listener(move |this, _ev, _w, cx| remove(this, idx, cx))),
+          div().w(px(28.)).flex_shrink_0().child(
+            Button::new(SharedString::from(format!("kv-remove-{idx}")))
+              .icon(Icon::new(AppIcon::Trash))
+              .ghost()
+              .xsmall()
+              .on_click(cx.listener(move |this, _ev, _w, cx| remove(this, idx, cx))),
+          ),
         ),
     );
   }
 
-  let footer = h_flex().w_full().child(
+  let add = h_flex().w_full().child(
     Button::new("kv-add-row")
       .label("Add entry")
       .icon(IconName::Plus)
@@ -186,13 +186,97 @@ where
 
   v_flex()
     .w_full()
-    .p(px(12.))
-    .gap(px(8.))
-    .bg(colors.sidebar)
-    .border_b_1()
-    .border_color(colors.border)
-    .child(header)
+    .p(px(16.))
+    .gap(px(14.))
     .child(identity)
-    .child(entries_block)
-    .child(footer)
+    .child(form_section("Data", cx))
+    .child(rows)
+    .child(add)
+}
+
+/// Which resource the KV create dialog builds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum KvResourceKind {
+  Secret,
+  ConfigMap,
+}
+
+/// `(kind, name, namespace, entries)` collected from the create form.
+pub type KvCreateValues = (KvResourceKind, String, String, Vec<(String, String)>);
+
+/// Modal dialog body for creating a Secret / `ConfigMap`. The Create /
+/// Cancel buttons live in the dialog footer (see `dialogs::open_*`); this
+/// renders only the scrollable field area, matching every other create
+/// dialog in the app.
+pub struct KvCreateDialog {
+  focus_handle: FocusHandle,
+  kind: KvResourceKind,
+  default_ns: String,
+  form: Option<KvFormState>,
+}
+
+impl KvCreateDialog {
+  pub fn new(kind: KvResourceKind, default_ns: String, cx: &mut Context<'_, Self>) -> Self {
+    Self {
+      focus_handle: cx.focus_handle(),
+      kind,
+      default_ns,
+      form: None,
+    }
+  }
+
+  fn ensure(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    if self.form.is_none() {
+      // Secrets often hold multi-line PEM/cert blobs — give them a
+      // multi-line value editor; ConfigMaps stay single-line.
+      let multiline = self.kind == KvResourceKind::Secret;
+      self.form = Some(KvFormState::new(&self.default_ns, multiline, window, cx));
+    }
+  }
+
+  /// Collected form values, or `None` when the name is empty (keep the
+  /// dialog open so the user can fix it). Returns owned data so the
+  /// `cx` read-borrow is released before the caller invokes a service.
+  pub fn values(&self, cx: &App) -> Option<KvCreateValues> {
+    let form = self.form.as_ref()?;
+    let name = form.name_value(cx);
+    if name.is_empty() {
+      return None;
+    }
+    Some((self.kind, name, form.namespace_value(cx), form.collect(cx)))
+  }
+}
+
+impl Focusable for KvCreateDialog {
+  fn focus_handle(&self, _cx: &App) -> FocusHandle {
+    self.focus_handle.clone()
+  }
+}
+
+impl Render for KvCreateDialog {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+    self.ensure(window, cx);
+    let Some(form) = self.form.as_ref() else {
+      return div();
+    };
+    // SAFETY of borrow: render_kv_fields only reads `form`'s input
+    // entities; the listeners re-borrow `self.form` mutably at click time.
+    let fields = render_kv_fields(
+      form,
+      |this: &mut Self, w, cx| {
+        if let Some(f) = this.form.as_mut() {
+          f.add_row(w, cx);
+          cx.notify();
+        }
+      },
+      |this: &mut Self, idx, cx| {
+        if let Some(f) = this.form.as_mut() {
+          f.remove_row(idx);
+          cx.notify();
+        }
+      },
+      cx,
+    );
+    div().w_full().child(fields)
+  }
 }

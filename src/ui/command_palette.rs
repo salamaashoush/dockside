@@ -165,6 +165,14 @@ impl CommandPalette {
         action: PaletteAction::Navigate(CurrentView::Networks),
       },
       PaletteCommand {
+        id: "nav-clusters",
+        label: "Go to Clusters (manage kubeconfig)",
+        shortcut: None,
+        category: "Navigation",
+        icon: IconName::Globe,
+        action: PaletteAction::Navigate(CurrentView::Clusters),
+      },
+      PaletteCommand {
         id: "nav-cluster",
         label: "Go to Cluster Overview",
         shortcut: None,

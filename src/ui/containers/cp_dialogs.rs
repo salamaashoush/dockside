@@ -11,6 +11,8 @@ use gpui_component::{
   v_flex,
 };
 
+use crate::ui::components::form_field;
+
 use crate::services;
 
 pub fn prompt_upload_to_container(container_id: String, _window: &mut Window, cx: &mut App) {
@@ -51,7 +53,7 @@ fn open_dest_path_dialog(container_id: String, src: std::path::PathBuf, cx: &mut
       });
       let input_for_save = input_state.clone();
 
-      window.open_dialog(cx, move |dialog, _window, _cx| {
+      window.open_dialog(cx, move |dialog, _window, cx| {
         let input_for_render = input_state.clone();
         let input_for_btn = input_for_save.clone();
         let id_for_btn = container_id.clone();
@@ -59,12 +61,12 @@ fn open_dest_path_dialog(container_id: String, src: std::path::PathBuf, cx: &mut
         dialog
           .title("Upload to Container")
           .min_w(px(460.))
-          .child(
-            v_flex()
-              .gap(px(8.))
-              .p(px(16.))
-              .child(Input::new(&input_for_render).w_full()),
-          )
+          .child(v_flex().p(px(16.)).child(form_field(
+            "Destination path in container",
+            Input::new(&input_for_render).w_full(),
+            Some("Directory the file/folder is copied into."),
+            cx,
+          )))
           .footer(move |_dialog_state, _, _window, _cx| {
             let input = input_for_btn.clone();
             let id = id_for_btn.clone();
@@ -100,19 +102,19 @@ pub fn prompt_download_from_container(container_id: String, window: &mut Window,
   let input_state: Entity<InputState> = cx.new(|cx| InputState::new(window, cx).placeholder("/path/inside/container"));
   let input_for_save = input_state.clone();
 
-  window.open_dialog(cx, move |dialog, _window, _cx| {
+  window.open_dialog(cx, move |dialog, _window, cx| {
     let input_for_render = input_state.clone();
     let input_for_btn = input_for_save.clone();
     let id_for_btn = container_id.clone();
     dialog
       .title("Download from Container")
       .min_w(px(460.))
-      .child(
-        v_flex()
-          .gap(px(8.))
-          .p(px(16.))
-          .child(Input::new(&input_for_render).w_full()),
-      )
+      .child(v_flex().p(px(16.)).child(form_field(
+        "Path in container to download",
+        Input::new(&input_for_render).w_full(),
+        Some("File or directory inside the container."),
+        cx,
+      )))
       .footer(move |_dialog_state, _, _window, _cx| {
         let input = input_for_btn.clone();
         let id = id_for_btn.clone();

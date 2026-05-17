@@ -2,6 +2,7 @@
 
 use gpui::App;
 
+use crate::kubernetes::NodeTaint;
 use crate::services::{Tokio, complete_task, fail_task, start_task};
 use crate::state::{LoadState, StateChanged, docker_state};
 
@@ -13,6 +14,7 @@ pub fn refresh_nodes(cx: &mut App) {
   if is_initial {
     state.update(cx, |s, _| s.nodes_state = LoadState::Loading);
   }
+  let ctx_gen = state.read(cx).kube_context_generation;
   let tokio_task = Tokio::spawn(cx, async move {
     let client = crate::kubernetes::KubeClient::new().await?;
     client.list_nodes().await
@@ -20,6 +22,9 @@ pub fn refresh_nodes(cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
       state.update(cx, |s, cx| match result {
         Ok(Ok(items)) => {
           s.nodes = items;
@@ -28,6 +33,33 @@ pub fn refresh_nodes(cx: &mut App) {
         }
         Ok(Err(e)) => s.nodes_state = LoadState::Error(e.to_string()),
         Err(e) => s.nodes_state = LoadState::Error(e.to_string()),
+      });
+    })
+  })
+  .detach();
+}
+
+/// Probe metrics-server and refresh per-node CPU/memory. `Err` (no
+/// metrics.k8s.io) hides the Node Metrics tab; `Ok` shows it.
+pub fn refresh_node_metrics(cx: &mut App) {
+  let state = docker_state(cx);
+  let ctx_gen = state.read(cx).kube_context_generation;
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.node_metrics().await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
+      state.update(cx, |s, cx| {
+        match result {
+          Ok(items) => s.set_node_metrics(items),
+          Err(_) => s.clear_node_metrics(),
+        }
+        cx.emit(StateChanged::NodeMetricsUpdated);
       });
     })
   })
@@ -43,6 +75,7 @@ pub fn refresh_events(cx: &mut App) {
   let selected_ns = state.read(cx).selected_namespace.clone();
   let namespace = if selected_ns == "all" { None } else { Some(selected_ns) };
 
+  let ctx_gen = state.read(cx).kube_context_generation;
   let tokio_task = Tokio::spawn(cx, async move {
     let client = crate::kubernetes::KubeClient::new().await?;
     client.list_events(namespace.as_deref()).await
@@ -50,6 +83,9 @@ pub fn refresh_events(cx: &mut App) {
   cx.spawn(async move |cx| {
     let result = tokio_task.await;
     cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
       state.update(cx, |s, cx| match result {
         Ok(Ok(items)) => {
           s.events = items;
@@ -199,6 +235,137 @@ pub fn delete_namespace(name: String, cx: &mut App) {
         disp.update(cx, |_, cx| {
           cx.emit(DispatcherEvent::TaskFailed {
             error: format!("Failed to delete namespace '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+// ============================================================================
+// Node detail: YAML get/apply, label + taint editing
+// ============================================================================
+
+/// Fetch a node's YAML and emit `NodeYamlLoaded` for the detail pane.
+pub fn get_node_yaml(name: String, cx: &mut App) {
+  let state = docker_state(cx);
+  let name_for_event = name.clone();
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.get_node_yaml(&name).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    let yaml = match result {
+      Ok(y) => y,
+      Err(e) => format!("Error: {e}"),
+    };
+    cx.update(|cx| {
+      state.update(cx, |_s, cx| {
+        cx.emit(StateChanged::NodeYamlLoaded {
+          name: name_for_event,
+          yaml,
+        });
+      });
+    })
+  })
+  .detach();
+}
+
+pub fn apply_node_yaml(name: String, yaml: String, cx: &mut App) {
+  let label = name.clone();
+  let task_id = start_task(cx, format!("Applying node '{name}'..."));
+  let disp = dispatcher(cx);
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.apply_node_yaml(&name, &yaml).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Node '{label}' applied"),
+          });
+        });
+        refresh_nodes(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to apply node '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+/// Upsert `set` labels and delete `removed` keys on a node.
+pub fn set_node_labels(name: String, set: Vec<(String, String)>, removed: Vec<String>, cx: &mut App) {
+  let label = name.clone();
+  let task_id = start_task(cx, format!("Updating labels on '{name}'..."));
+  let disp = dispatcher(cx);
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.patch_node_labels(&name, &set, &removed).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Labels updated on '{label}'"),
+          });
+        });
+        refresh_nodes(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to update labels on '{label}': {e}"),
+          });
+        });
+      }
+    })
+  })
+  .detach();
+}
+
+/// Replace the node's whole taint set.
+pub fn set_node_taints(name: String, taints: Vec<NodeTaint>, cx: &mut App) {
+  let label = name.clone();
+  let task_id = start_task(cx, format!("Updating taints on '{name}'..."));
+  let disp = dispatcher(cx);
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.set_node_taints(&name, &taints).await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| match result {
+      Ok(()) => {
+        complete_task(cx, task_id);
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskCompleted {
+            message: format!("Taints updated on '{label}'"),
+          });
+        });
+        refresh_nodes(cx);
+      }
+      Err(e) => {
+        fail_task(cx, task_id, e.to_string());
+        disp.update(cx, |_, cx| {
+          cx.emit(DispatcherEvent::TaskFailed {
+            error: format!("Failed to update taints on '{label}': {e}"),
           });
         });
       }

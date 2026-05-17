@@ -271,6 +271,9 @@ fn main() {
     // Load initial data
     services::load_initial_data(cx);
 
+    // Restore the persisted kubeconfig context + populate the switcher.
+    services::bootstrap_kube_contexts(cx);
+
     // Start real-time resource watchers for automatic UI updates
     services::start_watchers(cx);
 

@@ -238,6 +238,7 @@ pub enum FavoriteRef {
   Pvc { name: String, namespace: String },
   Secret { name: String, namespace: String },
   ConfigMap { name: String, namespace: String },
+  Node { name: String },
   Machine { id: String, label: String },
 }
 
@@ -258,7 +259,8 @@ impl FavoriteRef {
       | Self::Ingress { name, .. }
       | Self::Pvc { name, .. }
       | Self::Secret { name, .. }
-      | Self::ConfigMap { name, .. } => name,
+      | Self::ConfigMap { name, .. }
+      | Self::Node { name } => name,
       Self::Machine { label, .. } => label,
     }
   }
@@ -280,9 +282,33 @@ impl FavoriteRef {
       Self::Pvc { .. } => "PVC",
       Self::Secret { .. } => "Secret",
       Self::ConfigMap { .. } => "ConfigMap",
+      Self::Node { .. } => "Node",
       Self::Machine { .. } => "Machine",
     }
   }
+}
+
+/// An SSH-reachable host used by the Phase 4b remote node provisioner.
+/// Auth is delegated to the system `ssh` (agent / `~/.ssh/config` /
+/// `identity_file`) — we never store secrets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostEntry {
+  pub name: String,
+  pub address: String,
+  #[serde(default = "default_ssh_user")]
+  pub user: String,
+  #[serde(default = "default_ssh_port")]
+  pub port: u16,
+  /// Optional explicit private key path (`ssh -i`). Empty = agent/config.
+  #[serde(default)]
+  pub identity_file: String,
+}
+
+fn default_ssh_user() -> String {
+  "root".to_string()
+}
+fn default_ssh_port() -> u16 {
+  22
 }
 
 /// Application settings
@@ -338,6 +364,10 @@ pub struct AppSettings {
   /// Override path for `kubeconfig` (empty = standard discovery).
   #[serde(default)]
   pub kubeconfig_path: String,
+  /// Active kubeconfig context (empty = kubeconfig `current-context`).
+  /// Lets the app switch clusters without rewriting `~/.kube/config`.
+  #[serde(default)]
+  pub kube_context: String,
   /// Default Kubernetes namespace selected on first load.
   #[serde(default = "default_namespace")]
   pub default_namespace: String,
@@ -371,6 +401,10 @@ pub struct AppSettings {
   /// HTTPS listen port for the reverse proxy.
   #[serde(default = "default_proxy_https_port")]
   pub proxy_https_port: u16,
+  /// SSH host inventory for the remote node provisioner, keyed by
+  /// kubeconfig context name.
+  #[serde(default)]
+  pub cluster_hosts: std::collections::HashMap<String, Vec<HostEntry>>,
 }
 
 fn default_true() -> bool {
@@ -442,6 +476,7 @@ impl Default for AppSettings {
       show_notifications: true,
       default_pull_platform: String::new(),
       kubeconfig_path: String::new(),
+      kube_context: String::new(),
       default_namespace: "default".to_string(),
       colima_default_cpus: 2,
       colima_default_memory_gb: 4,
@@ -453,6 +488,7 @@ impl Default for AppSettings {
       dns_port: default_dns_port(),
       proxy_http_port: default_proxy_http_port(),
       proxy_https_port: default_proxy_https_port(),
+      cluster_hosts: std::collections::HashMap::new(),
     }
   }
 }
@@ -636,6 +672,7 @@ mod tests {
       show_notifications: true,
       default_pull_platform: String::new(),
       kubeconfig_path: String::new(),
+      kube_context: String::new(),
       default_namespace: "default".to_string(),
       colima_default_cpus: 2,
       colima_default_memory_gb: 4,
@@ -647,6 +684,7 @@ mod tests {
       dns_port: 15353,
       proxy_http_port: 47080,
       proxy_https_port: 47443,
+      cluster_hosts: std::collections::HashMap::new(),
     };
 
     assert_eq!(settings.theme, ThemeName::GruvboxDark);
