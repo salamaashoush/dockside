@@ -4,6 +4,7 @@ use gpui::{App, Context, Entity, FocusHandle, Focusable, Render, Styled, Window,
 use gpui_component::{
   input::{Input, InputState},
   label::Label,
+  scroll::ScrollableElement,
   switch::Switch,
   theme::ActiveTheme,
   v_flex,
@@ -136,7 +137,7 @@ impl Render for ClusterFormDialog {
   fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     self.ensure(window, cx);
     let insecure = self.insecure;
-    v_flex()
+    let form = v_flex()
       .w_full()
       .child(Self::row(
         "Context name",
@@ -191,7 +192,12 @@ impl Render for ClusterFormDialog {
         "CA certificate (PEM)",
         div().h(px(120.)).child(Input::new(self.ca.as_ref().unwrap()).w_full()),
         cx,
-      ))
+      ));
+
+    v_flex()
+      .w_full()
+      .max_h(px(520.))
+      .child(div().w_full().flex_1().overflow_y_scrollbar().child(form))
   }
 }
 

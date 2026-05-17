@@ -402,6 +402,15 @@ impl Render for NodeList {
               })),
           )
           .child(
+            Button::new("nodes-add")
+              .icon(IconName::Plus)
+              .ghost()
+              .compact()
+              .on_click(cx.listener(|_this, _ev, window, cx| {
+                super::join_dialog::open_add_node_dialog(window, cx);
+              })),
+          )
+          .child(
             Button::new("nodes-refresh")
               .icon(Icon::new(AppIcon::Refresh))
               .ghost()

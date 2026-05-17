@@ -1,5 +1,6 @@
 mod client;
 mod diagnostics;
+mod distro;
 mod kubeconfig;
 mod types;
 
@@ -7,6 +8,7 @@ pub use client::{
   ContainerPortConfig, CreateDeploymentOptions, CreateServiceOptions, KubeClient, ServicePortConfig, list_kube_contexts,
 };
 pub use diagnostics::{K8sStatus, kubeconfig_setup_hint, kubectl_install_hint};
+pub use distro::{JoinGuide, join_guide};
 pub use kubeconfig::{AuthMethod, Kubeconfigs, NewCluster};
 pub use types::{
   ConfigMapInfo, CronJobInfo, DaemonSetInfo, DeploymentInfo, EventInfo, IngressInfo, JobInfo, KubeContextInfo,

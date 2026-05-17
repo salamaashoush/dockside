@@ -180,6 +180,14 @@ not single-file. Notes:
 
 **Goal**: surface the right join workflow for the detected distro. Phase 4 has two slices; ship 4a first.
 
+**Status: ✅ Shipped** (branch `feat/k8s-roadmap`). `src/kubernetes/distro.rs`
+detects k3s/k3d/kubeadm/EKS/GKE/AKS/kind/minikube/Unknown from node
+labels + kubelet version + API endpoint (unit-tested). `join_guide`
+returns per-distro steps + a copy-pasteable command + cloud-console
+deep link. "Add Node" button in the Nodes toolbar opens a read-only
+dialog (managed clusters get a scale hint + console link; self-managed
+get the join command). No remote execution (4b is the SSH slice).
+
 #### Phase 4a — Read-only join surface
 
 **Scope**:
