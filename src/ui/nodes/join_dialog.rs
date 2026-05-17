@@ -11,7 +11,6 @@ use gpui_component::{
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
-  menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   theme::ActiveTheme,
   v_flex,
@@ -188,66 +187,135 @@ impl AddNodeDialog {
 
   fn render_ssh(&mut self, cx: &mut Context<'_, Self>) -> gpui::Div {
     let colors = cx.theme().colors;
-    let this = cx.entity();
     let ctx = self.context.clone();
     let hosts = services::hosts_for(&ctx, cx);
-    let names: Vec<String> = hosts.iter().map(|h| h.name.clone()).collect();
     let role = self.role.clone();
     let sel_target = self.sel_target.clone();
     let sel_cp = self.sel_cp.clone();
+    let ready = sel_target.is_some() && sel_cp.is_some();
 
-    let mut sec = v_flex()
-      .w_full()
-      .gap(px(8.))
-      .child(
+    let section_title = |t: &str| {
+      div()
+        .text_sm()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(colors.foreground)
+        .child(t.to_string())
+    };
+
+    let mut sec = v_flex().w_full().gap(px(14.)).child(
+      v_flex()
+        .gap(px(4.))
+        .child(section_title("Remote provisioning (SSH)"))
+        .child(div().text_xs().text_color(colors.muted_foreground).child(
+          "Dockside SSHes the source for a join token, then the target to install + join. \
+                 Auth uses your ssh agent / ~/.ssh/config. Every command is logged to audit.log.",
+        )),
+    );
+
+    // ---- registered hosts: pick target + source, or remove ------------------
+    let mut host_block = v_flex().w_full().gap(px(4.)).child(
+      div()
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(colors.muted_foreground)
+        .child("HOSTS"),
+    );
+
+    if hosts.is_empty() {
+      host_block = host_block.child(
         div()
+          .w_full()
+          .py(px(10.))
           .text_sm()
-          .font_weight(gpui::FontWeight::SEMIBOLD)
-          .text_color(colors.foreground)
-          .child("Remote provisioning (SSH)"),
-      )
-      .child(
-        div()
-          .w_full()
-          .p(px(8.))
-          .rounded(px(6.))
-          .bg(colors.warning.opacity(0.12))
-          .text_xs()
-          .text_color(colors.warning)
-          .child("Runs the k3s/kubeadm installer as root on the target over SSH. Auth uses your ssh agent / ~/.ssh/config. Every command is logged to audit.log."),
+          .text_color(colors.muted_foreground)
+          .child("No SSH hosts yet — add one below."),
       );
-
-    // Registered hosts.
-    for (i, h) in hosts.iter().enumerate() {
-      let ctx_rm = ctx.clone();
-      let name_rm = h.name.clone();
-      sec = sec.child(
-        h_flex()
-          .w_full()
-          .gap(px(8.))
-          .items_center()
-          .py(px(4.))
-          .child(
-            div()
-              .flex_1()
-              .min_w_0()
-              .text_sm()
-              .text_color(colors.foreground)
-              .child(format!("{}  ·  {}@{}:{}", h.name, h.user, h.address, h.port)),
-          )
-          .child(
-            Button::new(("rm-host", i))
-              .icon(IconName::Delete)
-              .ghost()
-              .xsmall()
-              .on_click(move |_e, _w, cx| {
-                services::remove_host(&ctx_rm, &name_rm, cx);
-              }),
-          ),
-      );
+    } else {
+      for (i, h) in hosts.iter().enumerate() {
+        let is_t = sel_target.as_deref() == Some(h.name.as_str());
+        let is_s = sel_cp.as_deref() == Some(h.name.as_str());
+        let n_t = h.name.clone();
+        let n_s = h.name.clone();
+        let ctx_rm = ctx.clone();
+        let name_rm = h.name.clone();
+        host_block = host_block.child(
+          h_flex()
+            .w_full()
+            .gap(px(8.))
+            .items_center()
+            .py(px(8.))
+            .px(px(10.))
+            .rounded(px(6.))
+            .bg(colors.sidebar)
+            .child(
+              v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(px(2.))
+                .child(
+                  div()
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(colors.foreground)
+                    .child(h.name.clone()),
+                )
+                .child(
+                  div()
+                    .text_xs()
+                    .text_color(colors.muted_foreground)
+                    .child(format!("{}@{}:{}", h.user, h.address, h.port)),
+                ),
+            )
+            .child(
+              Button::new(("pick-target", i))
+                .label("Target")
+                .when(is_t, Button::primary)
+                .when(!is_t, Button::outline)
+                .xsmall()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                  this.sel_target = Some(n_t.clone());
+                  cx.notify();
+                })),
+            )
+            .child(
+              Button::new(("pick-source", i))
+                .label("Source")
+                .when(is_s, Button::primary)
+                .when(!is_s, Button::outline)
+                .xsmall()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                  this.sel_cp = Some(n_s.clone());
+                  cx.notify();
+                })),
+            )
+            .child(
+              Button::new(("rm-host", i))
+                .icon(IconName::Delete)
+                .ghost()
+                .xsmall()
+                .on_click(move |_e, _w, cx| {
+                  services::remove_host(&ctx_rm, &name_rm, cx);
+                }),
+            ),
+        );
+      }
     }
+    sec = sec.child(host_block);
 
-    // Add-host form.
+    // ---- add-host form: one labelled field per row --------------------------
+    let field = |label: &str, input: &Option<Entity<InputState>>| {
+      v_flex()
+        .w_full()
+        .gap(px(4.))
+        .child(
+          div()
+            .text_xs()
+            .text_color(colors.muted_foreground)
+            .child(label.to_string()),
+        )
+        .when_some(input.clone(), |el, i| el.child(Input::new(&i).w_full().small()))
+    };
+
     let ctx_add = ctx.clone();
     let (hn, ha, hu, hp, hk) = (
       self.h_name.clone(),
@@ -256,35 +324,37 @@ impl AddNodeDialog {
       self.h_port.clone(),
       self.h_key.clone(),
     );
-    sec = sec
-      .child(
-        h_flex()
-          .w_full()
-          .gap(px(6.))
-          .when_some(self.h_name.clone(), |el, i| {
-            el.child(div().flex_1().child(Input::new(&i).small()))
-          })
-          .when_some(self.h_addr.clone(), |el, i| {
-            el.child(div().flex_1().child(Input::new(&i).small()))
-          })
-          .when_some(self.h_user.clone(), |el, i| {
-            el.child(div().w(px(110.)).child(Input::new(&i).small()))
-          })
-          .when_some(self.h_port.clone(), |el, i| {
-            el.child(div().w(px(60.)).child(Input::new(&i).small()))
-          }),
-      )
-      .child(
-        h_flex()
-          .w_full()
-          .gap(px(6.))
-          .items_center()
-          .when_some(self.h_key.clone(), |el, i| {
-            el.child(div().flex_1().child(Input::new(&i).small()))
-          })
-          .child(
+    sec = sec.child(
+      v_flex()
+        .w_full()
+        .gap(px(8.))
+        .child(
+          div()
+            .text_xs()
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(colors.muted_foreground)
+            .child("ADD SSH HOST"),
+        )
+        .child(
+          h_flex()
+            .w_full()
+            .gap(px(10.))
+            .child(field("Name", &self.h_name))
+            .child(field("Host / IP", &self.h_addr)),
+        )
+        .child(
+          h_flex()
+            .w_full()
+            .gap(px(10.))
+            .child(field("User", &self.h_user))
+            .child(field("Port", &self.h_port)),
+        )
+        .child(field("Identity file (optional)", &self.h_key))
+        .child(
+          h_flex().w_full().justify_end().child(
             Button::new("add-host")
               .label("Add host")
+              .icon(IconName::Plus)
               .outline()
               .small()
               .on_click(move |_e, _w, cx| {
@@ -318,89 +388,39 @@ impl AddNodeDialog {
                 );
               }),
           ),
-      );
+        ),
+    );
 
-    // Provision picker.
-    let target_label = sel_target.clone().unwrap_or_else(|| "target host…".to_string());
-    let cp_label = sel_cp.clone().unwrap_or_else(|| "control-plane host…".to_string());
-    let names_t = names.clone();
-    let names_c = names.clone();
+    // ---- role + provision ---------------------------------------------------
+    let role_btn = |id: &'static str, value: &'static str, label: &'static str, current: &str| {
+      let active = current == value;
+      Button::new(id)
+        .label(label)
+        .when(active, Button::primary)
+        .when(!active, Button::outline)
+        .xsmall()
+        .on_click(cx.listener(move |this, _, _, cx| {
+          this.role = value.to_string();
+          cx.notify();
+        }))
+    };
 
     sec = sec.child(
       h_flex()
         .w_full()
         .gap(px(8.))
         .items_center()
-        .child(
-          Button::new("pick-target")
-            .label(format!("Target: {target_label}"))
-            .outline()
-            .small()
-            .dropdown_caret(true)
-            .dropdown_menu({
-              let this = this.clone();
-              move |menu, _w, _cx| {
-                let mut menu = menu;
-                for n in &names_t {
-                  let this = this.clone();
-                  let n = n.clone();
-                  menu = menu.item(PopupMenuItem::new(n.clone()).on_click(move |_, _, cx| {
-                    this.update(cx, |d, cx| {
-                      d.sel_target = Some(n.clone());
-                      cx.notify();
-                    });
-                  }));
-                }
-                menu
-              }
-            }),
-        )
-        .child(
-          Button::new("pick-cp")
-            .label(format!("Source: {cp_label}"))
-            .outline()
-            .small()
-            .dropdown_caret(true)
-            .dropdown_menu({
-              let this = this.clone();
-              move |menu, _w, _cx| {
-                let mut menu = menu;
-                for n in &names_c {
-                  let this = this.clone();
-                  let n = n.clone();
-                  menu = menu.item(PopupMenuItem::new(n.clone()).on_click(move |_, _, cx| {
-                    this.update(cx, |d, cx| {
-                      d.sel_cp = Some(n.clone());
-                      cx.notify();
-                    });
-                  }));
-                }
-                menu
-              }
-            }),
-        )
-        .child(
-          Button::new("role-toggle")
-            .label(format!("Role: {role}"))
-            .outline()
-            .small()
-            .on_click(cx.listener(|this, _, _, cx| {
-              this.role = if this.role == "worker" {
-                "control-plane".to_string()
-              } else {
-                "worker".to_string()
-              };
-              cx.notify();
-            })),
-        ),
+        .child(div().text_xs().text_color(colors.muted_foreground).child("Role"))
+        .child(role_btn("role-worker", "worker", "Worker", &role))
+        .child(role_btn("role-cp", "control-plane", "Control-plane", &role)),
     );
 
     let provision_hosts = hosts.clone();
-    sec.child(
+    sec = sec.child(
       Button::new("provision")
         .label("Provision over SSH")
         .primary()
-        .small()
+        .when(!ready, Button::outline)
         .on_click(cx.listener(move |this, _ev, window, cx| {
           let (Some(tn), Some(cn)) = (this.sel_target.clone(), this.sel_cp.clone()) else {
             return;
@@ -412,7 +432,18 @@ impl AddNodeDialog {
             window.close_dialog(cx);
           }
         })),
-    )
+    );
+
+    if !ready {
+      sec = sec.child(
+        div()
+          .text_xs()
+          .text_color(colors.muted_foreground)
+          .child("Pick a Target and a Source host above to enable provisioning."),
+      );
+    }
+
+    sec
   }
 }
 
