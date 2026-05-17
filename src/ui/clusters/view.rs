@@ -6,7 +6,6 @@ use gpui_component::{
   Icon, IconName, Sizable, WindowExt,
   button::{Button, ButtonVariants},
   h_flex,
-  label::Label,
   menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   theme::ActiveTheme,
@@ -18,6 +17,7 @@ use crate::assets::AppIcon;
 use crate::kubernetes::KubeContextInfo;
 use crate::services;
 use crate::state::{DockerState, StateChanged, docker_state};
+use crate::ui::components::{k8s_header_title, render_k8s_header};
 
 pub struct ClustersView {
   docker_state: Entity<DockerState>,
@@ -236,54 +236,42 @@ impl Render for ClustersView {
     let colors = cx.theme().colors;
     let contexts = self.docker_state.read(cx).kube_contexts.clone();
 
-    let toolbar = h_flex()
-      .h(px(52.))
-      .w_full()
-      .px(px(16.))
-      .border_b_1()
-      .border_color(colors.border)
+    let actions = h_flex()
+      .gap(px(8.))
       .items_center()
-      .justify_between()
-      .flex_shrink_0()
       .child(
-        v_flex().child(Label::new("Clusters")).child(
-          div()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(format!("{} context(s)", contexts.len())),
-        ),
+        Button::new("refresh-ctx")
+          .icon(Icon::new(AppIcon::Refresh))
+          .ghost()
+          .compact()
+          .on_click(|_, _, cx| services::refresh_kube_contexts(cx)),
       )
       .child(
-        h_flex()
-          .gap(px(8.))
-          .items_center()
-          .child(
-            Button::new("refresh-ctx")
-              .icon(Icon::new(AppIcon::Refresh))
-              .ghost()
-              .compact()
-              .on_click(|_, _, cx| services::refresh_kube_contexts(cx)),
-          )
-          .child(
-            Button::new("clusters-add")
-              .icon(IconName::Plus)
-              .ghost()
-              .compact()
-              .dropdown_menu(|menu, _w, _cx| {
-                menu
-                  .item(
-                    PopupMenuItem::new("Add cluster…")
-                      .icon(IconName::Plus)
-                      .on_click(|_, window, cx| Self::open_add(window, cx)),
-                  )
-                  .item(
-                    PopupMenuItem::new("Import kubeconfig file…")
-                      .icon(IconName::File)
-                      .on_click(|_, window, cx| Self::open_import(window, cx)),
-                  )
-              }),
-          ),
+        Button::new("clusters-add")
+          .icon(IconName::Plus)
+          .ghost()
+          .compact()
+          .dropdown_menu(|menu, _w, _cx| {
+            menu
+              .item(
+                PopupMenuItem::new("Add cluster…")
+                  .icon(IconName::Plus)
+                  .on_click(|_, window, cx| Self::open_add(window, cx)),
+              )
+              .item(
+                PopupMenuItem::new("Import kubeconfig file…")
+                  .icon(IconName::File)
+                  .on_click(|_, window, cx| Self::open_import(window, cx)),
+              )
+          }),
       );
+
+    let header = render_k8s_header(
+      k8s_header_title("Clusters", format!("{} context(s)", contexts.len()), cx),
+      false,
+      actions,
+      cx,
+    );
 
     let body = if contexts.is_empty() {
       div().size_full().flex().items_center().justify_center().child(
@@ -318,7 +306,7 @@ impl Render for ClustersView {
 
     v_flex()
       .size_full()
-      .child(toolbar)
+      .child(header)
       .child(div().flex_1().min_h_0().child(body))
   }
 }

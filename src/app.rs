@@ -699,7 +699,7 @@ impl DocksideApp {
                                     })),
                             )
                             .child(
-                                SidebarMenuItem::new("Cluster")
+                                SidebarMenuItem::new("Overview")
                                     .icon(IconName::LayoutDashboard)
                                     .active(current_view == CurrentView::Cluster)
                                     .on_click(cx.listener(|_this, _ev, _window, cx| {

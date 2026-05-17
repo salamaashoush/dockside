@@ -8,7 +8,6 @@ use gpui_component::{
   button::{Button, ButtonVariants},
   h_flex,
   input::{Input, InputState},
-  label::Label,
   menu::{DropdownMenu, PopupMenuItem},
   scroll::ScrollableElement,
   tab::{Tab, TabBar},
@@ -19,7 +18,7 @@ use gpui_component::{
 use crate::assets::AppIcon;
 use crate::services;
 use crate::state::{DockerState, LoadState, StateChanged, docker_state, settings_state};
-use crate::ui::components::{render_context_selector, render_k8s_error, render_loading};
+use crate::ui::components::{render_k8s_error, render_k8s_header, render_loading};
 use crate::ui::nodes::NodesView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -79,7 +78,7 @@ impl ClusterView {
     }
   }
 
-  fn render_tab_bar(&self, cx: &mut Context<'_, Self>) -> impl IntoElement {
+  fn render_tab_bar(&self, cx: &mut Context<'_, Self>) -> impl IntoElement + use<> {
     let active = self.active_tab;
     TabBar::new("cluster-tabs")
       .child(
@@ -422,34 +421,17 @@ impl ClusterView {
 
 impl Render for ClusterView {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-    let colors = cx.theme().colors;
+    let refresh = Button::new("cluster-refresh")
+      .icon(Icon::new(AppIcon::Refresh))
+      .ghost()
+      .compact()
+      .on_click(cx.listener(|_this, _ev, _w, cx| {
+        services::refresh_nodes(cx);
+        services::refresh_events(cx);
+        services::refresh_namespaces(cx);
+      }));
 
-    let toolbar = h_flex()
-      .h(px(52.))
-      .w_full()
-      .px(px(16.))
-      .border_b_1()
-      .border_color(colors.border)
-      .items_center()
-      .justify_between()
-      .child(Label::new("Cluster"))
-      .child(
-        h_flex()
-          .gap(px(8.))
-          .items_center()
-          .child(render_context_selector(cx))
-          .child(
-            Button::new("refresh")
-              .icon(Icon::new(AppIcon::Refresh))
-              .ghost()
-              .compact()
-              .on_click(cx.listener(|_this, _ev, _w, cx| {
-                services::refresh_nodes(cx);
-                services::refresh_events(cx);
-                services::refresh_namespaces(cx);
-              })),
-          ),
-      );
+    let tab_bar = self.render_tab_bar(cx);
 
     let body = match self.active_tab {
       ClusterTab::Nodes => div().size_full().child(self.nodes.clone()),
@@ -459,14 +441,7 @@ impl Render for ClusterView {
 
     v_flex()
       .size_full()
-      .child(toolbar)
-      .child(
-        div()
-          .w_full()
-          .border_b_1()
-          .border_color(colors.border)
-          .child(self.render_tab_bar(cx)),
-      )
+      .child(render_k8s_header(tab_bar, true, refresh, cx))
       .child(div().flex_1().min_h_0().child(body))
   }
 }
