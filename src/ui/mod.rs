@@ -22,7 +22,7 @@ pub mod networking;
 pub mod networks;
 pub mod nodes;
 pub mod pods;
-pub mod prune_dialog;
+pub mod prune;
 pub mod pvcs;
 pub mod secrets;
 pub mod services;
@@ -33,4 +33,4 @@ pub mod storage;
 pub mod volumes;
 pub mod workloads;
 
-pub use prune_dialog::{PruneDialog, PruneOptions};
+pub use prune::{PruneOptions, PruneView};

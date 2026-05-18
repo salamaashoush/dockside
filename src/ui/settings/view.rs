@@ -1241,6 +1241,10 @@ impl SettingsView {
           );
         }
       }
+      // Own scroll area. Use a fixed height (not max_h) so the box
+      // always reserves its space and clips — max_h collapsed to zero
+      // inside the page scroll and let the list overlap the sections
+      // below.
       v_flex()
         .w_full()
         .p(px(16.))
@@ -1252,7 +1256,7 @@ impl SettingsView {
           div()
             .id("dns-routes-scroll")
             .w_full()
-            .max_h(px(220.))
+            .h(px(240.))
             .overflow_y_scrollbar()
             .child(list),
         )
@@ -1598,7 +1602,7 @@ impl Render for SettingsView {
         .overflow_y_scrollbar()
         .px(px(32.))
         .py(px(24.))
-        .child(div().w_full().max_w(px(720.)).child(body)),
+        .child(div().w_full().child(body)),
     );
 
     h_flex()

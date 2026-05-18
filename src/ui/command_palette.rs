@@ -65,7 +65,6 @@ pub enum PaletteAction {
   ShowCreateMachineDialog,
   ShowCreateDeploymentDialog,
   ShowCreateServiceDialog,
-  ShowPruneDialog,
 
   // Machine actions (default profile)
   StartDefaultMachine,
@@ -429,7 +428,7 @@ impl CommandPalette {
         shortcut: None,
         category: "Docker",
         icon: IconName::Delete,
-        action: PaletteAction::ShowPruneDialog,
+        action: PaletteAction::Navigate(CurrentView::Prune),
       },
       // === COLIMA MACHINE ACTIONS ===
       PaletteCommand {

@@ -45,6 +45,7 @@ use crate::ui::models::ModelsView;
 use crate::ui::networking::NetworkingView;
 use crate::ui::networks::NetworksView;
 use crate::ui::pods::PodsView;
+use crate::ui::prune::PruneView;
 use crate::ui::pvcs::PvcsView;
 use crate::ui::secrets::SecretsView;
 use crate::ui::services::ServicesView;
@@ -61,6 +62,7 @@ use crate::ui::workloads::WorkloadsView;
 pub struct DocksideApp {
   docker_state: Entity<DockerState>,
   machines_view: Entity<MachinesView>,
+  prune_view: Entity<PruneView>,
   containers_view: Entity<ContainersView>,
   compose_view: Entity<ComposeView>,
   volumes_view: Entity<VolumesView>,
@@ -151,6 +153,7 @@ impl DocksideApp {
 
     // Create self-contained views
     let machines_view = cx.new(|cx| MachinesView::new(window, cx));
+    let prune_view = cx.new(PruneView::new);
     let containers_view = cx.new(|cx| ContainersView::new(window, cx));
     let compose_view = cx.new(|cx| ComposeView::new(window, cx));
     let volumes_view = cx.new(|cx| VolumesView::new(window, cx));
@@ -246,6 +249,7 @@ impl DocksideApp {
     Self {
       docker_state,
       machines_view,
+      prune_view,
       containers_view,
       compose_view,
       volumes_view,
@@ -579,10 +583,6 @@ impl DocksideApp {
     });
   }
 
-  fn show_prune_dialog(window: &mut Window, cx: &mut Context<'_, Self>) {
-    dialogs::open_prune_dialog(window, cx);
-  }
-
   fn render_sidebar(&self, cx: &mut Context<'_, Self>) -> impl IntoElement + use<> {
     let state = self.docker_state.read(cx);
     let current_view = state.current_view;
@@ -781,8 +781,9 @@ impl DocksideApp {
                         .child(
                             SidebarMenuItem::new("Prune")
                                 .icon(AppIcon::Trash)
-                                .on_click(cx.listener(|_this, _ev, window, cx| {
-                                    Self::show_prune_dialog(window, cx);
+                                .active(current_view == CurrentView::Prune)
+                                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                    crate::services::set_view(CurrentView::Prune, cx);
                                 })),
                         )
                         .child(
@@ -802,6 +803,7 @@ impl DocksideApp {
 
     match state.current_view {
       CurrentView::Machines => div().size_full().child(self.machines_view.clone()),
+      CurrentView::Prune => div().size_full().child(self.prune_view.clone()),
       CurrentView::Containers => div().size_full().child(self.containers_view.clone()),
       CurrentView::Compose => div().size_full().child(self.compose_view.clone()),
       CurrentView::Volumes => div().size_full().child(self.volumes_view.clone()),
@@ -968,9 +970,6 @@ impl DocksideApp {
       }
       PaletteAction::ShowCreateServiceDialog => {
         dialogs::open_create_service_dialog(window, cx);
-      }
-      PaletteAction::ShowPruneDialog => {
-        dialogs::open_prune_dialog(window, cx);
       }
 
       // Machine actions (default profile)

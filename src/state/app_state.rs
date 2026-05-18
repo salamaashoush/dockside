@@ -27,6 +27,7 @@ pub enum CurrentView {
   Pvcs,
   Storage,
   Machines,
+  Prune,
   /// AI Models — only constructed on macOS aarch64 (sidebar + palette
   /// gated), but variant is always defined so match arms compile on
   /// every platform.
@@ -126,11 +127,12 @@ mod tests {
       CurrentView::Pvcs,
       CurrentView::Storage,
       CurrentView::Machines,
+      CurrentView::Prune,
       CurrentView::Models,
       CurrentView::ActivityMonitor,
       CurrentView::Settings,
     ];
-    assert_eq!(views.len(), 26);
+    assert_eq!(views.len(), 27);
   }
 
   #[test]

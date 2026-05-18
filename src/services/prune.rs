@@ -1,27 +1,24 @@
 //! Docker prune operations
 
-use gpui::{App, AppContext, Entity};
+use gpui::{App, Entity};
 
 use crate::docker::PruneResult;
 use crate::services::{Tokio, complete_task, fail_task, start_task};
-use crate::ui::PruneDialog;
+use crate::ui::PruneView;
 
 use super::core::{DispatcherEvent, dispatcher, docker_client};
 use super::docker::{refresh_containers, refresh_images, refresh_networks, refresh_volumes};
 use super::kubernetes::{refresh_deployments, refresh_pods, refresh_services};
 
-pub fn prune_docker(options: &crate::ui::PruneOptions, cx: &mut App) -> Entity<PruneDialog> {
+/// Run the selected prune operations, reporting progress and the final
+/// result back into the given `PruneView` (loading → result/error).
+pub fn prune_docker(view: Entity<PruneView>, options: &crate::ui::PruneOptions, cx: &mut App) {
   let task_id = start_task(cx, "Pruning Docker resources...".to_string());
   let disp = dispatcher(cx);
   let client = docker_client();
 
-  // Create a PruneDialog entity to track results
-  let prune_dialog = cx.new(|cx| {
-    let mut dialog = PruneDialog::new(cx);
-    dialog.set_loading(true);
-    dialog
-  });
-  let prune_dialog_clone = prune_dialog.clone();
+  view.update(cx, |v, _| v.set_loading(true));
+  let prune_dialog_clone = view;
 
   let prune_containers = options.prune_containers;
   let prune_images = options.prune_images;
@@ -233,6 +230,4 @@ pub fn prune_docker(options: &crate::ui::PruneOptions, cx: &mut App) -> Entity<P
     })
   })
   .detach();
-
-  prune_dialog
 }

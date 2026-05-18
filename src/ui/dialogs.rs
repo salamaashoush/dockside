@@ -26,7 +26,6 @@ use crate::ui::images::registry_dialog::RegistryBrowserDialog;
 use crate::ui::images::tag_dialog::TagImageDialog;
 use crate::ui::machines::MachineDialog;
 use crate::ui::networks::create_dialog::CreateNetworkDialog;
-use crate::ui::prune_dialog::PruneDialog;
 use crate::ui::services::create_dialog::CreateServiceDialog;
 use crate::ui::volumes::create_dialog::CreateVolumeDialog;
 
@@ -688,39 +687,6 @@ fn open_kv_create_dialog(kind: KvResourceKind, title: &'static str, window: &mut
                   KvResourceKind::ConfigMap => services::create_configmap(name, namespace, entries, cx),
                 }
                 window.close_dialog(cx);
-              }
-            })
-            .into_any_element(),
-        ]
-      })
-  });
-}
-
-/// Opens the Prune Docker Resources dialog with Prune button configured
-pub fn open_prune_dialog(window: &mut Window, cx: &mut App) {
-  let dialog_entity = cx.new(PruneDialog::new);
-
-  window.open_dialog(cx, move |dialog, _window, _cx| {
-    let dialog_clone = dialog_entity.clone();
-
-    dialog
-      .title("Prune Docker Resources")
-      .min_w(px(500.))
-      .child(dialog_entity.clone())
-      .footer(move |_dialog_state, _, _window, _cx| {
-        let dialog_for_prune = dialog_clone.clone();
-        vec![
-          Button::new("prune")
-            .label("Prune")
-            .primary()
-            .on_click({
-              let dialog = dialog_for_prune.clone();
-              move |_ev, window, cx| {
-                let options = dialog.read(cx).get_options();
-                if !options.is_empty() {
-                  services::prune_docker(&options, cx);
-                  window.close_dialog(cx);
-                }
               }
             })
             .into_any_element(),
