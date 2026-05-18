@@ -551,6 +551,7 @@ pub enum StateChanged {
   PvcsUpdated,
   NodesUpdated,
   NodeMetricsUpdated,
+  PodMetricsUpdated,
   NodeYamlLoaded {
     name: String,
     yaml: String,
@@ -617,6 +618,8 @@ pub struct DockerState {
   pub api_metrics_server: bool,
   /// node name -> (cpu, memory) raw quantity strings from metrics-server.
   pub node_metrics: std::collections::HashMap<String, (String, String)>,
+  /// `namespace/name` -> (cpu millicores, mem bytes) from metrics-server.
+  pub pod_metrics: std::collections::HashMap<String, (f64, u64)>,
   pub events: Vec<EventInfo>,
   pub namespaces: Vec<String>,
   pub selected_namespace: String,
@@ -689,6 +692,7 @@ impl DockerState {
       nodes: Vec::new(),
       api_metrics_server: false,
       node_metrics: std::collections::HashMap::new(),
+      pod_metrics: std::collections::HashMap::new(),
       events: Vec::new(),
       namespaces: vec!["default".to_string()],
       selected_namespace: "all".to_string(),
@@ -914,6 +918,7 @@ impl DockerState {
     self.nodes.clear();
     self.api_metrics_server = false;
     self.node_metrics.clear();
+    self.pod_metrics.clear();
     self.events.clear();
     self.namespaces = vec!["default".to_string()];
 
@@ -1062,6 +1067,24 @@ impl DockerState {
 
   pub fn node_usage(&self, name: &str) -> Option<&(String, String)> {
     self.node_metrics.get(name)
+  }
+
+  /// Store metrics-server pod usage (cpu millicores, mem bytes) keyed
+  /// `namespace/name`, and mark the API present.
+  pub fn set_pod_metrics(&mut self, metrics: Vec<(String, String, f64, u64)>) {
+    self.api_metrics_server = true;
+    self.pod_metrics = metrics
+      .into_iter()
+      .map(|(ns, name, cpu, mem)| (format!("{ns}/{name}"), (cpu, mem)))
+      .collect();
+  }
+
+  pub fn clear_pod_metrics(&mut self) {
+    self.pod_metrics.clear();
+  }
+
+  pub fn pod_usage(&self, namespace: &str, name: &str) -> Option<(f64, u64)> {
+    self.pod_metrics.get(&format!("{namespace}/{name}")).copied()
   }
 
   // Navigation

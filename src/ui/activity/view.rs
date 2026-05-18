@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::assets::AppIcon;
 use crate::docker::{AggregateStats, ContainerStats};
+use crate::kubernetes::PodPhase;
 use crate::services;
 use crate::state::{DockerState, docker_state, settings_state};
 
@@ -28,6 +29,8 @@ pub struct ActivityMonitorView {
   /// `PER_ROW_SAMPLES` so the inline row sparkline matches the bottom
   /// summary cards.
   cpu_history_per: HashMap<String, VecDeque<f64>>,
+  k8s_expanded: bool,
+  machines_expanded: bool,
 }
 
 impl ActivityMonitorView {
@@ -36,13 +39,27 @@ impl ActivityMonitorView {
     let refresh_interval = settings_state(cx).read(cx).settings.stats_refresh_interval;
     let docker_state_entity = docker_state(cx);
 
-    // Re-render the breakdown badges whenever the global container
-    // list ticks so paused / exited counts stay live without us
-    // having to poll docker for state ourselves.
+    // Re-render whenever the runtime signals it changed: container
+    // ticks, Kubernetes pod/node/metrics refreshes, machine refreshes,
+    // and context switches (services clear + refetch on switch — we
+    // just react and re-render the new context's numbers).
     cx.subscribe(
       &docker_state_entity,
       |_this, _state, event: &crate::state::StateChanged, cx| {
-        if matches!(event, crate::state::StateChanged::ContainersUpdated) {
+        use crate::state::StateChanged::{
+          ContainersUpdated, KubeContextSwitched, MachinesUpdated, NodeMetricsUpdated, NodesUpdated, PodMetricsUpdated,
+          PodsUpdated,
+        };
+        if matches!(
+          event,
+          ContainersUpdated
+            | PodsUpdated
+            | NodesUpdated
+            | NodeMetricsUpdated
+            | PodMetricsUpdated
+            | MachinesUpdated
+            | KubeContextSwitched
+        ) {
           cx.notify();
         }
       },
@@ -55,9 +72,9 @@ impl ActivityMonitorView {
         // Wait for configured refresh interval
         Timer::after(Duration::from_secs(refresh_interval)).await;
 
-        // Refresh stats
         let _ = this.update(cx, |_this, cx| {
           Self::refresh_stats(cx);
+          Self::refresh_runtime(cx);
         });
       }
     })
@@ -74,10 +91,29 @@ impl ActivityMonitorView {
       network_history: Vec::with_capacity(60),
       disk_history: Vec::with_capacity(60),
       cpu_history_per: HashMap::new(),
+      k8s_expanded: true,
+      machines_expanded: true,
     };
 
     Self::refresh_stats(cx);
+    Self::refresh_runtime(cx);
     view
+  }
+
+  /// Trigger the generation-guarded refresh services for the non-Docker
+  /// runtime data shown here. Each service drops stale responses on a
+  /// context switch itself — we never touch the guard.
+  fn refresh_runtime(cx: &mut Context<'_, Self>) {
+    let settings = settings_state(cx).read(cx).settings.clone();
+    if settings.colima_enabled {
+      services::refresh_machines(cx);
+    }
+    if settings.kubernetes_enabled {
+      services::refresh_pods(cx);
+      services::refresh_nodes(cx);
+      services::refresh_node_metrics(cx);
+      services::refresh_pod_metrics(cx);
+    }
   }
 
   fn refresh_stats(cx: &mut Context<'_, Self>) {
@@ -149,68 +185,6 @@ impl ActivityMonitorView {
     .detach();
   }
 
-  fn render_header(cx: &Context<'_, Self>) -> impl IntoElement {
-    let colors = &cx.theme().colors;
-
-    h_flex()
-      .w_full()
-      .h(px(40.))
-      .px(px(16.))
-      .items_center()
-      .border_b_1()
-      .border_color(colors.border)
-      .bg(colors.sidebar)
-      .child(
-        h_flex()
-          .flex_1()
-          .items_center()
-          .child(
-            div()
-              .w(px(300.))
-              .text_xs()
-              .font_weight(gpui::FontWeight::MEDIUM)
-              .text_color(colors.muted_foreground)
-              .child("Name"),
-          )
-          .child(
-            div()
-              .w(px(100.))
-              .text_xs()
-              .font_weight(gpui::FontWeight::MEDIUM)
-              .text_color(colors.muted_foreground)
-              .text_right()
-              .child("CPU %"),
-          )
-          .child(
-            div()
-              .w(px(100.))
-              .text_xs()
-              .font_weight(gpui::FontWeight::MEDIUM)
-              .text_color(colors.muted_foreground)
-              .text_right()
-              .child("Memory"),
-          )
-          .child(
-            div()
-              .w(px(100.))
-              .text_xs()
-              .font_weight(gpui::FontWeight::MEDIUM)
-              .text_color(colors.muted_foreground)
-              .text_right()
-              .child("Network"),
-          )
-          .child(
-            div()
-              .w(px(100.))
-              .text_xs()
-              .font_weight(gpui::FontWeight::MEDIUM)
-              .text_color(colors.muted_foreground)
-              .text_right()
-              .child("Disk"),
-          ),
-      )
-  }
-
   fn render_container_group(&self, cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
     let expanded = self.expanded;
@@ -230,6 +204,24 @@ impl ActivityMonitorView {
       .iter()
       .map(|s| s.block_read + s.block_write)
       .sum();
+
+    // Running / paused / exited counts, inlined on the group header
+    // (the same place the Kubernetes group carries its summary).
+    let (mut running, mut paused, mut exited) = (0_usize, 0_usize, 0_usize);
+    for c in &self.docker_state.read(cx).containers {
+      if c.state.is_running() {
+        running += 1;
+      } else if c.state.is_paused() {
+        paused += 1;
+      } else if matches!(
+        c.state,
+        crate::docker::ContainerState::Exited
+          | crate::docker::ContainerState::Dead
+          | crate::docker::ContainerState::Removing
+      ) {
+        exited += 1;
+      }
+    }
 
     v_flex()
             .w_full()
@@ -302,11 +294,79 @@ impl ActivityMonitorView {
                                     .text_right()
                                     .child(format!("{}/s", format_bytes(total_disk))),
                             ),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_shrink_0()
+                            .pl(px(24.))
+                            .gap(px(16.))
+                            .items_center()
+                            .child(Self::count_seg("running", running, colors.success, cx))
+                            .child(Self::count_seg("paused", paused, colors.warning, cx))
+                            .child(Self::count_seg("exited", exited, colors.muted_foreground, cx)),
                     ),
             )
             // Container rows (when expanded)
             .when(expanded, |el| {
-                el.children(
+                el.child(
+                    h_flex()
+                        .w_full()
+                        .h(px(28.))
+                        .px(px(16.))
+                        .pl(px(56.))
+                        .items_center()
+                        .child(
+                            h_flex()
+                                .flex_1()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .w(px(268.))
+                                        .text_xs()
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(colors.muted_foreground)
+                                        .child("Name"),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(60.))
+                                        .text_xs()
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(colors.muted_foreground)
+                                        .text_right()
+                                        .child("CPU %"),
+                                )
+                                .child(div().w(px(40.)).ml(px(4.)))
+                                .child(
+                                    div()
+                                        .w(px(100.))
+                                        .text_xs()
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(colors.muted_foreground)
+                                        .text_right()
+                                        .child("Memory"),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(100.))
+                                        .text_xs()
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(colors.muted_foreground)
+                                        .text_right()
+                                        .child("Network"),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(100.))
+                                        .text_xs()
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(colors.muted_foreground)
+                                        .text_right()
+                                        .child("Disk"),
+                                ),
+                        ),
+                )
+                .children(
                     self.stats
                         .container_stats
                         .iter()
@@ -404,6 +464,7 @@ impl ActivityMonitorView {
     h_flex()
       .w_full()
       .h(px(120.))
+      .flex_shrink_0()
       .border_t_1()
       .border_color(colors.border)
       .bg(colors.sidebar)
@@ -507,81 +568,6 @@ impl ActivityMonitorView {
       .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(tooltip_text.clone()).build(window, cx))
   }
 
-  /// Status breakdown badges: running / paused / exited container
-  /// counts pulled from the global container list (the docker daemon
-  /// is the source of truth for state — `AggregateStats` only knows
-  /// about the running set).
-  fn render_status_breakdown(&self, cx: &Context<'_, Self>) -> impl IntoElement {
-    let colors = &cx.theme().colors;
-    let containers = &self.docker_state.read(cx).containers;
-    let mut running = 0_usize;
-    let mut paused = 0_usize;
-    let mut exited = 0_usize;
-    for c in containers {
-      if c.state.is_running() {
-        running += 1;
-      } else if c.state.is_paused() {
-        paused += 1;
-      } else if matches!(
-        c.state,
-        crate::docker::ContainerState::Exited
-          | crate::docker::ContainerState::Dead
-          | crate::docker::ContainerState::Removing
-      ) {
-        exited += 1;
-      }
-    }
-    // Inline pill: dot + label + count on a single row. Looks closer
-    // to the toolbar status chips on Linear / GitHub than the chunky
-    // two-row card we had before.
-    let badge = move |label: &'static str, count: usize, color: Hsla| -> gpui::Div {
-      let active = count > 0;
-      let dot_color = if active { color } else { colors.muted_foreground };
-      let label_color = if active {
-        colors.foreground
-      } else {
-        colors.muted_foreground
-      };
-      let count_color = if active { color } else { colors.muted_foreground };
-      let bg = if active {
-        color.opacity(0.10)
-      } else {
-        colors.muted.opacity(0.4)
-      };
-      let border = if active { color.opacity(0.35) } else { colors.border };
-      h_flex()
-        .px(px(10.))
-        .py(px(4.))
-        .gap(px(8.))
-        .items_center()
-        .rounded_full()
-        .border_1()
-        .border_color(border)
-        .bg(bg)
-        .child(div().size(px(6.)).rounded_full().bg(dot_color))
-        .child(
-          div()
-            .text_xs()
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(label_color)
-            .child(label),
-        )
-        .child(
-          div()
-            .text_xs()
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(count_color)
-            .child(count.to_string()),
-        )
-    };
-    h_flex()
-      .gap(px(6.))
-      .items_center()
-      .child(badge("Running", running, colors.success))
-      .child(badge("Paused", paused, colors.warning))
-      .child(badge("Exited", exited, colors.muted_foreground))
-  }
-
   fn render_empty(cx: &Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
 
@@ -596,6 +582,370 @@ impl ActivityMonitorView {
         )
         .child(div().text_color(colors.muted_foreground).child("No running containers")),
     )
+  }
+
+  /// Inline `<count> <label>` segment: colored number, muted label.
+  /// Used to carry status counts on a group header.
+  fn count_seg(label: &'static str, count: usize, color: Hsla, cx: &Context<'_, Self>) -> impl IntoElement {
+    let colors = &cx.theme().colors;
+    h_flex()
+      .gap(px(6.))
+      .items_center()
+      .child(
+        div()
+          .min_w(px(20.))
+          .text_sm()
+          .font_weight(gpui::FontWeight::SEMIBOLD)
+          .text_color(if count > 0 { color } else { colors.muted_foreground })
+          .text_right()
+          .child(count.to_string()),
+      )
+      .child(div().text_sm().text_color(colors.muted_foreground).child(label))
+  }
+
+  /// Collapsible group header styled exactly like the Containers
+  /// group: chevron, icon, title, then a muted summary on the right.
+  fn group_header(
+    id: &'static str,
+    icon: AppIcon,
+    title: &'static str,
+    summary: String,
+    expanded: bool,
+    cx: &Context<'_, Self>,
+    toggle: impl Fn(&mut Self, &mut Context<'_, Self>) + 'static,
+  ) -> impl IntoElement {
+    let colors = &cx.theme().colors;
+    h_flex()
+      .id(id)
+      .w_full()
+      .h(px(36.))
+      .px(px(16.))
+      .items_center()
+      .cursor_pointer()
+      .hover(|el| el.bg(colors.list_hover))
+      .on_click(cx.listener(move |this, _ev, _window, cx| {
+        toggle(this, cx);
+        cx.notify();
+      }))
+      .child(
+        h_flex()
+          .flex_1()
+          .items_center()
+          .gap(px(8.))
+          .child(
+            Icon::new(if expanded {
+              AppIcon::ChevronDown
+            } else {
+              AppIcon::ChevronRight
+            })
+            .size(px(14.))
+            .text_color(colors.muted_foreground),
+          )
+          .child(Icon::new(icon).size(px(16.)).text_color(colors.foreground))
+          .child(
+            div()
+              .flex_1()
+              .text_sm()
+              .font_weight(gpui::FontWeight::MEDIUM)
+              .text_color(colors.foreground)
+              .child(title),
+          )
+          .child(div().text_sm().text_color(colors.muted_foreground).child(summary)),
+      )
+  }
+
+  /// Kubernetes signal: pod count by phase + node Ready/NotReady (+
+  /// metrics-server CPU/mem when present). Reads the global state the
+  /// guarded refresh services populate; multi-context aware because
+  /// those services clear + refetch on a context switch.
+  fn render_k8s_group(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+    let colors = &cx.theme().colors;
+    let expanded = self.k8s_expanded;
+    let state = self.docker_state.read(cx);
+
+    let running = state.pods.iter().filter(|p| p.phase == PodPhase::Running).count();
+    let summary = format!(
+      "{} running / {} pods · {} nodes",
+      running,
+      state.pods.len(),
+      state.nodes.len()
+    );
+
+    let phase_color = |p: PodPhase| match p {
+      PodPhase::Running => colors.success,
+      PodPhase::Pending => colors.warning,
+      PodPhase::Failed => colors.danger,
+      PodPhase::Succeeded | PodPhase::Unknown => colors.muted_foreground,
+    };
+
+    // Pods, busiest first, as a CPU/memory table like the containers.
+    let mut pods: Vec<_> = state.pods.iter().collect();
+    pods.sort_by(|a, b| {
+      let ca = state.pod_usage(&a.namespace, &a.name).map_or(0.0, |(c, _)| c);
+      let cb = state.pod_usage(&b.namespace, &b.name).map_or(0.0, |(c, _)| c);
+      cb.total_cmp(&ca)
+    });
+    let pod_rows: Vec<gpui::AnyElement> = pods
+      .iter()
+      .map(|p| {
+        let usage = state.pod_usage(&p.namespace, &p.name);
+        let cpu = usage.map_or_else(
+          || "—".to_string(),
+          |(m, _)| {
+            if m >= 1000.0 {
+              format!("{:.2} cores", m / 1000.0)
+            } else {
+              format!("{m:.0}m")
+            }
+          },
+        );
+        let mem = usage.map_or_else(|| "—".to_string(), |(_, b)| bytesize::ByteSize(b).to_string());
+        h_flex()
+          .id(gpui::SharedString::from(format!("pod-{}-{}", p.namespace, p.name)))
+          .w_full()
+          .h(px(32.))
+          .px(px(16.))
+          .pl(px(56.))
+          .items_center()
+          .gap(px(8.))
+          .hover(|el| el.bg(colors.list_hover))
+          .child(
+            div()
+              .size(px(6.))
+              .rounded_full()
+              .flex_shrink_0()
+              .bg(phase_color(p.phase)),
+          )
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .text_sm()
+              .text_color(colors.foreground)
+              .text_ellipsis()
+              .overflow_hidden()
+              .whitespace_nowrap()
+              .child(format!("{}/{}", p.namespace, p.name)),
+          )
+          .child(
+            div()
+              .flex_shrink_0()
+              .w(px(96.))
+              .text_sm()
+              .text_color(phase_color(p.phase))
+              .text_right()
+              .child(p.phase.to_string()),
+          )
+          .child(
+            div()
+              .flex_shrink_0()
+              .w(px(96.))
+              .text_sm()
+              .text_color(colors.secondary_foreground)
+              .text_right()
+              .child(cpu),
+          )
+          .child(
+            div()
+              .flex_shrink_0()
+              .w(px(110.))
+              .text_sm()
+              .text_color(colors.secondary_foreground)
+              .text_right()
+              .child(mem),
+          )
+          .into_any_element()
+      })
+      .collect();
+
+    // Nodes: Ready/NotReady + node-level usage from metrics-server.
+    let node_rows: Vec<gpui::AnyElement> =
+      state
+        .nodes
+        .iter()
+        .map(|n| {
+          let ok = n.status == "Ready";
+          let (cpu, mem) = state.node_usage(&n.name).cloned().unwrap_or_default();
+          h_flex()
+            .w_full()
+            .h(px(32.))
+            .px(px(16.))
+            .pl(px(56.))
+            .items_center()
+            .gap(px(8.))
+            .child(div().size(px(6.)).rounded_full().flex_shrink_0().bg(if ok {
+              colors.success
+            } else {
+              colors.danger
+            }))
+            .child(
+              div()
+                .flex_1()
+                .min_w_0()
+                .text_sm()
+                .text_color(colors.foreground)
+                .text_ellipsis()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(n.name.clone()),
+            )
+            .child(
+              div()
+                .flex_shrink_0()
+                .w(px(96.))
+                .text_sm()
+                .text_color(if ok { colors.success } else { colors.danger })
+                .text_right()
+                .child(n.status.clone()),
+            )
+            .child(
+              div()
+                .flex_shrink_0()
+                .w(px(96.))
+                .text_sm()
+                .text_color(colors.secondary_foreground)
+                .text_right()
+                .child(fmt_cpu_raw(&cpu)),
+            )
+            .child(
+              div()
+                .flex_shrink_0()
+                .w(px(110.))
+                .text_sm()
+                .text_color(colors.secondary_foreground)
+                .text_right()
+                .child(fmt_mem_raw(&mem)),
+            )
+            .into_any_element()
+        })
+        .collect();
+
+    // Column header aligned to the pod/node rows (same paddings and
+    // fixed column widths). Doubles as the section label.
+    let col = |w: f32, label: &'static str| {
+      div()
+        .flex_shrink_0()
+        .w(px(w))
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(colors.muted_foreground)
+        .text_right()
+        .child(label)
+    };
+    let cols_header = |title: &'static str| {
+      h_flex()
+        .w_full()
+        .px(px(16.))
+        .pl(px(56.))
+        .py(px(6.))
+        .gap(px(8.))
+        .items_center()
+        .child(div().size(px(6.)).flex_shrink_0())
+        .child(
+          div()
+            .flex_1()
+            .min_w_0()
+            .text_xs()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(colors.muted_foreground)
+            .child(title),
+        )
+        .child(col(96., "Status"))
+        .child(col(96., "CPU"))
+        .child(col(110., "Memory"))
+    };
+
+    v_flex()
+      .w_full()
+      .child(Self::group_header(
+        "k8s-group",
+        AppIcon::Pod,
+        "Kubernetes",
+        summary,
+        expanded,
+        cx,
+        |this, _cx| this.k8s_expanded = !this.k8s_expanded,
+      ))
+      .when(expanded, |el| {
+        el.child(
+          v_flex()
+            .w_full()
+            .child(cols_header("Pods"))
+            .children(pod_rows)
+            .child(cols_header("Nodes"))
+            .children(node_rows),
+        )
+      })
+  }
+
+  /// Colima / machine signal: VM status + sizing for every machine.
+  fn render_machines_group(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+    let colors = &cx.theme().colors;
+    let expanded = self.machines_expanded;
+    let state = self.docker_state.read(cx);
+    let machines = state.machines.clone();
+    let running = machines.iter().filter(|m| m.is_running()).count();
+    let summary = format!("{} running · {} total", running, machines.len());
+
+    let rows: Vec<gpui::AnyElement> = machines
+      .iter()
+      .map(|m| {
+        let up = m.is_running();
+        h_flex()
+          .w_full()
+          .h(px(30.))
+          .px(px(16.))
+          .pl(px(56.))
+          .items_center()
+          .gap(px(8.))
+          .child(div().size(px(6.)).rounded_full().flex_shrink_0().bg(if up {
+            colors.success
+          } else {
+            colors.muted_foreground
+          }))
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .text_sm()
+              .text_color(colors.foreground)
+              .text_ellipsis()
+              .overflow_hidden()
+              .whitespace_nowrap()
+              .child(m.name().to_string()),
+          )
+          .child(
+            div()
+              .flex_shrink_0()
+              .text_xs()
+              .text_color(if up { colors.success } else { colors.muted_foreground })
+              .child(m.status_display()),
+          )
+          .child(
+            div()
+              .flex_shrink_0()
+              .w(px(160.))
+              .text_xs()
+              .text_color(colors.muted_foreground)
+              .text_right()
+              .child(format!("{} CPU · {}", m.cpus(), m.display_memory())),
+          )
+          .into_any_element()
+      })
+      .collect();
+
+    v_flex()
+      .w_full()
+      .child(Self::group_header(
+        "machines-group",
+        AppIcon::Machine,
+        "Machines",
+        summary,
+        expanded,
+        cx,
+        |this, _cx| this.machines_expanded = !this.machines_expanded,
+      ))
+      .when(expanded, |el| el.child(v_flex().w_full().children(rows)))
   }
 }
 
@@ -612,6 +962,56 @@ fn sparkline_summary(label: &str, series: &[f64], unit: &str) -> String {
   #[allow(clippy::cast_precision_loss)]
   let avg = series.iter().sum::<f64>() / series.len() as f64;
   format!("{label} last {last:.1}{unit} (min {min:.1}{unit} / max {max:.1}{unit} / avg {avg:.1}{unit})")
+}
+
+/// Format a raw Kubernetes CPU quantity (`150m`, `2297905584n`, `1`)
+/// into a compact human string.
+fn fmt_cpu_raw(s: &str) -> String {
+  let s = s.trim();
+  if s.is_empty() {
+    return "—".to_string();
+  }
+  let millicores = if let Some(v) = s.strip_suffix('n') {
+    v.parse::<f64>().unwrap_or(0.0) / 1_000_000.0
+  } else if let Some(v) = s.strip_suffix('u') {
+    v.parse::<f64>().unwrap_or(0.0) / 1_000.0
+  } else if let Some(v) = s.strip_suffix('m') {
+    v.parse::<f64>().unwrap_or(0.0)
+  } else {
+    s.parse::<f64>().unwrap_or(0.0) * 1_000.0
+  };
+  if millicores >= 1000.0 {
+    format!("{:.2} cores", millicores / 1000.0)
+  } else {
+    format!("{millicores:.0}m")
+  }
+}
+
+/// Format a raw Kubernetes memory quantity (`7124364Ki`, `512Mi`) using
+/// `format_bytes`.
+fn fmt_mem_raw(s: &str) -> String {
+  let s = s.trim();
+  if s.is_empty() {
+    return "—".to_string();
+  }
+  let pairs: [(&str, u64); 10] = [
+    ("Ki", 1 << 10),
+    ("Mi", 1 << 20),
+    ("Gi", 1 << 30),
+    ("Ti", 1 << 40),
+    ("Pi", 1 << 50),
+    ("k", 1_000),
+    ("M", 1_000_000),
+    ("G", 1_000_000_000),
+    ("T", 1_000_000_000_000),
+    ("P", 1_000_000_000_000_000),
+  ];
+  for (suffix, mult) in pairs {
+    if let Some(v) = s.strip_suffix(suffix) {
+      return format_bytes(v.trim().parse::<u64>().unwrap_or(0).saturating_mul(mult));
+    }
+  }
+  format_bytes(s.parse::<u64>().unwrap_or(0))
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -634,6 +1034,9 @@ impl Render for ActivityMonitorView {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
     let colors = &cx.theme().colors;
     let has_containers = !self.stats.container_stats.is_empty();
+    let settings = settings_state(cx).read(cx).settings.clone();
+    let show_k8s = settings.kubernetes_enabled;
+    let show_machines = settings.colima_enabled;
 
     div()
             .size_full()
@@ -645,33 +1048,33 @@ impl Render for ActivityMonitorView {
                 h_flex()
                     .w_full()
                     .h(px(56.))
+                    .flex_shrink_0()
                     .px(px(20.))
                     .gap(px(16.))
                     .items_center()
-                    .justify_between()
                     .border_b_1()
                     .border_color(colors.border)
                     .child(
                         Label::new("Activity Monitor")
                             .text_color(colors.foreground)
                             .font_weight(gpui::FontWeight::SEMIBOLD),
-                    )
-                    .child(self.render_status_breakdown(cx)),
+                    ),
             )
-            // Table header
-            .child(Self::render_header(cx))
             // Content area
             .child(
                 div()
                     .id("activity-scroll")
                     .flex_1()
+                    .min_h(px(0.))
                     .overflow_y_scrollbar()
                     .when(has_containers, |el| {
                         el.child(self.render_container_group(cx))
                     })
                     .when(!has_containers, |el| {
                         el.child(Self::render_empty(cx))
-                    }),
+                    })
+                    .when(show_k8s, |el| el.child(self.render_k8s_group(cx)))
+                    .when(show_machines, |el| el.child(self.render_machines_group(cx))),
             )
             // Summary section at bottom
             .child(self.render_summary_section(cx))

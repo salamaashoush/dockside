@@ -1082,6 +1082,40 @@ impl KubeClient {
     Ok(out)
   }
 
+  /// Per-pod CPU/memory usage from `metrics.k8s.io/v1beta1/pods`,
+  /// summed across the pod's containers. `Err` means metrics-server is
+  /// absent. Returns `(namespace, name, cpu_millicores, mem_bytes)`.
+  pub async fn pod_metrics(&self) -> Result<Vec<(String, String, f64, u64)>> {
+    use kube::core::{ApiResource, DynamicObject, GroupVersionKind};
+    let gvk = GroupVersionKind::gvk("metrics.k8s.io", "v1beta1", "PodMetrics");
+    let ar = ApiResource::from_gvk_with_plural(&gvk, "pods");
+    let api: Api<DynamicObject> = Api::all_with(self.client.clone(), &ar);
+    let list = api
+      .list(&ListParams::default())
+      .await
+      .context("metrics.k8s.io API not available")?;
+    let mut out = Vec::with_capacity(list.items.len());
+    for item in list.items {
+      let name = item.metadata.name.clone().unwrap_or_default();
+      let namespace = item.metadata.namespace.clone().unwrap_or_else(|| "default".to_string());
+      let mut cpu_m = 0.0_f64;
+      let mut mem_b = 0_u64;
+      if let Some(containers) = item.data.get("containers").and_then(serde_json::Value::as_array) {
+        for c in containers {
+          let usage = c.get("usage");
+          if let Some(cpu) = usage.and_then(|u| u.get("cpu")).and_then(serde_json::Value::as_str) {
+            cpu_m += parse_cpu_millicores(cpu);
+          }
+          if let Some(mem) = usage.and_then(|u| u.get("memory")).and_then(serde_json::Value::as_str) {
+            mem_b += parse_mem_bytes(mem);
+          }
+        }
+      }
+      out.push((namespace, name, cpu_m, mem_b));
+    }
+    Ok(out)
+  }
+
   /// Set or clear `spec.unschedulable` on a node.
   pub async fn set_node_unschedulable(&self, name: &str, unschedulable: bool) -> Result<()> {
     let api: Api<Node> = Api::all(self.client.clone());
@@ -1751,4 +1785,44 @@ fn try_localhost_fallback(original_url: &str, mut config: Config) -> Option<Conf
   config.accept_invalid_certs = true;
 
   Some(config)
+}
+
+/// Parse a Kubernetes CPU quantity into millicores.
+/// Handles `n` (nano), `u` (micro), `m` (milli) suffixes and plain cores.
+fn parse_cpu_millicores(s: &str) -> f64 {
+  let s = s.trim();
+  if let Some(v) = s.strip_suffix('n') {
+    v.parse::<f64>().unwrap_or(0.0) / 1_000_000.0
+  } else if let Some(v) = s.strip_suffix('u') {
+    v.parse::<f64>().unwrap_or(0.0) / 1_000.0
+  } else if let Some(v) = s.strip_suffix('m') {
+    v.parse::<f64>().unwrap_or(0.0)
+  } else {
+    s.parse::<f64>().unwrap_or(0.0) * 1_000.0
+  }
+}
+
+/// Parse a Kubernetes memory quantity into bytes. Handles binary
+/// (`Ki`/`Mi`/`Gi`/`Ti`/`Pi`) and decimal (`k`/`M`/`G`/`T`/`P`)
+/// suffixes. Values are integers in practice (e.g. `52428Ki`).
+fn parse_mem_bytes(s: &str) -> u64 {
+  let s = s.trim();
+  let pairs: [(&str, u64); 10] = [
+    ("Ki", 1 << 10),
+    ("Mi", 1 << 20),
+    ("Gi", 1 << 30),
+    ("Ti", 1 << 40),
+    ("Pi", 1 << 50),
+    ("k", 1_000),
+    ("M", 1_000_000),
+    ("G", 1_000_000_000),
+    ("T", 1_000_000_000_000),
+    ("P", 1_000_000_000_000_000),
+  ];
+  for (suffix, mult) in pairs {
+    if let Some(v) = s.strip_suffix(suffix) {
+      return v.trim().parse::<u64>().unwrap_or(0).saturating_mul(mult);
+    }
+  }
+  s.parse::<u64>().unwrap_or(0)
 }

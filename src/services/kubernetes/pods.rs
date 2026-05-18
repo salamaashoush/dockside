@@ -297,3 +297,31 @@ pub fn restart_pod(name: String, namespace: String, cx: &mut App) {
   })
   .detach();
 }
+
+/// Probe metrics-server and refresh per-pod CPU/memory. `Err` (no
+/// metrics.k8s.io) clears the data; the Activity Monitor falls back to
+/// phase/ready text. Generation-guarded like every other k8s refresh.
+pub fn refresh_pod_metrics(cx: &mut App) {
+  let state = docker_state(cx);
+  let ctx_gen = state.read(cx).kube_context_generation;
+  let tokio_task = Tokio::spawn(cx, async move {
+    let client = crate::kubernetes::KubeClient::new().await?;
+    client.pod_metrics().await
+  });
+  cx.spawn(async move |cx| {
+    let result = tokio_task.await.unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
+    cx.update(|cx| {
+      if state.read(cx).kube_context_generation != ctx_gen {
+        return;
+      }
+      state.update(cx, |s, cx| {
+        match result {
+          Ok(items) => s.set_pod_metrics(items),
+          Err(_) => s.clear_pod_metrics(),
+        }
+        cx.emit(StateChanged::PodMetricsUpdated);
+      });
+    })
+  })
+  .detach();
+}
