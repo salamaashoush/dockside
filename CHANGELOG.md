@@ -2,6 +2,33 @@
 
 All notable changes to Dockside will be documented in this file.
 
+## [0.5.0] - 2026-05-18
+
+### Bug Fixes
+
+- **ui**: Redesign Add Node dialog — proper layout, working selectors by @salamaashoush
+- **ui**: Shared form primitives + label every bare form by @salamaashoush
+- **ui**: Stack Name/Namespace fields in kv create dialog by @salamaashoush
+- **ui**: Add Cluster form uses shared form_field (no per-row dividers) by @salamaashoush
+
+### Features
+
+- **k8s**: Multi-context foundation (roadmap phase 1) by @salamaashoush
+- **k8s**: Node detail pane + ops (roadmap phase 3) by @salamaashoush
+- **k8s**: Cluster CRUD / kubeconfig editor (roadmap phase 2) by @salamaashoush
+- **k8s**: Read-only node-join surface + fix tall dialog overflow (phase 4a) by @salamaashoush
+- **k8s**: Connection status dot + metrics-server Node Metrics tab (phase 5) by @salamaashoush
+- **k8s**: SSH remote node provisioning (roadmap phase 4b) by @salamaashoush
+- **prune**: First-class Prune view instead of a modal dialog by @salamaashoush
+- **activity**: Whole-runtime Activity Monitor (Kubernetes + Colima) by @salamaashoush
+
+### Refactor
+
+- **k8s**: Unify all k8s views into one cohesive multi-context surface by @salamaashoush
+- **ui**: Secret/ConfigMap create uses a modal dialog, not inline form by @salamaashoush
+- **settings**: Consistent sectioned form using shared form primitives by @salamaashoush
+- **settings**: Redesign Local DNS as a single status+control panel by @salamaashoush
+
 ## [0.4.0] - 2026-05-03
 
 ### Bug Fixes
